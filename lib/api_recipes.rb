@@ -23,19 +23,19 @@ module ApiRecipes
     attr_accessor :configuration
   end
 
+  def self.configuration
+    unless @configuration
+      @configuration = Configuration.new
+    end
+    @configuration
+  end
+
   def self.configure
     if block_given?
       yield(configuration)
     else
       configuration
     end
-  end
-
-  def self.configuration
-    unless @configuration
-      @configuration = Configuration.new
-    end
-    @configuration
   end
 
   module ClassMethods
@@ -52,42 +52,20 @@ module ApiRecipes
     private
 
     def define_class_endpoint(endpoint_name, configs)
-      class_var = :@@ep
-
       ep = Endpoint.new(endpoint_name, merge_endpoints_configs(endpoint_name, configs))
-      # class_var is an hash mapping endpoint names with Endpoint instances
-      # e.g { :endpoint_1 => #<ApiRecipes::Endpoint:0x007f9069cd9be0> }
-      if class_variable_defined?(class_var) && endpoints = class_variable_get(class_var)
-        # Update the class variable with new endpoints settings
-        endpoints[endpoint_name] = ep
-      else
-        # Define class variable
-        class_variable_set class_var, { endpoint_name => ep }
+
+      unless Thread.current[endpoint_name]
+        Thread.current[endpoint_name] = ep
       end
 
       define_singleton_method endpoint_name do
-        class_variable_get(class_var)[endpoint_name]
+        Thread.current[endpoint_name]
       end
     end
 
     def define_instance_endpoint(endpoint_name, configs)
-      instance_var = :@ep
-
-      ep = Endpoint.new(endpoint_name, merge_endpoints_configs(endpoint_name, configs))
       send :define_method, endpoint_name do
-        # instance_var is an hash mapping endpoint names with Endpoint instances
-        # e.g { :endpoint_1 => #<ApiRecipes::Endpoint:0x007f9069cd9be0> }
-        if instance_variable_defined?(instance_var) && endpoints = instance_variable_get(instance_var)
-          unless endpoints[endpoint_name]
-            # Create/replace the associated key
-            endpoints[endpoint_name] = ep
-          end
-          return endpoints[endpoint_name]
-        else
-          # Define instance variable
-          instance_variable_set instance_var, { endpoint_name => ep }
-        end
-        ep
+        Thread.current[endpoint_name].clone
       end
     end
   end

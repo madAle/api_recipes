@@ -1,7 +1,7 @@
 module ApiRecipes
   class Endpoint
 
-    attr_accessor :name, :settings
+    attr_accessor :name, :settings, :authorization, :basic_auth
     attr_reader :resources
 
     def initialize(name, config)
@@ -18,40 +18,6 @@ module ApiRecipes
         define_singleton_method resource do
           res
         end
-      end
-    end
-
-    def auth=(value)
-      if value
-        unless @api_recipes_auth
-          @api_recipes_auth = {}
-        end
-        @api_recipes_auth[name] = value
-      end
-    end
-
-    def auth
-      if a = @api_recipes_auth
-        a[name]
-      else
-        nil
-      end
-    end
-
-    def basic_auth=(value)
-      if value
-        unless @api_recipes_basic_auth
-          @api_recipes_basic_auth = {}
-        end
-        @api_recipes_basic_auth[name] = value
-      end
-    end
-
-    def basic_auth
-      if ba = @api_recipes_basic_auth
-        ba[name]
-      else
-        nil
       end
     end
   end

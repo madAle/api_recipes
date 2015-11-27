@@ -1,28 +1,14 @@
 module ApiRecipes
   class Resource
 
+    attr_accessor :authorization, :basic_auth
+
     def initialize(name, endpoint, routes = {})
       @name = name
       @routes = routes
       @endpoint = endpoint
 
       generate_routes
-    end
-
-    def auth=(value)
-      @endpoint.auth = value
-    end
-
-    def auth
-      @endpoint.auth
-    end
-
-    def basic_auth=(value)
-      @endpoint.basic_auth = value
-    end
-
-    def basic_auth
-      @endpoint.basic_auth
     end
 
     private
@@ -117,11 +103,15 @@ module ApiRecipes
 
     def request_with_auth
       req = request
-      if basic_auth = @endpoint.basic_auth
-        req = req.basic_auth(basic_auth)
+      if basic_auth
+        req = req.basic_auth basic_auth
+      elsif ba = @endpoint.basic_auth
+        req = req.basic_auth ba
       end
-      if auth = @endpoint.auth
-        req = req.auth(auth)
+      if authorization
+        req = req.auth authorization
+      elsif auth = @endpoint.auth
+        req = req.auth auth
       end
       req
     end

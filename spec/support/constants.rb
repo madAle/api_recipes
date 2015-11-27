@@ -1,0 +1,1 @@
+ENDPOINT_NAME = :github

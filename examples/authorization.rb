@@ -21,7 +21,7 @@ end
 # Get your OAUTH token on Github.
 # Navigate Profile => Settings => Personal Access Tokens => Generate new token
 # Copy the generated string and substitute it to YOUR_GITHUB_OAUTH_TOKEN below
-MyFancyClass.github.auth = 'token YOUR_GITHUB_OAUTH_TOKEN'
+MyFancyClass.github.authorization = 'token YOUR_GITHUB_OAUTH_TOKEN'
 
 MyFancyClass.github.users.list do |users|
   puts users.collect{ |user| user['login'] }
