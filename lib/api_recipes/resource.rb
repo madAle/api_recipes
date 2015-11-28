@@ -110,7 +110,7 @@ module ApiRecipes
       end
       if authorization
         req = req.auth authorization
-      elsif auth = @endpoint.auth
+      elsif auth = @endpoint.authorization
         req = req.auth auth
       end
       req
