@@ -3,7 +3,7 @@
 # ApiRecipes
 
 <p align="center">  
-  <img width="50" height="60" src="api_recipes.png"/>
+  <img width="300" height="160" src="api_recipes.png"/>
 </p>
 
 Consume HTTP APIs with style
