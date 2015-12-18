@@ -1,6 +1,6 @@
+require 'http'
 require 'oj'
 require 'oj_mimic_json'
-require 'http'
 require 'active_support/core_ext/hash/indifferent_access'
 require 'active_support/core_ext/hash/keys'
 require 'active_support/core_ext/array/extract_options'
@@ -43,29 +43,30 @@ module ApiRecipes
       configs = configs.deep_symbolize_keys
       name = name.to_sym
 
+      ep = Endpoint.new(name, merge_endpoints_configs(name, configs))
       # Define 'name' method for the class
-      define_class_endpoint name, configs
+      define_class_endpoint ep
       # Define 'name' method for the class' instances
-      define_instance_endpoint name, configs
+      define_instance_endpoint ep
     end
 
     private
 
-    def define_class_endpoint(endpoint_name, configs)
-      ep = Endpoint.new(endpoint_name, merge_endpoints_configs(endpoint_name, configs))
+    def define_class_endpoint(ep)
+      name = ep.name
+      unless method_defined? name
+        Thread.current[name] = ep
 
-      unless Thread.current[endpoint_name]
-        Thread.current[endpoint_name] = ep
-      end
-
-      define_singleton_method endpoint_name do
-        Thread.current[endpoint_name]
+        define_singleton_method name do
+          Thread.current[name]
+        end
       end
     end
 
-    def define_instance_endpoint(endpoint_name, configs)
-      send :define_method, endpoint_name do
-        Thread.current[endpoint_name].clone
+    def define_instance_endpoint(ep)
+      name = ep.name
+      send :define_method, name do
+        Thread.current[name].clone
       end
     end
   end
