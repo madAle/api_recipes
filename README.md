@@ -6,7 +6,9 @@
   <img width="300" height="160" src="api_recipes.png"/>
 </p>
 
-Consume HTTP APIs with style
+Create your HTTP APIs recipes and tastefully consume it!
+
+Api recipes lets you easily describe and consume an HTTP API.
    
 ## Installation
 
@@ -30,15 +32,16 @@ Ruby 1.9.3 or higher.
 
 ## Usage
 
-... in progress.
+Help needed.
 
 In the meantime take a look at the ``` examples ``` folder. Thank you.
 
 ## TODO
 
-* Write specs
+* Write specs (I know... this code has been wrote down on a hurry so please do not beat me)
 * Write a good Usage
 * Add more examples
+* Add documentation
 * Delete this TODO section
 
 ## Contributing
