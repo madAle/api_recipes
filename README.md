@@ -2,7 +2,13 @@
 
 # ApiRecipes
 
-Consume HTTP APIs with style
+<p align="center">  
+  <img width="300" height="160" src="api_recipes.png"/>
+</p>
+
+Create your HTTP APIs recipes and tastefully consume it!
+
+Api recipes lets you easily describe and consume an HTTP API.
    
 ## Installation
 
@@ -26,25 +32,17 @@ Ruby 1.9.3 or higher.
 
 ## Usage
 
-... in progress. 
+Help needed.
 
 In the meantime take a look at the ``` examples ``` folder. Thank you.
 
 ## TODO
 
-* Write specs
+* Write specs (I know... this code has been wrote down on a hurry so please do not beat me)
 * Write a good Usage
 * Add more examples
+* Add documentation
 * Delete this TODO section
-
-## Development
-
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. 
-You can also run `bin/console` for an interactive prompt that will allow you to experiment.
-
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update 
-the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for 
-the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
 
 ## Contributing
 
