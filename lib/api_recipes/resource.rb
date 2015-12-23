@@ -62,6 +62,21 @@ module ApiRecipes
       end
     end
 
+    def encode_residual_params(route_attributes, residual_params)
+      # If :encode_params_as is specified and avalable use it
+      if Settings::AVAILABLE_PARAMS_ENCODINGS.include? route_attributes[:encode_params_as].to_s
+        { route_attributes[:encode_params_as].to_sym => residual_params }
+      else
+        # default to query string params (get) or json (other methods)
+        case route_attributes[:method].to_sym
+          when :get
+            { params: residual_params }
+          when :post, :put, :patch, :delete
+            { json: residual_params }
+        end
+      end
+    end
+
     def extract_headers
       settings[:default_headers] || {}
     end
@@ -70,6 +85,7 @@ module ApiRecipes
     # e.g. webapp.alarms.index
     def generate_routes
       @routes.each do |route, attrs|
+        attrs.deep_symbolize_keys!
         if route.eql? @name
           raise RouteNameClashError.new(route, @name)
         end
@@ -90,11 +106,11 @@ module ApiRecipes
 
     def port
       settings[:port] || case settings[:protocol]
-                            when 'http'
-                              80
-                            when 'https'
-                              443
-                          end
+                           when 'http'
+                             80
+                           when 'https'
+                             443
+                         end
     end
 
     def request
@@ -128,16 +144,15 @@ module ApiRecipes
       unless route_attributes
         route_attributes = {}
       end
-      unless method = route_attributes[:method]
-        method = Settings::DEFAULT_HTTP_VERB
-      end
+      # Merge route attributes with defaults
+      route_attributes = Settings::DEFAULT_ROUTE_ATTRIBUTES.merge route_attributes
 
       params = pars.extract_options!
       path, residual_params = build_path(route, route_attributes, params)
       residual_params = nil unless residual_params.any?
       uri = build_uri_from path
 
-      response = build_request.send(method.downcase, uri, json: residual_params)
+      response = build_request.send(route_attributes[:method], uri, encode_residual_params(route_attributes, residual_params))
       check_response_code route, route_attributes, response
 
       if block_given?
