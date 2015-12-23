@@ -85,7 +85,9 @@ module ApiRecipes
     # e.g. webapp.alarms.index
     def generate_routes
       @routes.each do |route, attrs|
-        attrs.deep_symbolize_keys!
+        if attrs.is_a? Hash
+          attrs.deep_symbolize_keys!
+        end
         if route.eql? @name
           raise RouteNameClashError.new(route, @name)
         end
