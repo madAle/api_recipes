@@ -14,6 +14,10 @@ module ApiRecipes
         routes: {}
     }
 
-    DEFAULT_HTTP_VERB = :get
+    DEFAULT_ROUTE_ATTRIBUTES = {
+      method: :get
+    }
+
+    AVAILABLE_PARAMS_ENCODINGS = %w(form params json body)
   end
 end
