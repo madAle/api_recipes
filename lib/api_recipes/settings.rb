@@ -15,8 +15,7 @@ module ApiRecipes
     }
 
     DEFAULT_ROUTE_ATTRIBUTES = {
-      method: :get,
-      encode_params_as: :json
+      method: :get
     }
 
     AVAILABLE_PARAMS_ENCODINGS = %w(form params json body)
