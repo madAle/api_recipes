@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.authors       = ['Alessandro Verlato']
   spec.email         = ['averlato@gmail.com']
 
-  spec.summary       = %q{Consume HTTP APIs with style}
+  spec.summary       = %q{Easily describe and consume HTTP APIs}
   spec.homepage      = 'https://github.com/madAle/api_recipes'
   spec.license       = 'MIT'
 
