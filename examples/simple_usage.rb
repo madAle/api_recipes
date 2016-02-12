@@ -10,10 +10,6 @@ end
 # Let's create a simple class that uses ApiRecipes
 class MyFancyClass
   include ApiRecipes
-
-  # Declare the endpoints that we're going to use
-  # Add some custom configs
-  endpoint :github
 end
 
 
@@ -22,6 +18,7 @@ end
 
 # Get user's usernames from Github's Apis (https://github.com)
 usernames = nil
+
 MyFancyClass.github.users.list do |users|
   usernames = users.collect{ |user| user['login'] }
 end

@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.authors       = ['Alessandro Verlato']
   spec.email         = ['averlato@gmail.com']
 
-  spec.summary       = %q{Easily describe and consume HTTP APIs}
+  spec.summary       = %q{Consume HTTP APIs with style}
   spec.homepage      = 'https://github.com/madAle/api_recipes'
   spec.license       = 'MIT'
 
@@ -20,6 +20,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'oj', '~> 2.13.0'
   spec.add_dependency 'oj_mimic_json', '~> 1.0.1'
-  spec.add_dependency 'http', '~> 0.9.0'
-  spec.add_dependency 'activesupport', '>= 4.0.0'
+  spec.add_dependency 'http', '~> 1.0.0'
 end
