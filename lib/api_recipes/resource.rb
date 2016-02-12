@@ -139,7 +139,7 @@ module ApiRecipes
     end
 
     def settings
-      @endpoint.settings
+      @endpoint.configs
     end
 
     def start_request(route, route_attributes, *pars)

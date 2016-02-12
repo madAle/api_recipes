@@ -1,22 +1,23 @@
 module ApiRecipes
   class Endpoint
 
-    attr_accessor :name, :settings, :authorization, :basic_auth
+    attr_accessor :name, :configs, :authorization, :basic_auth
     attr_reader :resources
 
-    def initialize(name, config)
+    def initialize(name, configs)
       @name = name
-      @config = config
-      @settings = ApiRecipes::Settings::DEFAULT.merge config.endpoints_configs[name]
+      @configs = ApiRecipes::Settings::DEFAULT.merge configs
 
       # Generate   some_endpoint.some_resource  methods
       # e.g.  github.users
       @resources = [] unless @resources
-      @settings[:routes].each do |resource, routes|
+      @configs[:routes].each do |resource, routes|
         @resources << resource
         res = Resource.new resource, self, routes
-        define_singleton_method resource do
-          res
+        unless respond_to? resource
+          define_singleton_method resource do
+            res
+          end
         end
       end
     end
