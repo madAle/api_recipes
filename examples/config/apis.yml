@@ -18,7 +18,7 @@ github:
         ok_code: 200        # Optional, defaults to: 200
 
       show:
-        path: /:user_id     # You can use :some_param notation and provide params when calling the route (see examples/simple.rb)
+        path: /:user_id     # You can use :some_param notation and provide the param when calling the route (see examples/simple.rb)
 
       repos:
         path: /:user_id/repos

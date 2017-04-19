@@ -9,8 +9,6 @@ require 'api_recipes/resource'
 require 'api_recipes/endpoint'
 require 'api_recipes/settings'
 
-HTTP.inspect
-
 module ApiRecipes
 
   def self.included(base)
