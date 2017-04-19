@@ -85,9 +85,6 @@ module ApiRecipes
     # e.g. webapp.alarms.index
     def generate_routes
       @routes.each do |route, attrs|
-        if attrs.is_a? Hash
-          attrs.deep_symbolize_keys!
-        end
         if route.eql? @name
           raise RouteNameClashError.new(route, @name)
         end
@@ -146,8 +143,8 @@ module ApiRecipes
       unless route_attributes
         route_attributes = {}
       end
-      # Merge route attributes with defaults
-      route_attributes = Settings::DEFAULT_ROUTE_ATTRIBUTES.merge route_attributes
+      # Merge route attributes with defaults and deep clone route attributes
+      route_attributes = Marshal.load(Marshal.dump(Settings::DEFAULT_ROUTE_ATTRIBUTES.merge(route_attributes).deep_symbolize_keys))
 
       params = pars.extract_options!
       path, residual_params = build_path(route, route_attributes, params)
