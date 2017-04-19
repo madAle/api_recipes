@@ -135,7 +135,7 @@ module ApiRecipes
     end
 
     def required_params_for_path(path)
-      path.scan(/:(\w+)/).flatten.map &:to_sym
+      path.scan(/:(\w+)/).flatten.map { |p| p.to_sym }
     end
 
     def settings
