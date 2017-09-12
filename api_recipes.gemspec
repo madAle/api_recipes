@@ -18,7 +18,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
   spec.required_ruby_version = '>= 2.1.0'
 
-  spec.add_dependency 'oj', '~> 2.13.0'
+  spec.add_dependency 'oj', '~> 3.3.5'
   spec.add_dependency 'oj_mimic_json', '~> 1.0.1'
   spec.add_dependency 'http', '~> 1.0.0'
 end
