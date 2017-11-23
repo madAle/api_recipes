@@ -1,6 +1,5 @@
 require 'http'
 require 'oj'
-require 'oj_mimic_json'
 
 require 'api_recipes/utils'
 require 'api_recipes/exceptions'

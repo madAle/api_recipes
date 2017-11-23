@@ -155,7 +155,7 @@ module ApiRecipes
       check_response_code route, route_attributes, response
 
       if block_given?
-        body = JSON.load response.body.to_s
+        body = Oj.load response.body.to_s
         yield body, response.code, response.reason
       else
         response
