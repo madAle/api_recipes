@@ -10,6 +10,8 @@ end
 # Let's create a simple class that uses ApiRecipes
 class MyFancyClass
   include ApiRecipes
+
+  endpoint :github
 end
 
 
@@ -26,4 +28,11 @@ end
 # Get user's repos
 MyFancyClass.github.users.repos(user_id: usernames.first) do |repos|
   puts repos
+end
+
+# The endpoints are available on instances too
+fancy = MyFancyClass.new
+
+fancy.github.users.list do |users|
+  puts users.collect{ |user| user['login'] }
 end

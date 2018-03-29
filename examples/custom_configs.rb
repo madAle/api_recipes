@@ -5,6 +5,7 @@ require 'api_recipes'
 # Configure RemoteApi through custom settings
 FAKE_API_SETTINGS = {
     host: 'jsonplaceholder.typicode.com',
+    timeout: 10,
     routes: {
         users: {
             list: nil,
