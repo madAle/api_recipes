@@ -12,26 +12,14 @@ module ApiRecipes
 
   def self.included(base)
 
-    def base.endpoint(endpoint_name, configs, obj = nil)
-      overwrite = false
-      # If no obj has given, do not overwrite the EP (i.e. use the one created on configuration phase)
-      # Else ff an obj has given, overwrite the EP with a new EP with new configs.
-      # This EP will be accessible by this obj only (both class and instance)
-      unless obj
-        obj = self
-        overwrite = true
-      end
+    def base.endpoint(endpoint_name, configs = {})
       configs = ApiRecipes._aprcps_merge_endpoints_configs(endpoint_name, configs.deep_symbolize_keys)
       endpoint_name = endpoint_name.to_sym
 
       # Define 'endpoint_name' method for the class
-      ApiRecipes._aprcps_define_class_endpoint endpoint_name, configs, obj, overwrite
+      ApiRecipes._aprcps_define_class_endpoint endpoint_name, configs, self, true
       # Define 'endpoint_name' method for the class' instances
-      ApiRecipes._aprcps_define_instance_endpoint endpoint_name, obj
-    end
-
-    configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
-      base.endpoint endpoint_name, endpoint_configs, base
+      ApiRecipes._aprcps_define_instance_endpoint endpoint_name, self
     end
   end
 
