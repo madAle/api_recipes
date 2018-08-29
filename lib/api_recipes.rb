@@ -93,3 +93,12 @@ module ApiRecipes
     ApiRecipes.configuration.endpoints_configs[endpoint_name].merge configs
   end
 end
+
+# Monkey-patch URI so it can accept dashed hostnames like "web-service-1"
+module URI
+  # Undef DEFAULT_PARSER
+  URI.send(:remove_const, :DEFAULT_PARSER)
+
+  # Redefine DEFAULT_PARSER
+  DEFAULT_PARSER = Parser.new(HOSTNAME: "(?:(?:[a-zA-Z\\d](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.)*(?:[a-zA-Z](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.?")
+end
