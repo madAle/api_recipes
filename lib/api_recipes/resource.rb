@@ -1,11 +1,6 @@
 module ApiRecipes
   class Resource
 
-    # Monkey-patch URI so it can accept dashed hostnames like "web-service-1"
-    module URI
-      DEFAULT_PARSER = Parser.new(HOSTNAME: "(?:(?:[a-zA-Z\\d](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.)*(?:[a-zA-Z](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.?")
-    end
-
     attr_accessor :authorization, :basic_auth
 
     def initialize(name, endpoint, routes = {})
