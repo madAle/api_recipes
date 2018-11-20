@@ -1,5 +1,5 @@
 github:
-  protocol: https           # Optional, defaults to: 'http'
+  protocol: https           # Optional, defaults to: 'https'
   host: api.github.com      # Optional, defaults to: 'localhost'
   port: 443                 # Optional, defaults to: 80 for http and 443 for https
   base_path:                # Optional, defaults to: ''
