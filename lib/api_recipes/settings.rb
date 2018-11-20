@@ -4,7 +4,7 @@ module ApiRecipes
     FAIL_OPTIONS = [:return, :raise, :return_false]
 
     DEFAULT = {
-        protocol: 'http',
+        protocol: 'https',
         host: 'localhost',
         port: nil,
         base_path: '',
