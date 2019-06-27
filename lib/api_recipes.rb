@@ -42,15 +42,16 @@ module ApiRecipes
   def self._aprcps_define_global_endpoints
     configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
       unless method_defined? endpoint_name
-        unless _aprcps_storage[endpoint_name]
-          _aprcps_storage[endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
-        end
         define_singleton_method endpoint_name do
+          unless _aprcps_storage[endpoint_name]
+            _aprcps_storage[endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
+          end
           _aprcps_storage[endpoint_name]
         end
       end
     end
   end
+
 
   def self._aprcps_storage
     unless Thread.current[:api_recipes]
