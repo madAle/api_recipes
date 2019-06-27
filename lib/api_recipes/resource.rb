@@ -27,12 +27,8 @@ module ApiRecipes
     end
 
     def build_request
-      request_with_auth
-          .headers(extract_headers)
-          .timeout :global,
-                   write: per_kind_timeout,
-                   connect: per_kind_timeout,
-                   read: per_kind_timeout
+
+
     end
 
     def build_uri_from(path)
@@ -112,12 +108,16 @@ module ApiRecipes
                          end
     end
 
-    def request
-      HTTP
-    end
-
     def request_with_auth
-      req = request
+      req = HTTP
+      req = req.headers(extract_headers)
+                .timeout(
+                    :global,
+                    write: per_kind_timeout,
+                    connect: per_kind_timeout,
+                    read: per_kind_timeout
+                )
+
       if basic_auth
         req = req.basic_auth basic_auth
       elsif ba = @endpoint.basic_auth
@@ -151,11 +151,11 @@ module ApiRecipes
       residual_params = nil unless residual_params.any?
       uri = build_uri_from path
 
-      response = build_request.send(route_attributes[:method], uri, encode_residual_params(route_attributes, residual_params))
+      response = request_with_auth.send(route_attributes[:method], uri, encode_residual_params(route_attributes, residual_params))
       check_response_code route, route_attributes, response
 
       if block_given?
-        body = Oj.load response.body.to_s
+        body = Oj.load(response.body.to_s)
         yield body, response.code, response.reason
       else
         response
