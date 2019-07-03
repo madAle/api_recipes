@@ -63,7 +63,7 @@ describe ApiRecipes do
 
   # Describe expected behaviour
 
-  describe 'When configuration is made first, ApiRecipes module' do
+  context 'When configuration is made first, ApiRecipes module' do
     endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
 
     before :all do
@@ -72,9 +72,13 @@ describe ApiRecipes do
       end
     end
 
-    endpoints_configs.each do |ep_name, configs|
-      it "should define a #{ep_name} method" do
-        expect(ApiRecipes).to respond_to ep_name
+    describe "should define a method named as each defined endpoint's name" do
+      context 'E.g. given example configs' do
+        endpoints_configs.each do |ep_name, _|
+          it "should define '#{ep_name}' method" do
+            expect(ApiRecipes).to respond_to ep_name
+          end
+        end
       end
     end
   end
