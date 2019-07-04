@@ -80,40 +80,38 @@ describe ApiRecipes do
     let(:klass) { Object.const_get CLASS_NAME }
 
     before :each do
-      klass.class_eval do
-        include ApiRecipes
-      end
+      klass.send :include, ApiRecipes
     end
 
     it "should define 'endpoint' method on '#{CLASS_NAME}'" do
       expect(klass).to respond_to(:endpoint).with(1).argument
     end
 
-    describe '.endpoint' do
+    describe "an endpoint is defined on '#{CLASS_NAME}'" do
       let(:wrong_endpoint_name) { 1 }
+
+      before do
+        klass.send :endpoint, ENDPOINT_NAME
+      end
 
       it 'should raise error if endpoint_name is not a string or symbol' do
         expect { klass.endpoint wrong_endpoint_name }.to raise_error(ArgumentError)
       end
-    end
 
-    describe '._aprcps_define_class_endpoint' do
       context "when defining '#{ENDPOINT_NAME}' endpoint" do
-        before do
-          ApiRecipes._aprcps_define_class_endpoint ENDPOINT_NAME, klass
-        end
-
         context "'#{CLASS_NAME}' does not already define a method called '#{ENDPOINT_NAME}'" do
           it "should define a class method named '#{ENDPOINT_NAME}'" do
+            puts klass.new.send ENDPOINT_NAME
             expect(klass).to respond_to ENDPOINT_NAME
           end
         end
 
-        context "'#{CLASS_NAME}' already defines a method called '#{ENDPOINT_NAME}'" do
-          it 'should raise an error' do
-            expect { ApiRecipes._aprcps_define_class_endpoint ENDPOINT_NAME, klass }.to raise_error(ApiRecipes::EndpointNameClashError)
-          end
-        end
+        # context "'#{CLASS_NAME}' already defines a method called '#{ENDPOINT_NAME}'" do
+        #   it 'should raise an error' do
+        #     puts klass.methods.sort
+        #     expect { klass.class_eval { endpoint ENDPOINT_NAME } }.to raise_error(ApiRecipes::EndpointNameClashError)
+        #   end
+        # end
       end
     end
 

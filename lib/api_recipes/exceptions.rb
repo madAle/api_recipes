@@ -43,15 +43,8 @@ module ApiRecipes
   end
 
   class EndpointConfigIsNotAnHash < Exception
-    attr_reader :endpoint
-
-    def initialize(message = nil, endpoint = nil)
-      @endpoint = endpoint
-      if message
-        # Nothing to do
-      else
-        message = "provided config for endpoint '#{@endpoint}' must be an Hash"
-      end
+    def initialize(endpoint)
+      message = "provided config for endpoint '#{endpoint}' must be an Hash"
       super(message)
     end
   end

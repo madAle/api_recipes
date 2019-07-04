@@ -10,24 +10,30 @@ require 'api_recipes/settings'
 
 module ApiRecipes
 
-  def self.included(base)
+  def self.included(receiver)
 
-    def base.endpoint(endpoint_name)
+    def receiver.endpoint(endpoint_name, configs = {})
       unless endpoint_name.is_a?(String) || endpoint_name.is_a?(Symbol)
         raise ArgumentError, "endpoint name must be a Symbol or String"
       end
 
-      # if configs && !configs.is_a?(Hash)
-      #   raise ApiRecipes::EndpointConfigIsNotAnHash.new(endpoint_name)
-      # end
-      #
-      endpoint_name = endpoint_name.to_sym
-      # configs = ApiRecipes._aprcps_merge_endpoints_configs(endpoint_name, configs.deep_symbolize_keys)
+      if configs && !configs.is_a?(Hash)
+        raise ApiRecipes::EndpointConfigIsNotAnHash.new(endpoint_name)
+      end
 
-      # Define 'endpoint_name' method for the class
-      ApiRecipes._aprcps_define_class_endpoint endpoint_name, self
-      # Define 'endpoint_name' method for the class' instances
-      ApiRecipes._aprcps_define_instance_endpoint endpoint_name, self
+      endpoint_name = endpoint_name.to_sym
+      configs = ApiRecipes._aprcps_merge_endpoints_configs(endpoint_name, configs.deep_symbolize_keys)
+      if self.respond_to? endpoint_name
+        raise EndpointNameClashError.new(self, endpoint_name)
+      else
+        ApiRecipes._aprcps_storage[endpoint_name] = Endpoint.new(endpoint_name, configs)
+        define_method endpoint_name do
+          ApiRecipes._aprcps_storage[endpoint_name]
+        end
+        define_singleton_method endpoint_name do
+          ApiRecipes._aprcps_storage[endpoint_name]
+        end
+      end
     end
   end
 
@@ -68,28 +74,28 @@ module ApiRecipes
   end
 
 
-  def self._aprcps_define_class_endpoint(ep_name, obj)
-    if obj.respond_to? ep_name
-      raise EndpointNameClashError.new(obj, ep_name)
-    else
-      _aprcps_storage[ep_name] = Endpoint.new(ep_name, _aprcps_merge_endpoints_configs(ep_name, nil))
-      obj.define_singleton_method ep_name do
-        ApiRecipes._aprcps_storage[ep_name]
-      end
-    end
-  end
-
-  def self._aprcps_define_instance_endpoint(ep_name, obj)
-    obj.instance_eval do
-      if obj.respond_to? ep_name
-        raise EndpointNameClashError.new(obj, ep_name)
-      else
-        define_method ep_name do
-          self.class.send ep_name
-        end
-      end
-    end
-  end
+  # def self._aprcps_define_class_endpoint(ep_name, obj)
+  #   if obj.respond_to? ep_name
+  #     raise EndpointNameClashError.new(obj, ep_name)
+  #   else
+  #     _aprcps_storage[ep_name] = Endpoint.new(ep_name, _aprcps_merge_endpoints_configs(ep_name, nil))
+  #     obj.define_singleton_method ep_name do
+  #       ApiRecipes._aprcps_storage[ep_name]
+  #     end
+  #   end
+  # end
+  #
+  # def self._aprcps_define_instance_endpoint(ep_name, obj)
+  #   obj.instance_eval do
+  #     if obj.respond_to? ep_name
+  #       raise EndpointNameClashError.new(obj, ep_name)
+  #     else
+  #       define_method ep_name do
+  #         self.class.send ep_name
+  #       end
+  #     end
+  #   end
+  # end
 
   def self._aprcps_merge_endpoints_configs(endpoint_name, configs = nil)
     unless ApiRecipes.configuration.endpoints_configs[endpoint_name]
