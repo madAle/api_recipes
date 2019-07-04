@@ -3,13 +3,6 @@ require 'support/constants'
 require 'yaml'
 
 describe ApiRecipes do
-  before :each do
-    @klass = Class.new
-    @klass.instance_eval do
-      include ApiRecipes
-      endpoint ENDPOINT_NAME
-    end
-  end
 
   it 'has a version number' do
     expect(ApiRecipes::VERSION).not_to be nil
@@ -63,24 +56,86 @@ describe ApiRecipes do
 
   # Describe expected behaviour
 
-  context 'When configuration is made first, ApiRecipes module' do
-    endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
+  context 'when configuration is made' do
+    describe "should define a method for each configured endpoint's name" do
+      endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
 
-    before :all do
-      ApiRecipes.configure do |config|
-        config.endpoints_configs = endpoints_configs
+      before :all do
+        ApiRecipes.configure do |config|
+          config.endpoints_configs = endpoints_configs
+        end
       end
-    end
 
-    describe "should define a method named as each defined endpoint's name" do
-      context 'E.g. given example configs' do
+      context 'E.g. given example configs, ApiRecipe' do
         endpoints_configs.each do |ep_name, _|
-          it "should define '#{ep_name}' method" do
+          it "is expected to define'#{ep_name}'" do
             expect(ApiRecipes).to respond_to ep_name
           end
         end
       end
     end
+  end
+
+  context "module is included into a class named '#{CLASS_NAME}'" do
+    let(:klass) { Object.const_get CLASS_NAME }
+
+    before :each do
+      klass.class_eval do
+        include ApiRecipes
+      end
+    end
+
+    it "should define 'endpoint' method on '#{CLASS_NAME}'" do
+      expect(klass).to respond_to(:endpoint).with(1).argument
+    end
+
+    describe '.endpoint' do
+      let(:wrong_endpoint_name) { 1 }
+
+      it 'should raise error if endpoint_name is not a string or symbol' do
+        expect { klass.endpoint wrong_endpoint_name }.to raise_error(ArgumentError)
+      end
+    end
+
+    describe '._aprcps_define_class_endpoint' do
+      context "when defining '#{ENDPOINT_NAME}' endpoint" do
+        before do
+          ApiRecipes._aprcps_define_class_endpoint ENDPOINT_NAME, klass
+        end
+
+        context "'#{CLASS_NAME}' does not already define a method called '#{ENDPOINT_NAME}'" do
+          it "should define a class method named '#{ENDPOINT_NAME}'" do
+            expect(klass).to respond_to ENDPOINT_NAME
+          end
+        end
+
+        context "'#{CLASS_NAME}' already defines a method called '#{ENDPOINT_NAME}'" do
+          it 'should raise an error' do
+            expect { ApiRecipes._aprcps_define_class_endpoint ENDPOINT_NAME, klass }.to raise_error(ApiRecipes::EndpointNameClashError)
+          end
+        end
+      end
+    end
+
+    # describe '._aprcps_define_instance_endpoint' do
+    #   context "when defining '#{ENDPOINT_NAME}' endpoint" do
+    #     before do
+    #       ApiRecipes._aprcps_define_instance_endpoint ENDPOINT_NAME, klass
+    #     end
+    #
+    #     context "#{CLASS_NAME}' instance does not already define a method called '#{ENDPOINT_NAME}'" do
+    #       it "should define a method named '##{ENDPOINT_NAME}'" do
+    #         expect(klass.new).to respond_to ENDPOINT_NAME
+    #       end
+    #     end
+    #
+    #     context "'#{CLASS_NAME}' instance already defines a method called '#{ENDPOINT_NAME}'" do
+    #       it 'should raise an error' do
+    #         expect { ApiRecipes._aprcps_define_instance_endpoint ENDPOINT_NAME, klass }.to raise_error(ApiRecipes::EndpointNameClashError)
+    #       end
+    #     end
+    #   end
+    # end
   end
 
 

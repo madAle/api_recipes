@@ -81,8 +81,9 @@ module ApiRecipes
     # e.g. webapp.alarms.index
     def generate_routes
       @routes.each do |route, attrs|
+        # Check if route name clashes with resource name
         if route.eql? @name
-          raise RouteNameClashError.new(route, @name)
+          raise RouteAndResourceNamesClashError.new(route, @name)
         end
         unless respond_to? route.to_sym
           define_singleton_method route.to_sym do |*params, &block|
