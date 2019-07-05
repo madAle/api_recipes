@@ -7,7 +7,7 @@ describe 'ApiRecipes global configuration' do
 
   context 'when no global config has been made' do
 
-    before :each do
+    before do
       klass.send :include, ApiRecipes
       klass.send :endpoint, ENDPOINT_NAME, CUSTOM_CONFIGS
     end
@@ -26,7 +26,7 @@ describe 'ApiRecipes global configuration' do
       end
     end
 
-    before :each do
+    before do
       klass.send :include, ApiRecipes
       klass.send :endpoint, ENDPOINT_NAME, CUSTOM_CONFIGS
     end
