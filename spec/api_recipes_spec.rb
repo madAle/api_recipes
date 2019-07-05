@@ -101,39 +101,21 @@ describe ApiRecipes do
       context "when defining '#{ENDPOINT_NAME}' endpoint" do
         context "'#{CLASS_NAME}' does not already define a method called '#{ENDPOINT_NAME}'" do
           it "should define a class method named '#{ENDPOINT_NAME}'" do
-            puts klass.new.send ENDPOINT_NAME
             expect(klass).to respond_to ENDPOINT_NAME
+          end
+
+          it "should define an instance method named '##{ENDPOINT_NAME}'" do
+            expect(klass.new).to respond_to ENDPOINT_NAME
           end
         end
 
-        # context "'#{CLASS_NAME}' already defines a method called '#{ENDPOINT_NAME}'" do
-        #   it 'should raise an error' do
-        #     puts klass.methods.sort
-        #     expect { klass.class_eval { endpoint ENDPOINT_NAME } }.to raise_error(ApiRecipes::EndpointNameClashError)
-        #   end
-        # end
+        context "'#{CLASS_NAME}' already defines a method called '#{ENDPOINT_NAME}'" do
+          it 'should raise an error' do
+            expect { klass.send :endpoint, ENDPOINT_NAME }.to raise_error(ApiRecipes::EndpointNameClashError)
+          end
+        end
       end
     end
-
-    # describe '._aprcps_define_instance_endpoint' do
-    #   context "when defining '#{ENDPOINT_NAME}' endpoint" do
-    #     before do
-    #       ApiRecipes._aprcps_define_instance_endpoint ENDPOINT_NAME, klass
-    #     end
-    #
-    #     context "#{CLASS_NAME}' instance does not already define a method called '#{ENDPOINT_NAME}'" do
-    #       it "should define a method named '##{ENDPOINT_NAME}'" do
-    #         expect(klass.new).to respond_to ENDPOINT_NAME
-    #       end
-    #     end
-    #
-    #     context "'#{CLASS_NAME}' instance already defines a method called '#{ENDPOINT_NAME}'" do
-    #       it 'should raise an error' do
-    #         expect { ApiRecipes._aprcps_define_instance_endpoint ENDPOINT_NAME, klass }.to raise_error(ApiRecipes::EndpointNameClashError)
-    #       end
-    #     end
-    #   end
-    # end
   end
 
 
