@@ -31,7 +31,7 @@ describe 'ApiRecipes global configuration' do
       klass.send :endpoint, ENDPOINT_NAME, CUSTOM_CONFIGS
     end
 
-    it "is expected that Class#{ENDPOINT_NAME} returns an endpoint with merged configs (default + custom)" do
+    it "is expected that Class##{ENDPOINT_NAME} returns an endpoint with merged configs (default + custom)" do
       expect(klass.send(ENDPOINT_NAME).configs).to include CUSTOM_CONFIGS
       expect(klass.send(ENDPOINT_NAME).configs).to eq endpoints_configs.deep_symbolize_keys[ENDPOINT_NAME].merge CUSTOM_CONFIGS
     end

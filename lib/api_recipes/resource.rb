@@ -1,8 +1,6 @@
 module ApiRecipes
   class Resource
 
-    attr_accessor :authorization, :basic_auth
-
     def initialize(name, endpoint, routes = {})
       @name = name
       @routes = routes
@@ -96,7 +94,7 @@ module ApiRecipes
       self
     end
 
-    def per_kind_timeout
+    def timeout
       settings.fetch(:timeout, ApiRecipes::Settings::GLOBAL_TIMEOUT)/3.0
     end
 
@@ -112,22 +110,15 @@ module ApiRecipes
     def request_with_auth
       req = HTTP
       req = req.headers(extract_headers)
-                .timeout(
-                    :global,
-                    write: per_kind_timeout,
-                    connect: per_kind_timeout,
-                    read: per_kind_timeout
-                )
+                .timeout(timeout)
 
+      basic_auth = @endpoint.basic_auth
       if basic_auth
         req = req.basic_auth basic_auth
-      elsif ba = @endpoint.basic_auth
-        req = req.basic_auth ba
       end
+      authorization = @endpoint.authorization
       if authorization
         req = req.auth authorization
-      elsif auth = @endpoint.authorization
-        req = req.auth auth
       end
       req
     end

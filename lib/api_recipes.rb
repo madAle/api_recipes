@@ -26,12 +26,13 @@ module ApiRecipes
       if self.respond_to? endpoint_name
         raise EndpointNameClashError.new(self, endpoint_name)
       else
-        ApiRecipes._aprcps_storage[endpoint_name] = Endpoint.new(endpoint_name, configs)
+        ApiRecipes._aprcps_storage[endpoint_name] = {}
+        ApiRecipes._aprcps_storage[endpoint_name][self] = Endpoint.new(endpoint_name, configs)
         define_method endpoint_name do
-          ApiRecipes._aprcps_storage[endpoint_name]
+          ApiRecipes._aprcps_storage[endpoint_name][self.class]
         end
         define_singleton_method endpoint_name do
-          ApiRecipes._aprcps_storage[endpoint_name]
+          ApiRecipes._aprcps_storage[endpoint_name][self]
         end
       end
     end
@@ -52,13 +53,32 @@ module ApiRecipes
     end
   end
 
+  def self.set_authorization_for_endpoint(authorization, endpoint_name)
+    endpoint_name = endpoint_name.to_sym
+
+    if _aprcps_storage[endpoint_name]
+      _aprcps_storage[endpoint_name].each do |_, endpoint|
+        endpoint.authorization = authorization
+      end
+    end
+  end
+
+  def self.set_basic_auth_for_endpoint(authorization, endpoint_name)
+    endpoint_name = endpoint_name.to_sym
+
+    if _aprcps_storage[endpoint_name]
+      _aprcps_storage[endpoint_name].each do |_, endpoint|
+        endpoint.basic_auth = authorization
+      end
+    end
+  end
+
   def self._aprcps_define_global_endpoints
     configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
+      endpoint_name = endpoint_name.to_sym
       unless method_defined? endpoint_name
+        _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
         define_singleton_method endpoint_name do
-          unless _aprcps_storage[:global][endpoint_name]
-            _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
-          end
           _aprcps_storage[:global][endpoint_name]
         end
       end
@@ -80,7 +100,7 @@ module ApiRecipes
       ApiRecipes.configuration.endpoints_configs[endpoint_name] = {}
     end
     if configs
-      ApiRecipes.configuration.endpoints_configs[endpoint_name].merge(configs) do |key, old_val, new_val|
+      ApiRecipes.configuration.endpoints_configs[endpoint_name].merge(configs) do |_, old_val, new_val|
         if new_val.nil?
           old_val
         else

@@ -21,5 +21,31 @@ module ApiRecipes
         end
       end
     end
+
+    def authorization=(auth)
+      @authorization = auth
+
+      # Check if I'm the global endpoint
+      if global?
+        # Set authorization also on every "children" (classes that define the same endpoint)
+        ApiRecipes.set_authorization_for_endpoint auth, name
+      end
+    end
+
+    def basic_auth=(auth)
+      @basic_auth = auth
+
+      # Check if I'm the global endpoint
+      if global?
+        # Set authorization also on every "children" (classes that define the same endpoint)
+        ApiRecipes.set_basic_auth_for_endpoint auth, name
+      end
+    end
+
+    private
+
+    def global?
+      ApiRecipes._aprcps_storage[:global][name] == self
+    end
   end
 end
