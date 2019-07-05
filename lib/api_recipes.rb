@@ -56,48 +56,26 @@ module ApiRecipes
     configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
       unless method_defined? endpoint_name
         define_singleton_method endpoint_name do
-          unless _aprcps_storage[endpoint_name]
-            _aprcps_storage[endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
+          unless _aprcps_storage[:global][endpoint_name]
+            _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
           end
-          _aprcps_storage[endpoint_name]
+          _aprcps_storage[:global][endpoint_name]
         end
       end
     end
   end
 
-
   def self._aprcps_storage
     unless Thread.current[:api_recipes]
-      Thread.current[:api_recipes] = {}
+      Thread.current[:api_recipes] = { global: {} }
     end
     Thread.current[:api_recipes]
   end
 
-
-  # def self._aprcps_define_class_endpoint(ep_name, obj)
-  #   if obj.respond_to? ep_name
-  #     raise EndpointNameClashError.new(obj, ep_name)
-  #   else
-  #     _aprcps_storage[ep_name] = Endpoint.new(ep_name, _aprcps_merge_endpoints_configs(ep_name, nil))
-  #     obj.define_singleton_method ep_name do
-  #       ApiRecipes._aprcps_storage[ep_name]
-  #     end
-  #   end
-  # end
-  #
-  # def self._aprcps_define_instance_endpoint(ep_name, obj)
-  #   obj.instance_eval do
-  #     if obj.respond_to? ep_name
-  #       raise EndpointNameClashError.new(obj, ep_name)
-  #     else
-  #       define_method ep_name do
-  #         self.class.send ep_name
-  #       end
-  #     end
-  #   end
-  # end
-
   def self._aprcps_merge_endpoints_configs(endpoint_name, configs = nil)
+    unless endpoint_name.is_a?(String) || endpoint_name.is_a?(Symbol)
+      raise ArgumentError, "no enpoint_name provided. Given: #{endpoint_name.inspect}"
+    end
     unless ApiRecipes.configuration.endpoints_configs[endpoint_name]
       ApiRecipes.configuration.endpoints_configs[endpoint_name] = {}
     end
