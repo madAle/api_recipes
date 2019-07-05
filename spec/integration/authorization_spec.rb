@@ -68,7 +68,7 @@ describe 'ApiRecipes authorization' do
     context 'when a global configuration has been done' do
       let(:klass_instance) { klass.new }
 
-      before :all do
+      before do
         endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
         ApiRecipes.configure do |config|
           config.endpoints_configs = endpoints_configs

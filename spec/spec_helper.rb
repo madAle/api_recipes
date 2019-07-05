@@ -14,6 +14,15 @@ RSpec.configure do |config|
   end
 
   config.before :each do
+    if Module.const_defined?('ApiRecipes')
+      Object.send(:remove_const, 'ApiRecipes')
+      # Reloads the module and all other files
+      load 'api_recipes.rb'
+      Dir.glob('lib/api_recipes/**').each do |filename|
+        load filename
+      end
+    end
+
     # Remove CLASS_NAME definition
     Object.send(:remove_const, CLASS_NAME.to_s)
     # Re-define CLASS_NAME

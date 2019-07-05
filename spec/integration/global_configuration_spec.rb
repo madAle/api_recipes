@@ -6,7 +6,7 @@ describe 'ApiRecipes global configuration' do
 
   endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
 
-  before :all do
+  before do
     ApiRecipes.configure do |config|
       config.endpoints_configs = endpoints_configs
     end

@@ -26,14 +26,21 @@ module ApiRecipes
       if self.respond_to? endpoint_name
         raise EndpointNameClashError.new(self, endpoint_name)
       else
-        ApiRecipes._aprcps_storage[endpoint_name] = {}
-        ApiRecipes._aprcps_storage[endpoint_name][self] = Endpoint.new(endpoint_name, configs)
         define_method endpoint_name do
+          unless ApiRecipes._aprcps_storage[endpoint_name]
+            ApiRecipes._aprcps_storage[endpoint_name] = {}
+            ApiRecipes._aprcps_storage[endpoint_name][self.class] = Endpoint.new(endpoint_name, configs)
+          end
           ApiRecipes._aprcps_storage[endpoint_name][self.class]
         end
         define_singleton_method endpoint_name do
+          unless ApiRecipes._aprcps_storage[endpoint_name]
+            ApiRecipes._aprcps_storage[endpoint_name] = {}
+            ApiRecipes._aprcps_storage[endpoint_name][self] = Endpoint.new(endpoint_name, configs)
+          end
           ApiRecipes._aprcps_storage[endpoint_name][self]
         end
+        ApiRecipes._aprcps_define_global_endpoints
       end
     end
   end
@@ -76,11 +83,11 @@ module ApiRecipes
   def self._aprcps_define_global_endpoints
     configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
       endpoint_name = endpoint_name.to_sym
-      unless method_defined? endpoint_name
-        _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
-        define_singleton_method endpoint_name do
-          _aprcps_storage[:global][endpoint_name]
+      define_singleton_method endpoint_name do
+        unless _aprcps_storage[:global][endpoint_name]
+          _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
         end
+        _aprcps_storage[:global][endpoint_name]
       end
     end
   end

@@ -56,7 +56,7 @@ describe ApiRecipes do
   describe '._aprcps_define_global_endpoints' do
     endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
 
-    before :all do
+    before do
       ApiRecipes.configure do |config|
         config.endpoints_configs = endpoints_configs
       end
@@ -93,7 +93,7 @@ describe ApiRecipes do
     context 'when a configuration has been made' do
       endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
 
-      before :all do
+      before do
         ApiRecipes.configure do |config|
           config.endpoints_configs = endpoints_configs
         end
@@ -147,7 +147,7 @@ describe ApiRecipes do
   context "module is included into a class named '#{CLASS_NAME}'" do
     let(:klass) { Object.const_get CLASS_NAME }
 
-    before :each do
+    before do
       klass.send :include, ApiRecipes
     end
 
