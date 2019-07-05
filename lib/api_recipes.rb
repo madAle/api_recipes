@@ -32,17 +32,23 @@ module ApiRecipes
         ApiRecipes._aprcps_storage[endpoint_name][self] = ep
 
         define_method endpoint_name do
-          if endp = ApiRecipes._aprcps_storage[self.class]
+          unless ApiRecipes._aprcps_thread_storage[self.class]
+            ApiRecipes._aprcps_thread_storage[self.class] = {}
+          end
+          if endp = ApiRecipes._aprcps_thread_storage[self.class][endpoint_name]
             endp
           else
-            ApiRecipes._aprcps_storage[self.class] = ep.clone
+            ApiRecipes._aprcps_thread_storage[self.class][endpoint_name] = ep.clone
           end
         end
         define_singleton_method endpoint_name do
-          if endp = ApiRecipes._aprcps_storage[self]
+          unless ApiRecipes._aprcps_thread_storage[self]
+            ApiRecipes._aprcps_thread_storage[self] = {}
+          end
+          if endp = ApiRecipes._aprcps_thread_storage[self][endpoint_name]
             endp
           else
-            ApiRecipes._aprcps_storage[self] = ep.clone
+            ApiRecipes._aprcps_thread_storage[self][endpoint_name] = ep.clone
           end
         end
       end
@@ -110,10 +116,13 @@ module ApiRecipes
       @storage = { global: {} }
     end
     @storage
-    # unless Thread.current[:api_recipes]
-    #   Thread.current[:api_recipes] = { global: {} }
-    # end
-    # Thread.current[:api_recipes]
+  end
+
+  def self._aprcps_thread_storage
+    unless Thread.current[:api_recipes]
+      Thread.current[:api_recipes] = {}
+    end
+    Thread.current[:api_recipes]
   end
 
   def self._aprcps_merge_endpoints_configs(endpoint_name, configs = nil)
