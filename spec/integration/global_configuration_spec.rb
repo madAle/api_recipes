@@ -33,6 +33,12 @@ describe 'ApiRecipes global configuration' do
     end
   end
 
+  after do
+    Object.send :remove_const, 'Foo'
+    Object.send :remove_const, 'Bar'
+    Object.send :remove_const, 'FooBar'
+  end
+
   it 'is expected that Foo can access ApiRecipes global endpoints' do
     expect { Foo.global_access_test }.to_not raise_error
   end

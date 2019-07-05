@@ -26,21 +26,17 @@ module ApiRecipes
       if self.respond_to? endpoint_name
         raise EndpointNameClashError.new(self, endpoint_name)
       else
+        ep = Endpoint.new(endpoint_name, configs)
+        ApiRecipes.copy_global_authorizations_to_endpoint ep
+        ApiRecipes._aprcps_storage[endpoint_name] = {}
+        ApiRecipes._aprcps_storage[endpoint_name][self] = ep
+
         define_method endpoint_name do
-          unless ApiRecipes._aprcps_storage[endpoint_name]
-            ApiRecipes._aprcps_storage[endpoint_name] = {}
-            ApiRecipes._aprcps_storage[endpoint_name][self.class] = Endpoint.new(endpoint_name, configs)
-          end
-          ApiRecipes._aprcps_storage[endpoint_name][self.class]
+          ep
         end
         define_singleton_method endpoint_name do
-          unless ApiRecipes._aprcps_storage[endpoint_name]
-            ApiRecipes._aprcps_storage[endpoint_name] = {}
-            ApiRecipes._aprcps_storage[endpoint_name][self] = Endpoint.new(endpoint_name, configs)
-          end
-          ApiRecipes._aprcps_storage[endpoint_name][self]
+          ep
         end
-        ApiRecipes._aprcps_define_global_endpoints
       end
     end
   end
@@ -60,11 +56,23 @@ module ApiRecipes
     end
   end
 
+  def self.copy_global_authorizations_to_endpoint(endpoint)
+    if _aprcps_storage[:global][endpoint.name]
+      if auth = _aprcps_storage[:global][endpoint.name].basic_auth
+        endpoint.authorization = auth
+      end
+      if auth = _aprcps_storage[:global][endpoint.name].authorization
+        endpoint.authorization = auth
+      end
+    end
+  end
+
   def self.set_authorization_for_endpoint(authorization, endpoint_name)
     endpoint_name = endpoint_name.to_sym
 
     if _aprcps_storage[endpoint_name]
       _aprcps_storage[endpoint_name].each do |_, endpoint|
+        puts "Setting auth for #{_} - #{endpoint}"
         endpoint.authorization = authorization
       end
     end
@@ -83,20 +91,22 @@ module ApiRecipes
   def self._aprcps_define_global_endpoints
     configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
       endpoint_name = endpoint_name.to_sym
+      _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
       define_singleton_method endpoint_name do
-        unless _aprcps_storage[:global][endpoint_name]
-          _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
-        end
         _aprcps_storage[:global][endpoint_name]
       end
     end
   end
 
   def self._aprcps_storage
-    unless Thread.current[:api_recipes]
-      Thread.current[:api_recipes] = { global: {} }
+    unless @storage
+      @storage = { global: {} }
     end
-    Thread.current[:api_recipes]
+    @storage
+    # unless Thread.current[:api_recipes]
+    #   Thread.current[:api_recipes] = { global: {} }
+    # end
+    # Thread.current[:api_recipes]
   end
 
   def self._aprcps_merge_endpoints_configs(endpoint_name, configs = nil)

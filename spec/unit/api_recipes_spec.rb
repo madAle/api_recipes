@@ -70,13 +70,9 @@ describe ApiRecipes do
   end
 
   describe '._aprcps_storage' do
-    before do
-      Thread.current[:api_recipes] = nil
-    end
-
     context 'on first call' do
-      it 'should init Thread.current[:api_recipes] as an Hash' do
-        expect { ApiRecipes._aprcps_storage }.to change { Thread.current[:api_recipes] }.from(nil).to(Hash)
+      it 'should init ApiRecipes storage as an Hash' do
+        expect { ApiRecipes._aprcps_storage }.to change { ApiRecipes.instance_variable_get :@storage }.from(nil).to(Hash)
       end
 
       it 'should return an Hash with content { global: {} }' do
