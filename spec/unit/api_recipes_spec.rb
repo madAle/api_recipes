@@ -128,10 +128,14 @@ describe ApiRecipes do
         end
 
         context "when 'config' param is a non-empty Hash" do
-          let(:configs) { { protocol: 'fake-protocol' } }
+          let(:configs) { CUSTOM_CONFIGS }
 
           it 'should return the merge of configured enpoint configs and provided ones' do
             expect(ApiRecipes._aprcps_merge_endpoints_configs(ENDPOINT_NAME, configs)).to eq ApiRecipes.configuration.endpoints_configs[ENDPOINT_NAME].merge(configs)
+          end
+
+          it "is expected to not overwrite keys not present in 'config'" do
+            expect(ApiRecipes._aprcps_merge_endpoints_configs(ENDPOINT_NAME, configs)[:routes]).to_not be_nil
           end
         end
       end

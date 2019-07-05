@@ -33,14 +33,6 @@ describe 'ApiRecipes global configuration' do
     end
   end
 
-  it "is expected that Foo defines a #{ENDPOINT_NAME} method" do
-    expect(Foo).to respond_to ENDPOINT_NAME
-  end
-
-  it "is expected that Bar does not define a #{ENDPOINT_NAME} method" do
-    expect(Bar).to_not respond_to ENDPOINT_NAME
-  end
-
   it 'is expected that Foo can access ApiRecipes global endpoints' do
     expect { Foo.global_access_test }.to_not raise_error
   end

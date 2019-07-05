@@ -80,7 +80,13 @@ module ApiRecipes
       ApiRecipes.configuration.endpoints_configs[endpoint_name] = {}
     end
     if configs
-      ApiRecipes.configuration.endpoints_configs[endpoint_name].merge configs
+      ApiRecipes.configuration.endpoints_configs[endpoint_name].merge(configs) do |key, old_val, new_val|
+        if new_val.nil?
+          old_val
+        else
+          new_val
+        end
+      end
     else
       ApiRecipes.configuration.endpoints_configs[endpoint_name]
     end
