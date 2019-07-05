@@ -32,10 +32,18 @@ module ApiRecipes
         ApiRecipes._aprcps_storage[endpoint_name][self] = ep
 
         define_method endpoint_name do
-          ep
+          if endp = ApiRecipes._aprcps_storage[self.class]
+            endp
+          else
+            ApiRecipes._aprcps_storage[self.class] = ep.clone
+          end
         end
         define_singleton_method endpoint_name do
-          ep
+          if endp = ApiRecipes._aprcps_storage[self]
+            endp
+          else
+            ApiRecipes._aprcps_storage[self] = ep.clone
+          end
         end
       end
     end
@@ -72,7 +80,6 @@ module ApiRecipes
 
     if _aprcps_storage[endpoint_name]
       _aprcps_storage[endpoint_name].each do |_, endpoint|
-        puts "Setting auth for #{_} - #{endpoint}"
         endpoint.authorization = authorization
       end
     end
