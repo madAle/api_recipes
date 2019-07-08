@@ -1,6 +1,8 @@
 module ApiRecipes
   class Resource
 
+    attr_reader :response
+
     def initialize(name, endpoint, routes = {})
       @name = name
       @routes = routes
@@ -23,12 +25,7 @@ module ApiRecipes
       path = "#{settings[:base_path]}#{settings[:api_version]}/#{@name}#{path}"
       return path, provided_params
     end
-
-    def build_request
-
-
-    end
-
+    
     def build_uri_from(path)
       attrs = {
           scheme: settings[:protocol],
@@ -61,7 +58,7 @@ module ApiRecipes
       if Settings::AVAILABLE_PARAMS_ENCODINGS.include? route_attributes[:encode_params_as].to_s
         { route_attributes[:encode_params_as].to_sym => residual_params }
       else
-        # default to query string params (get) or json (other methods)
+        # Default to query string params (get) or json (other methods)
         case route_attributes[:method].to_sym
           when :get
             { params: residual_params }
@@ -73,6 +70,14 @@ module ApiRecipes
 
     def extract_headers
       settings[:default_headers] || {}
+    end
+
+    def fill(object)
+      if block_given?
+
+      else
+
+      end
     end
 
     # Generate routes  some_endpoint.some_resource.some_route  methods
@@ -147,7 +152,7 @@ module ApiRecipes
       check_response_code route, route_attributes, response
 
       if block_given?
-        body = Oj.load(response.body.to_s)
+        body = response.parse
         yield body, response.code, response.reason
       else
         response

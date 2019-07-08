@@ -18,6 +18,5 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
   spec.required_ruby_version = '> 2.2.0'
 
-  spec.add_dependency 'oj', '~> 3.7.0'
   spec.add_dependency 'http', '~> 4.1.1'
 end
