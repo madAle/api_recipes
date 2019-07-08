@@ -1,0 +1,43 @@
+github:
+  protocol: https           # Optional, defaults to: 'https'
+  host: api.github.com      # Optional, defaults to: 'localhost'
+  port: 443                 # Optional, defaults to: 80 for http and 443 for https
+  base_path:                # Optional, defaults to: ''
+  api_version:              # Optional, defaults to: ''
+  timeout: 3                # Optional, defaults to: 3 (time expressed in seconds)
+  on_nok_code: :raise       # Optional, defaults to :raise. Possible values: [:do_nothing, :raise, :return_false]
+  default_headers:
+    accept: 'application/vnd.github.v3+json'
+    content_type: 'application/json'
+
+  routes:
+    users:
+      list:
+        path:               # Optional, defaults to: ''
+        method: get         # Optional, defaults to: get
+        ok_code: 200        # Optional, defaults to: 200
+
+      show:
+        path: /:user_id     # You can use :some_param notation and provide the param when calling the route (see examples/simple.rb)
+
+      repos:
+        path: /:user_id/repos
+
+
+# Example of test endpoint with minimal configuration and multiple routes
+jsonplaceholder:
+  host: jsonplaceholder.typicode.com
+
+  routes:
+    users:
+      list:
+      show:
+        path: /:user_id     # You can use :some_param notation and provide params when calling the route (see examples/simple.rb)
+
+    posts:
+      list:
+      show:
+        path: /:post_id
+
+      comments:
+        path: /:post_id/comments

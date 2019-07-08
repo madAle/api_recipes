@@ -10,16 +10,46 @@ require 'api_recipes/settings'
 
 module ApiRecipes
 
-  def self.included(base)
+  def self.included(receiver)
 
-    def base.endpoint(endpoint_name, configs = {})
-      configs = ApiRecipes._aprcps_merge_endpoints_configs(endpoint_name, configs.deep_symbolize_keys)
+    def receiver.endpoint(endpoint_name, configs = {})
+      unless endpoint_name.is_a?(String) || endpoint_name.is_a?(Symbol)
+        raise ArgumentError, "endpoint name must be a Symbol or String"
+      end
+
+      if configs && !configs.is_a?(Hash)
+        raise ApiRecipes::EndpointConfigIsNotAnHash.new(endpoint_name)
+      end
+
       endpoint_name = endpoint_name.to_sym
+      configs = ApiRecipes._aprcps_merge_endpoints_configs(endpoint_name, configs.deep_symbolize_keys)
+      if self.respond_to? endpoint_name
+        raise EndpointNameClashError.new(self, endpoint_name)
+      else
+        ep = Endpoint.new(endpoint_name, configs)
+        ApiRecipes.copy_global_authorizations_to_endpoint ep
+        ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
+        ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep
 
-      # Define 'endpoint_name' method for the class
-      ApiRecipes._aprcps_define_class_endpoint endpoint_name, configs, self, true
-      # Define 'endpoint_name' method for the class' instances
-      ApiRecipes._aprcps_define_instance_endpoint endpoint_name, self
+        define_method endpoint_name do
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name]
+            ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
+          end
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
+            ApiRecipes._aprcps_thread_storage[endpoint_name][self.class] = ep.clone
+          end
+          ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
+        end
+        define_singleton_method endpoint_name do
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name]
+            ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
+          end
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name][self]
+            ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep.clone
+          end
+          ApiRecipes._aprcps_thread_storage[endpoint_name][self]
+        end
+      end
     end
   end
 
@@ -33,65 +63,86 @@ module ApiRecipes
   def self.configure
     if block_given?
       yield(configuration)
-      _aprcps_define_global_endpoints
     else
       configuration
     end
   end
 
-  def self._aprcps_define_global_endpoints
-    configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
-      unless method_defined? endpoint_name
-        define_singleton_method endpoint_name do
-          unless _aprcps_storage[endpoint_name]
-            _aprcps_storage[endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
-          end
-          _aprcps_storage[endpoint_name]
-        end
+  def self.copy_global_authorizations_to_endpoint(endpoint)
+    if _aprcps_global_storage[endpoint.name]
+      if auth = _aprcps_global_storage[endpoint.name].basic_auth
+        endpoint.authorization = auth
+      end
+      if auth = _aprcps_global_storage[endpoint.name].authorization
+        endpoint.authorization = auth
       end
     end
   end
 
+  def self.set_authorization_for_endpoint(authorization, endpoint_name)
+    endpoint_name = endpoint_name.to_sym
 
-  def self._aprcps_storage
+    # Set authorization on thread storage
+    if _aprcps_thread_storage[endpoint_name]
+      _aprcps_thread_storage[endpoint_name].each do |_, endpoint|
+        endpoint.authorization = authorization
+      end
+    end
+  end
+
+  def self.set_basic_auth_for_endpoint(basic_auth, endpoint_name)
+    endpoint_name = endpoint_name.to_sym
+
+    # Set authorization on thread storage
+    if _aprcps_thread_storage[endpoint_name]
+      _aprcps_thread_storage[endpoint_name].each do |_, endpoint|
+        endpoint.authorization = basic_auth
+      end
+    end
+  end
+
+  def self._aprcps_define_global_endpoints
+    configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
+      endpoint_name = endpoint_name.to_sym
+      _aprcps_global_storage[endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
+      define_singleton_method endpoint_name do
+        _aprcps_global_storage[endpoint_name]
+      end
+    end
+  end
+
+  def self._aprcps_global_storage
+    unless @storage
+      @storage = {}
+    end
+    @storage
+  end
+
+  def self._aprcps_thread_storage
     unless Thread.current[:api_recipes]
       Thread.current[:api_recipes] = {}
     end
     Thread.current[:api_recipes]
   end
 
-
-  def self._aprcps_define_class_endpoint(ep_name, configs, obj, overwrite)
-    unless obj.method_defined? ep_name
-      if overwrite
-        ep = Endpoint.new(ep_name, configs)
-      else
-        ep = _aprcps_storage[ep_name]
-      end
-      obj.define_singleton_method ep_name do
-        ep
-      end
-    end
-  end
-
-  def self._aprcps_define_instance_endpoint(ep_name, obj)
-    obj.instance_eval do
-      unless obj.method_defined? ep_name
-        define_method ep_name do
-          self.class.send ep_name
-        end
-      end
-    end
-  end
-
-  def self._aprcps_merge_endpoints_configs(endpoint_name, configs)
-    if configs && !configs.is_a?(Hash)
-      raise ApiRecipes::EndpointConfigIsNotAnHash.new(endpoint_name)
+  def self._aprcps_merge_endpoints_configs(endpoint_name, configs = nil)
+    unless endpoint_name.is_a?(String) || endpoint_name.is_a?(Symbol)
+      raise ArgumentError, "no enpoint_name provided. Given: #{endpoint_name.inspect}"
     end
     unless ApiRecipes.configuration.endpoints_configs[endpoint_name]
       ApiRecipes.configuration.endpoints_configs[endpoint_name] = {}
     end
-    ApiRecipes.configuration.endpoints_configs[endpoint_name].merge configs
+    if configs
+      ApiRecipes.configuration.endpoints_configs[endpoint_name].merge(configs) do |_, old_val, new_val|
+        if new_val.nil?
+          old_val
+        else
+          new_val
+        end
+      end
+    else
+      ApiRecipes.configuration.endpoints_configs[endpoint_name]
+    end
   end
 end
 

@@ -1,16 +1,15 @@
 module ApiRecipes
-  class RouteNameClashError < Exception
-    attr_reader :route, :resource
 
-    def initialize(message = nil, route = nil, resource = nil)
-      @route = route; @resource = resource
-      if message
-        # Nothing to do
-      elsif route
-        message = "route name (#{@route}) can't be equal to resource name (#{@resource}). Please change route or resource name."
-      else
-        message = "route name can't be equal to resource name. Please change route or resource names."
-      end
+  class EndpointNameClashError < Exception
+    def initialize(object, endpoint_name)
+      message = "#{object.class} already defines a method called '#{endpoint_name}'. Tip: change endpoint name"
+      super(message)
+    end
+  end
+
+  class RouteAndResourceNamesClashError < Exception
+    def initialize(route_name, resource_name)
+      message = "route name (#{route_name}) can't be equal to resource name (#{resource_name}). Please change route or resource name."
       super(message)
     end
   end
@@ -44,15 +43,8 @@ module ApiRecipes
   end
 
   class EndpointConfigIsNotAnHash < Exception
-    attr_reader :endpoint
-
-    def initialize(message = nil, endpoint = nil)
-      @endpoint = endpoint
-      if message
-        # Nothing to do
-      else
-        message = "provided config for endpoint '#{@endpoint}' must be an Hash"
-      end
+    def initialize(endpoint)
+      message = "provided config for endpoint '#{endpoint}' must be an Hash"
       super(message)
     end
   end
