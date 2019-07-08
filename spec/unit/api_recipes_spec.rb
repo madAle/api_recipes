@@ -69,19 +69,15 @@ describe ApiRecipes do
     end
   end
 
-  describe '._aprcps_storage' do
+  describe '._aprcps_global_storage' do
     context 'on first call' do
       it 'should init ApiRecipes storage as an Hash' do
-        expect { ApiRecipes._aprcps_storage }.to change { ApiRecipes.instance_variable_get :@storage }.from(nil).to(Hash)
-      end
-
-      it 'should return an Hash with content { global: {} }' do
-        expect(ApiRecipes._aprcps_storage).to eq({ global: {} })
+        expect { ApiRecipes._aprcps_global_storage }.to change { ApiRecipes.instance_variable_get :@storage }.from(nil).to(Hash)
       end
     end
 
     it 'should return an Hash' do
-      expect(ApiRecipes._aprcps_storage).to be_a(Hash)
+      expect(ApiRecipes._aprcps_global_storage).to be_a(Hash)
     end
   end
 

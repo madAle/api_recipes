@@ -45,7 +45,7 @@ module ApiRecipes
     private
 
     def global?
-      ApiRecipes._aprcps_storage[:global][name] == self
+      ApiRecipes._aprcps_global_storage[name] == self
     end
   end
 end

@@ -95,7 +95,7 @@ module ApiRecipes
     end
 
     def timeout
-      settings.fetch(:timeout, ApiRecipes::Settings::GLOBAL_TIMEOUT)/3.0
+      settings.fetch(:timeout, ApiRecipes::Settings::GLOBAL_TIMEOUT)
     end
 
     def port

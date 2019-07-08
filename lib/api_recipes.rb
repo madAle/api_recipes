@@ -28,28 +28,26 @@ module ApiRecipes
       else
         ep = Endpoint.new(endpoint_name, configs)
         ApiRecipes.copy_global_authorizations_to_endpoint ep
-        ApiRecipes._aprcps_storage[endpoint_name] = {}
-        ApiRecipes._aprcps_storage[endpoint_name][self] = ep
+        ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
+        ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep
 
         define_method endpoint_name do
-          unless ApiRecipes._aprcps_thread_storage[self.class]
-            ApiRecipes._aprcps_thread_storage[self.class] = {}
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name]
+            ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
           end
-          if endp = ApiRecipes._aprcps_thread_storage[self.class][endpoint_name]
-            endp
-          else
-            ApiRecipes._aprcps_thread_storage[self.class][endpoint_name] = ep.clone
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
+            ApiRecipes._aprcps_thread_storage[endpoint_name][self.class] = ep.clone
           end
+          ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
         end
         define_singleton_method endpoint_name do
-          unless ApiRecipes._aprcps_thread_storage[self]
-            ApiRecipes._aprcps_thread_storage[self] = {}
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name]
+            ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
           end
-          if endp = ApiRecipes._aprcps_thread_storage[self][endpoint_name]
-            endp
-          else
-            ApiRecipes._aprcps_thread_storage[self][endpoint_name] = ep.clone
+          unless ApiRecipes._aprcps_thread_storage[endpoint_name][self]
+            ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep.clone
           end
+          ApiRecipes._aprcps_thread_storage[endpoint_name][self]
         end
       end
     end
@@ -71,11 +69,11 @@ module ApiRecipes
   end
 
   def self.copy_global_authorizations_to_endpoint(endpoint)
-    if _aprcps_storage[:global][endpoint.name]
-      if auth = _aprcps_storage[:global][endpoint.name].basic_auth
+    if _aprcps_global_storage[endpoint.name]
+      if auth = _aprcps_global_storage[endpoint.name].basic_auth
         endpoint.authorization = auth
       end
-      if auth = _aprcps_storage[:global][endpoint.name].authorization
+      if auth = _aprcps_global_storage[endpoint.name].authorization
         endpoint.authorization = auth
       end
     end
@@ -84,19 +82,21 @@ module ApiRecipes
   def self.set_authorization_for_endpoint(authorization, endpoint_name)
     endpoint_name = endpoint_name.to_sym
 
-    if _aprcps_storage[endpoint_name]
-      _aprcps_storage[endpoint_name].each do |_, endpoint|
+    # Set authorization on thread storage
+    if _aprcps_thread_storage[endpoint_name]
+      _aprcps_thread_storage[endpoint_name].each do |_, endpoint|
         endpoint.authorization = authorization
       end
     end
   end
 
-  def self.set_basic_auth_for_endpoint(authorization, endpoint_name)
+  def self.set_basic_auth_for_endpoint(basic_auth, endpoint_name)
     endpoint_name = endpoint_name.to_sym
 
-    if _aprcps_storage[endpoint_name]
-      _aprcps_storage[endpoint_name].each do |_, endpoint|
-        endpoint.basic_auth = authorization
+    # Set authorization on thread storage
+    if _aprcps_thread_storage[endpoint_name]
+      _aprcps_thread_storage[endpoint_name].each do |_, endpoint|
+        endpoint.authorization = basic_auth
       end
     end
   end
@@ -104,16 +104,16 @@ module ApiRecipes
   def self._aprcps_define_global_endpoints
     configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
       endpoint_name = endpoint_name.to_sym
-      _aprcps_storage[:global][endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
+      _aprcps_global_storage[endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
       define_singleton_method endpoint_name do
-        _aprcps_storage[:global][endpoint_name]
+        _aprcps_global_storage[endpoint_name]
       end
     end
   end
 
-  def self._aprcps_storage
+  def self._aprcps_global_storage
     unless @storage
-      @storage = { global: {} }
+      @storage = {}
     end
     @storage
   end
