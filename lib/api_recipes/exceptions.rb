@@ -28,6 +28,13 @@ module ApiRecipes
     end
   end
 
+  class ProvidedObjectNotAsResponseData < Exception
+    def initialize(object_class, data_class)
+      message = "provided object #{object_class} is not compatible with response data that is of type #{data_class}"
+      super(message)
+    end
+  end
+
   class ResponseCodeNotAsExpected < Exception
     attr_reader :resource, :route, :expected_code, :response_code, :response_body
 

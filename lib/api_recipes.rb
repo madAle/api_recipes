@@ -5,6 +5,7 @@ require 'api_recipes/exceptions'
 require 'api_recipes/configuration'
 require 'api_recipes/resource'
 require 'api_recipes/endpoint'
+require 'api_recipes/response'
 require 'api_recipes/settings'
 
 module ApiRecipes
