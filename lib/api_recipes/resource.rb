@@ -1,12 +1,26 @@
 module ApiRecipes
   class Resource
 
+    attr_reader :request, :response
+
     def initialize(name, endpoint, routes = {})
       @name = name
       @routes = routes
       @endpoint = endpoint
 
       generate_routes
+    end
+
+    def fill(object)
+      data = @response.parse
+      if block_given?
+        tap do
+          try_to_fill object, data
+          yield object, data, @response.status
+        end
+      else
+        try_to_fill object, data
+      end
     end
 
     private
@@ -24,9 +38,28 @@ module ApiRecipes
       return path, provided_params
     end
 
-    def build_request
+    def build_request(route, route_attributes, *pars)
+      unless route_attributes
+        route_attributes = {}
+      end
+      # Merge route attributes with defaults and deep clone route attributes
+      route_attributes = Marshal.load(Marshal.dump(Settings::DEFAULT_ROUTE_ATTRIBUTES.merge(route_attributes).deep_symbolize_keys))
 
+      params = pars.extract_options!
+      path, residual_params = build_path(route, route_attributes, params)
+      residual_params = nil unless residual_params.any?
+      uri = build_uri_from path
 
+      @request = request_with_auth
+      @response = @request.send(route_attributes[:method], uri, encode_residual_params(route_attributes, residual_params))
+      check_response_code route, route_attributes, @response
+
+      if block_given?
+        data = @response.parse
+        tap { yield data, @response.status }
+      else
+        self
+      end
     end
 
     def build_uri_from(path)
@@ -42,15 +75,15 @@ module ApiRecipes
     def check_response_code(route, route_attributes, response)
       # Check if :ok_code is present, check the response
       if ok_code = route_attributes[:ok_code]
-        code = response.code
+        code = response.status.code
         # If the code does not match, apply the requested strategy (see FAIL_OPTIONS)
         unless code == ok_code
           case settings[:on_nok_code]
-            when :do_nothing
-            when :raise
-              raise ResponseCodeNotAsExpected.new(nil, @name, route, ok_code, code, response.body)
-            when :return_false
-              return false
+          when :do_nothing
+          when :raise
+            raise ResponseCodeNotAsExpected.new(nil, @name, route, ok_code, code, response.body)
+          when :return_false
+            return false
           end
         end
       end
@@ -61,12 +94,12 @@ module ApiRecipes
       if Settings::AVAILABLE_PARAMS_ENCODINGS.include? route_attributes[:encode_params_as].to_s
         { route_attributes[:encode_params_as].to_sym => residual_params }
       else
-        # default to query string params (get) or json (other methods)
+        # Default to query string params (get) or json (other methods)
         case route_attributes[:method].to_sym
-          when :get
-            { params: residual_params }
-          when :post, :put, :patch, :delete
-            { json: residual_params }
+        when :get
+          { params: residual_params }
+        when :post, :put, :patch, :delete
+          { json: residual_params }
         end
       end
     end
@@ -85,7 +118,7 @@ module ApiRecipes
         end
         unless respond_to? route.to_sym
           define_singleton_method route.to_sym do |*params, &block|
-            start_request route, attrs, *params, &block
+            build_request route, attrs, *params, &block
           end
         else
           raise RouteNameClashWithExistentMethod.new(@name, route)
@@ -100,10 +133,10 @@ module ApiRecipes
 
     def port
       settings[:port] || case settings[:protocol]
-                           when 'http'
-                             80
-                           when 'https'
-                             443
+                         when 'http'
+                           80
+                         when 'https'
+                           443
                          end
     end
 
@@ -131,27 +164,29 @@ module ApiRecipes
       @endpoint.configs
     end
 
-    def start_request(route, route_attributes, *pars)
-      unless route_attributes
-        route_attributes = {}
+    def try_to_fill(object, data)
+      case data
+      when Hash
+        res = fill_object_with object, data
+      when Array
+        res = []
+        data.each do |element|
+          res << fill_object_with(object.new, element)
+        end
       end
-      # Merge route attributes with defaults and deep clone route attributes
-      route_attributes = Marshal.load(Marshal.dump(Settings::DEFAULT_ROUTE_ATTRIBUTES.merge(route_attributes).deep_symbolize_keys))
 
-      params = pars.extract_options!
-      path, residual_params = build_path(route, route_attributes, params)
-      residual_params = nil unless residual_params.any?
-      uri = build_uri_from path
+      res
+    end
 
-      response = request_with_auth.send(route_attributes[:method], uri, encode_residual_params(route_attributes, residual_params))
-      check_response_code route, route_attributes, response
-
-      if block_given?
-        body = Oj.load(response.body.to_s)
-        yield body, response.code, response.reason
-      else
-        response
+    def fill_object_with(object, data)
+      data.each do |key, value|
+        begin
+          object.send "#{key}=", value
+        rescue
+        end
       end
+
+      object
     end
   end
 end
