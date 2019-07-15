@@ -26,18 +26,16 @@ module ApiRecipes
       if self.respond_to? endpoint_name
         raise EndpointNameClashError.new(self, endpoint_name)
       else
-        ep = Endpoint.new(endpoint_name, configs)
-        ApiRecipes.copy_global_authorizations_to_endpoint ep
-        ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
-        ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep
-
         define_method endpoint_name do
           unless ApiRecipes._aprcps_thread_storage[endpoint_name]
             ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
           end
           unless ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
-            ApiRecipes._aprcps_thread_storage[endpoint_name][self.class] = ep.clone
+            ep = Endpoint.new(endpoint_name, configs)
+            ApiRecipes.copy_global_authorizations_to_endpoint ep
+            ApiRecipes._aprcps_thread_storage[endpoint_name][self.class] = ep
           end
+
           ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
         end
         define_singleton_method endpoint_name do
@@ -45,8 +43,11 @@ module ApiRecipes
             ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
           end
           unless ApiRecipes._aprcps_thread_storage[endpoint_name][self]
-            ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep.clone
+            ep = Endpoint.new(endpoint_name, configs)
+            ApiRecipes.copy_global_authorizations_to_endpoint ep
+            ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep
           end
+
           ApiRecipes._aprcps_thread_storage[endpoint_name][self]
         end
       end
