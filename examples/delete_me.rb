@@ -2,7 +2,7 @@ require 'api_recipes'
 require 'yaml'
 
 ApiRecipes.configure do |config|
-  config.endpoints_configs = YAML.load_file(File.expand_path('examples/config/apis.yml'))
+  config.apis_configs = YAML.load_file(File.expand_path('examples/config/apis.yml'))
 end
 
 class Foo

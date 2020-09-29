@@ -4,7 +4,7 @@ require 'yaml'
 # Configure RemoteApi through a yaml file.
 # Take a look at examples/config/apis.yml  for details
 ApiRecipes.configure do |config|
-  config.endpoints_configs = YAML.load_file(File.expand_path('examples/config/apis.yml'))
+  config.apis_configs = YAML.load_file(File.expand_path('examples/config/apis.yml'))
 end
 
 # Let's create a simple class that uses ApiRecipes

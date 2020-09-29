@@ -10,8 +10,8 @@ module ApiRecipes
         base_path: '',
         api_version: '',
         timeout: 3,
-        on_nok_code: :raise,
-        routes: {}
+        on_wrong_http_code: :raise,
+        endpoints: {}
     }
 
     DEFAULT_ROUTE_ATTRIBUTES = {

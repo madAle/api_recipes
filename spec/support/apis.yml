@@ -5,12 +5,12 @@ github:
   base_path:                # Optional, defaults to: ''
   api_version:              # Optional, defaults to: ''
   timeout: 3                # Optional, defaults to: 3 (time expressed in seconds)
-  on_nok_code: :raise       # Optional, defaults to :raise. Possible values: [:do_nothing, :raise, :return_false]
+  on_wrong_http_code: :raise       # Optional, defaults to :raise. Possible values: [:do_nothing, :raise, :return_false]
   default_headers:
     accept: 'application/vnd.github.v3+json'
     content_type: 'application/json'
 
-  routes:
+  endpoints:
     users:
       list:
         path:               # Optional, defaults to: ''
@@ -24,11 +24,11 @@ github:
         path: /:user_id/repos
 
 
-# Example of test endpoint with minimal configuration and multiple routes
+# Example of test endpoint with minimal configuration and multiple endpoints
 jsonplaceholder:
   host: jsonplaceholder.typicode.com
 
-  routes:
+  endpoints:
     users:
       list:
       show:

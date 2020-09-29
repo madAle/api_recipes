@@ -6,7 +6,7 @@ require 'api_recipes'
 FAKE_API_SETTINGS = {
     host: 'jsonplaceholder.typicode.com',
     timeout: 10,
-    routes: {
+    endpoints: {
         users: {
             list: nil,
             show: {

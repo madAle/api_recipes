@@ -1,8 +1,8 @@
 module ApiRecipes
 
-  class EndpointNameClashError < Exception
+  class ApiNameClashError < Exception
     def initialize(object, endpoint_name)
-      message = "#{object.class} already defines a method called '#{endpoint_name}'. Tip: change endpoint name"
+      message = "#{object.class} already defines a method called '#{endpoint_name}'. Tip: change api name"
       super(message)
     end
   end
@@ -49,7 +49,7 @@ module ApiRecipes
     end
   end
 
-  class EndpointConfigIsNotAnHash < Exception
+  class ApiConfigIsNotAnHash < Exception
     def initialize(endpoint)
       message = "provided config for endpoint '#{endpoint}' must be an Hash"
       super(message)

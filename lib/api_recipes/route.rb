@@ -1,14 +1,13 @@
 module ApiRecipes
-  class Resource
+  class Route
 
     attr_reader :request, :response
 
-    def initialize(name, endpoint, routes = {})
+    def initialize(name, endpoint)
       @name = name
-      @routes = routes
       @endpoint = endpoint
 
-      generate_routes
+      generate_endpoints
     end
 
     def fill(object)
@@ -34,7 +33,7 @@ module ApiRecipes
         end
         path.gsub! ":#{rp}", p.to_s
       end
-      path = "#{settings[:base_path]}#{settings[:api_version]}/#{@name}#{path}"
+      path = "#{settings[:base_path]}/#{@name}#{path}"
       return path, provided_params
     end
 
@@ -78,7 +77,7 @@ module ApiRecipes
         code = response.status.code
         # If the code does not match, apply the requested strategy (see FAIL_OPTIONS)
         unless code == ok_code
-          case settings[:on_nok_code]
+          case settings[:on_wrong_http_code]
           when :do_nothing
           when :raise
             raise ResponseCodeNotAsExpected.new(nil, @name, route, ok_code, code, response.body)
@@ -90,7 +89,7 @@ module ApiRecipes
     end
 
     def encode_residual_params(route_attributes, residual_params)
-      # If :encode_params_as is specified and avalable use it
+      # If :encode_params_as is specified and available, use it
       if Settings::AVAILABLE_PARAMS_ENCODINGS.include? route_attributes[:encode_params_as].to_s
         { route_attributes[:encode_params_as].to_sym => residual_params }
       else
@@ -108,10 +107,10 @@ module ApiRecipes
       settings[:default_headers] || {}
     end
 
-    # Generate routes  some_endpoint.some_resource.some_route  methods
+    # Generate endpoints  some_endpoint.some_resource.some_route  methods
     # e.g. webapp.alarms.index
-    def generate_routes
-      @routes.each do |route, attrs|
+    def generate_endpoints
+      @endpoints.each do |route, attrs|
         # Check if route name clashes with resource name
         if route.eql? @name
           raise RouteAndResourceNamesClashError.new(route, @name)
