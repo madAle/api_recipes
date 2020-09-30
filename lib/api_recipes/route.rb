@@ -61,6 +61,7 @@ module ApiRecipes
       else
         # Default: 200 <= OK < 300
         ok_code = true if (code >= 200 && code < 300)
+        expected_code = '200 <= CODE < 300'
       end
       unless ok_code
         case attributes[:on_bad_code].to_s
