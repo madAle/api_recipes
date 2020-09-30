@@ -1,7 +1,7 @@
 require 'api_recipes'
 require 'yaml'
 
-# Configure RemoteApi through a yaml file.
+# Configure ApiRecipes through a yaml file.
 # Take a look at examples/config/apis.yml  for details
 ApiRecipes.configure do |config|
   config.apis_configs = YAML.load_file(File.expand_path('examples/config/apis.yml'))
@@ -11,7 +11,7 @@ end
 class MyFancyClass
   include ApiRecipes
 
-  # Declare the endpoints that we're going to use
+  # Declare the apis that we're going to use
   api :github
 end
 

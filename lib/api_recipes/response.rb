@@ -14,12 +14,9 @@ module ApiRecipes
       @data = @original_response.parse
     end
 
-    def code
-      @original_response.status
-    end
-
-    def headers
-      @original_response.headers
+    # Forward method calls to 'original' Response class
+    def method_missing(symbol, *args, &block)
+      @original_response.send symbol,* args, &block
     end
   end
 end

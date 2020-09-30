@@ -24,6 +24,15 @@ github:
         repos:
           path: /:user_id/repos
 
+    # Complex example
+    repos:
+      route: false
+      path: /repos/:owner_id/:repo_id     # This creates endpoint /repos/:owner_id/repo_id
+      endpoints:
+        show:
+          path: ''                        # Path is empty (!not nil!) so it will be used instead of endpoint name (show), maintaining de facto the repos URL intact
+        contributors:                     # Final path will be /repos/:owner_id/repo_id/contributors
+
 
 # Example of test api with minimal configuration and multiple endpoints
 jsonplaceholder:

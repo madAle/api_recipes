@@ -3,11 +3,11 @@ module ApiRecipes
 
     attr_reader :api, :name, :params, :route, :children
 
-    def initialize(api: nil, name: nil, path: nil, params: {}, request_params: {}, &block)
+    def initialize(api: nil, name: nil, path: nil, params: {}, request_params: [], &block)
       @api = api
       @name = name
       @path = path.to_s
-      new_params = params.dup
+      new_params = params.dup || {}
       self.params = new_params
       @children = new_params.delete :endpoints
       @route = nil
@@ -37,42 +37,24 @@ module ApiRecipes
         # Generate route
         attrs = params.dup
         attrs.delete(:endpoints)
-        # puts "generating #{@name} with path #{absolute_path}"
-        @route = Route.new(api: @api, endpoint: self, path: absolute_path, attributes: attrs, req_pars: @request_params)
+        # puts "Generating route '#{@name}' with path '#{build_path}'"
+        @route = Route.new(api: @api, endpoint: self, path: build_path, attributes: attrs, req_pars: @request_params)
       end
     end
 
     def generate_children
       # Generate children endpoints if any
+      # puts "generating children of #{@name}: #{children.inspect}"
       if children
         children.each do |ep_name, pars|
-          # puts "creating Endpoint #{ep_name} passing path #{absolute_path}"
+          # puts "Creating Endpoint '#{@name}' child '#{ep_name}' passing path #{build_path}"
           define_singleton_method ep_name do |*request_params, &block|
-            Endpoint.new api: @api, name: ep_name, path: absolute_path, params: pars, request_params: request_params, &block
+            Endpoint.new api: @api, name: ep_name, path: build_path, params: pars, request_params: request_params, &block
           end
         end
       end
       # Route.new(api: @api, endpoint: self, name: route_name, attributes: route_attrs, req_pars: request_params).start_request &block
     end
-
-    # def generate_routes
-    #   @routes.each do |route_name, route_attrs|
-    #     # Check if route_name clashes with resource name
-    #     if route_name.eql? @name
-    #       raise RouteAndResourceNamesClashError.new(route_name, @name)
-    #     end
-    #     # Check if a method named route_name has already been defined on this object
-    #     unless respond_to? route_name
-    #       # Define #route_name method
-    #       define_singleton_method route_name do |*request_params, &block|
-    #         handle_route route_name, *request_params, block
-    #         Route.new(api: @api, endpoint: self, name: route_name, attributes: route_attrs, req_pars: request_params).start_request &block
-    #       end
-    #     else
-    #       raise RouteNameClashWithExistentMethod.new(@name, route_name)
-    #     end
-    #   end
-    # end
 
     def check_route_name_does_not_clash(route_name)
       # Check if a method named route_name has already been defined on this object
@@ -88,7 +70,12 @@ module ApiRecipes
 
     def absolute_path
       # Append path passed to initialize and (params[:path] || @name)
-      "#{@path}/#{params[:path] || @name}".gsub(/\/+/, '/')
+      append = params[:path] || @name
+      unless append.empty?
+        "#{@path}/#{append}"
+      else
+        "#{@path}"
+      end.gsub(/\/+/, '/')   # remove multiple consecutive '//'
     end
 
     def params=(attrs)
@@ -107,6 +94,24 @@ module ApiRecipes
         out[key_val.first] = new_val.nil? ? key_val.last : new_val
         out
       end
+    end
+
+    def build_path
+      final_path = absolute_path
+      # Check if provided path_params match with required path params
+      req_params = required_params_for_path
+      if @request_params.size != req_params.size
+        # puts "\nWARNING\n"
+        raise PathParamsMismatch.new(final_path, req_params, @path_params)
+      end
+      # Replace required_params present in path with params provided by user (@path_params)
+      @request_params.each { |par| final_path.sub! /(:[^\/]+)/, par.to_s }
+
+      final_path
+    end
+
+    def required_params_for_path
+      absolute_path.scan(/:(\w+)/).flatten.map { |p| p.to_sym }
     end
   end
 end

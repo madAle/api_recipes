@@ -42,26 +42,12 @@ module ApiRecipes
 
     private
 
-    def build_path
-      final_path = path
-      # Check if provided path_params match with required path params
-      req_params = required_params_for_path
-      if @path_params.size != req_params.size
-        raise PathParamsMismatch.new(final_path, req_params, @path_params)
-      end
-      # Replace required_params present in path with params provided by user (@path_params)
-      @path_params.each { |par| final_path.sub! /(:[^\/]+)/, par }
-
-      final_path
-    end
-
-
-    def build_uri_from(the_path)
+    def build_uri_from_path
       attrs = {
           scheme: settings[:protocol],
           host: settings[:host],
           port: port,
-          path: the_path
+          path: path
       }
       URI::Generic.build attrs
     end
@@ -101,8 +87,7 @@ module ApiRecipes
     end
 
     def prepare_request
-      final_path = build_path
-      @uri = build_uri_from final_path
+      @uri = build_uri_from_path
       # puts @uri
 
       @request = request_with_auth
@@ -130,10 +115,6 @@ module ApiRecipes
         req = req.auth authorization
       end
       req
-    end
-
-    def required_params_for_path
-      path.scan(/:(\w+)/).flatten.map { |p| p.to_sym }
     end
 
     def settings
