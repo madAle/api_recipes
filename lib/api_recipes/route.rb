@@ -28,7 +28,6 @@ module ApiRecipes
     end
 
     def start_request(&block)
-      puts request_params
       original_response = @request.send attributes[:method], @uri, request_params
       check_response_code
 
@@ -88,7 +87,7 @@ module ApiRecipes
 
     def prepare_request
       @uri = build_uri_from_path
-      puts @uri
+      puts @uri if ApiRecipes.print_urls
 
       @request = request_with_auth
     end

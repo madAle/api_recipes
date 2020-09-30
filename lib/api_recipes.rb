@@ -46,6 +46,14 @@ module ApiRecipes
     end
   end
 
+  def self.print_urls=(value)
+    @print_urls = value
+  end
+
+  def self.print_urls
+    @print_urls || false
+  end
+
   def self.configuration
     unless @configuration
       @configuration = Configuration.new
