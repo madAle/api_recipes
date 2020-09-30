@@ -3,51 +3,44 @@ require 'http'
 require 'api_recipes/utils'
 require 'api_recipes/exceptions'
 require 'api_recipes/configuration'
-require 'api_recipes/resource'
+require 'api_recipes/route'
 require 'api_recipes/endpoint'
+require 'api_recipes/api'
 require 'api_recipes/response'
 require 'api_recipes/settings'
+
+# TODO: Sistema i default nelle config
 
 module ApiRecipes
 
   def self.included(receiver)
 
-    def receiver.endpoint(endpoint_name, configs = {})
-      unless endpoint_name.is_a?(String) || endpoint_name.is_a?(Symbol)
-        raise ArgumentError, "endpoint name must be a Symbol or String"
+    def receiver.api(api_name, configs = {})
+      unless api_name.is_a?(String) || api_name.is_a?(Symbol)
+        raise ArgumentError, "api name must be a Symbol or String"
       end
 
       if configs && !configs.is_a?(Hash)
-        raise ApiRecipes::EndpointConfigIsNotAnHash.new(endpoint_name)
+        raise ApiRecipes::ApiConfigIsNotAnHash.new(api_name)
       end
 
-      endpoint_name = endpoint_name.to_sym
-      configs = ApiRecipes._aprcps_merge_endpoints_configs(endpoint_name, configs.deep_symbolize_keys)
-      if self.respond_to? endpoint_name
-        raise EndpointNameClashError.new(self, endpoint_name)
+      api_name = api_name.to_sym
+      # configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
+      if self.respond_to? api_name
+        raise ApiNameClashError.new(self, api_name)
       else
-        ep = Endpoint.new(endpoint_name, configs)
-        ApiRecipes.copy_global_authorizations_to_endpoint ep
-        ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
-        ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep
 
-        define_method endpoint_name do
-          unless ApiRecipes._aprcps_thread_storage[endpoint_name]
-            ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
-          end
-          unless ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
-            ApiRecipes._aprcps_thread_storage[endpoint_name][self.class] = ep.clone
-          end
-          ApiRecipes._aprcps_thread_storage[endpoint_name][self.class]
+        define_method api_name do
+          configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
+          api = Api.new(api_name, configs)
+          ApiRecipes.copy_global_authorizations_to_api api
+          api
         end
-        define_singleton_method endpoint_name do
-          unless ApiRecipes._aprcps_thread_storage[endpoint_name]
-            ApiRecipes._aprcps_thread_storage[endpoint_name] = {}
-          end
-          unless ApiRecipes._aprcps_thread_storage[endpoint_name][self]
-            ApiRecipes._aprcps_thread_storage[endpoint_name][self] = ep.clone
-          end
-          ApiRecipes._aprcps_thread_storage[endpoint_name][self]
+        define_singleton_method api_name do
+          configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
+          api = Api.new(api_name, configs)
+          ApiRecipes.copy_global_authorizations_to_api api
+          api
         end
       end
     end
@@ -68,45 +61,45 @@ module ApiRecipes
     end
   end
 
-  def self.copy_global_authorizations_to_endpoint(endpoint)
-    if _aprcps_global_storage[endpoint.name]
-      if auth = _aprcps_global_storage[endpoint.name].basic_auth
-        endpoint.authorization = auth
+  def self.copy_global_authorizations_to_api(api)
+    if _aprcps_global_storage[api.name]
+      if auth = _aprcps_global_storage[api.name].basic_auth
+        api.basic_auth = auth
       end
-      if auth = _aprcps_global_storage[endpoint.name].authorization
-        endpoint.authorization = auth
+      if auth = _aprcps_global_storage[api.name].authorization
+        api.authorization = auth
       end
     end
   end
 
-  def self.set_authorization_for_endpoint(authorization, endpoint_name)
-    endpoint_name = endpoint_name.to_sym
+  def self.set_authorization_for_api(authorization, api_name)
+    api_name = api_name.to_sym
 
     # Set authorization on thread storage
-    if _aprcps_thread_storage[endpoint_name]
-      _aprcps_thread_storage[endpoint_name].each do |_, endpoint|
-        endpoint.authorization = authorization
+    if _aprcps_thread_storage[api_name]
+      _aprcps_thread_storage[api_name].each do |_, api|
+        api.authorization = authorization
       end
     end
   end
 
-  def self.set_basic_auth_for_endpoint(basic_auth, endpoint_name)
-    endpoint_name = endpoint_name.to_sym
+  def self.set_basic_auth_for_api(basic_auth, api_name)
+    api_name = api_name.to_sym
 
     # Set authorization on thread storage
-    if _aprcps_thread_storage[endpoint_name]
-      _aprcps_thread_storage[endpoint_name].each do |_, endpoint|
-        endpoint.authorization = basic_auth
+    if _aprcps_thread_storage[api_name]
+      _aprcps_thread_storage[api_name].each do |_, api|
+        api.authorization = basic_auth
       end
     end
   end
 
-  def self._aprcps_define_global_endpoints
-    configuration.endpoints_configs.each do |endpoint_name, endpoint_configs|
-      endpoint_name = endpoint_name.to_sym
-      _aprcps_global_storage[endpoint_name] = Endpoint.new endpoint_name, endpoint_configs
-      define_singleton_method endpoint_name do
-        _aprcps_global_storage[endpoint_name]
+  def self._aprcps_define_global_apis
+    configuration.apis_configs.each do |api_name, api_configs|
+      api_name = api_name.to_sym
+      _aprcps_global_storage[api_name] = Api.new api_name, api_configs
+      define_singleton_method api_name do
+        _aprcps_global_storage[api_name]
       end
     end
   end
@@ -125,15 +118,15 @@ module ApiRecipes
     Thread.current[:api_recipes]
   end
 
-  def self._aprcps_merge_endpoints_configs(endpoint_name, configs = nil)
-    unless endpoint_name.is_a?(String) || endpoint_name.is_a?(Symbol)
-      raise ArgumentError, "no enpoint_name provided. Given: #{endpoint_name.inspect}"
+  def self._aprcps_merge_apis_configs(api_name, configs = nil)
+    unless api_name.is_a?(String) || api_name.is_a?(Symbol)
+      raise ArgumentError, "no api_name provided. Given: #{api_name.inspect}"
     end
-    unless ApiRecipes.configuration.endpoints_configs[endpoint_name]
-      ApiRecipes.configuration.endpoints_configs[endpoint_name] = {}
+    unless ApiRecipes.configuration.apis_configs[api_name]
+      ApiRecipes.configuration.apis_configs[api_name] = {}
     end
     if configs
-      ApiRecipes.configuration.endpoints_configs[endpoint_name].merge(configs) do |_, old_val, new_val|
+      ApiRecipes.configuration.apis_configs[api_name].merge(configs) do |_, old_val, new_val|
         if new_val.nil?
           old_val
         else
@@ -141,7 +134,7 @@ module ApiRecipes
         end
       end
     else
-      ApiRecipes.configuration.endpoints_configs[endpoint_name]
+      ApiRecipes.configuration.apis_configs[api_name]
     end
   end
 end

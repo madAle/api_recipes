@@ -69,9 +69,9 @@ describe 'ApiRecipes authorization' do
       let(:klass_instance) { klass.new }
 
       before do
-        endpoints_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
+        apis_configs = YAML.load_file(File.expand_path('spec/support/apis.yml'))
         ApiRecipes.configure do |config|
-          config.endpoints_configs = endpoints_configs
+          config.apis_configs = apis_configs
         end
       end
 

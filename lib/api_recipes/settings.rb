@@ -1,21 +1,23 @@
 module ApiRecipes
   module Settings
     GLOBAL_TIMEOUT = 1
-    FAIL_OPTIONS = [:return, :raise, :return_false]
 
     DEFAULT = {
         protocol: 'https',
         host: 'localhost',
         port: nil,
-        base_path: '',
-        api_version: '',
         timeout: 3,
-        on_nok_code: :raise,
-        routes: {}
+        on_bad_code: 'raise',
+        endpoints: {}
     }
 
     DEFAULT_ROUTE_ATTRIBUTES = {
-        method: :get
+        method: :get,
+        route: 'yes',
+        path: nil,
+        ok_code: nil,
+        timeout: DEFAULT[:timeout],
+        on_bad_code: DEFAULT[:on_bad_code]
     }
 
     AVAILABLE_PARAMS_ENCODINGS = %w(form params json body)

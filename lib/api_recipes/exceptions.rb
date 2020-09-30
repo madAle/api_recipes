@@ -1,8 +1,8 @@
 module ApiRecipes
 
-  class EndpointNameClashError < Exception
+  class ApiNameClashError < Exception
     def initialize(object, endpoint_name)
-      message = "#{object.class} already defines a method called '#{endpoint_name}'. Tip: change endpoint name"
+      message = "#{object.class} already defines a method called '#{endpoint_name}'. Tip: change api name"
       super(message)
     end
   end
@@ -15,14 +15,18 @@ module ApiRecipes
   end
 
   class MissingRouteAttribute < Exception
-    attr_reader :resource, :route, :attribute
+    def initialize(endpoint = nil, route = nil,  attribute = nil)
+      message = "route '#{endpoint}.#{route}' requires '#{attribute}' attribute but this was not provided"
+      super(message)
+    end
+  end
 
-    def initialize(message = nil, resource = nil, route = nil,  attribute = nil)
-      @resource = resource; @route = route; @attribute = attribute
-      if message
-        # Nothing to do
-      elsif @route && @attribute
-        message = "route '#{@resource}.#{@route}' requires '#{@attribute}' attribute but this was not given"
+  class PathParamsMismatch < Exception
+    def initialize(path, expected_params, provided_params)
+      if expected_params.size == 0
+        message = "route '#{path}' requires NO PARAMS but #{provided_params} were provided"
+      else
+        message = "route '#{path}' requires params #{expected_params} but #{provided_params} were provided"
       end
       super(message)
     end
@@ -36,20 +40,14 @@ module ApiRecipes
   end
 
   class ResponseCodeNotAsExpected < Exception
-    attr_reader :resource, :route, :expected_code, :response_code, :response_body
 
-    def initialize(message = nil, resource = nil, route = nil, expected_code = nil, response_code = nil, response_body = nil)
-      @resource = resource; @route = route; @expected_code = expected_code; @response_code = response_code; @response_body = response_body
-      if message
-        # Nothing to do
-      else
-        message = "response code for request on route '#{@resource}.#{@route}' has returned #{@response_code}, but #{@expected_code} was expected. Reason: #{@response_body}"
-      end
+    def initialize(endpoint = nil, route = nil, expected_code = nil, response_code = nil, response_body = nil)
+      message = "response code for request on route '#{endpoint}.#{route}' has returned #{response_code}, but #{expected_code} was expected. Reason: #{response_body}"
       super(message)
     end
   end
 
-  class EndpointConfigIsNotAnHash < Exception
+  class ApiConfigIsNotAnHash < Exception
     def initialize(endpoint)
       message = "provided config for endpoint '#{endpoint}' must be an Hash"
       super(message)
@@ -71,11 +69,15 @@ module ApiRecipes
   end
 
   class RouteNameClashWithExistentMethod < Exception
-    attr_reader :resource, :route
+    def initialize(endpoint_name, route_name)
+      message = "can't define route '#{route_name}' method in endpoint '#{endpoint_name}' because method '#{route_name}' has already been defined"
+      super(message)
+    end
+  end
 
-    def initialize(resource, route)
-      @resource = resource; @route = route
-      message = "can't define route '#{@route}' method in resource '#{@resource}' because method '#{@route}' already exists"
+  class NoRouteExists < Exception
+    def initialize(endpoint_name)
+      message = "no route defined on #{endpoint_name}"
       super(message)
     end
   end

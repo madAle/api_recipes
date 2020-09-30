@@ -3,17 +3,17 @@ module ApiRecipes
 
     attr_accessor :log_to, :log_level
 
-    def endpoints_configs=(configs = {})
-      raise ArgumentError, 'endpoints_configs must be an Hash' unless configs.is_a? Hash
-      @endpoints_configs = configs.deep_symbolize_keys
-      ApiRecipes._aprcps_define_global_endpoints
+    def apis_configs=(configs = {})
+      raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
+      @apis_configs = configs.deep_symbolize_keys
+      ApiRecipes._aprcps_define_global_apis
     end
 
-    def endpoints_configs
-      unless @endpoints_configs
-        @endpoints_configs = {}
+    def apis_configs
+      unless @apis_configs
+        @apis_configs = {}
       end
-      @endpoints_configs
+      @apis_configs
     end
 
     def logger=(logger)
