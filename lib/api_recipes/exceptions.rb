@@ -40,9 +40,8 @@ module ApiRecipes
   end
 
   class ResponseCodeNotAsExpected < Exception
-
-    def initialize(endpoint = nil, route = nil, expected_code = nil, response_code = nil, response_body = nil)
-      message = "response code for request on route '#{endpoint}.#{route}' has returned #{response_code}, but #{expected_code} was expected. Reason: #{response_body}"
+    def initialize(path, expected_code = nil, response_code = nil, response_body = nil)
+      message = "response code for request on route '#{path}' has returned #{response_code}, but #{expected_code} was expected\n\nResponse body:\n #{response_body}"
       super(message)
     end
   end

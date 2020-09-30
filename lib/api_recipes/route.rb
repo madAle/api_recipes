@@ -28,10 +28,10 @@ module ApiRecipes
     end
 
     def start_request(&block)
-      original_response = @request.send attributes[:method], @uri, request_params
+      original_response = @request.send http_verb, @uri, request_params
+      @response = Response.new original_response, attributes
       check_response_code
 
-      @response = Response.new original_response, attributes
       if block_given?
         tap { block.call @response }
       else
@@ -53,17 +53,23 @@ module ApiRecipes
 
     def check_response_code
       # If :ok_code property is present, check the response code
-      if ok_code = attributes[:ok_code]
-        code = @response.status.code
+      ok_code = false
+      code = @response.code
+      if expected_code = attributes[:ok_code]
         # If the code does not match, apply the requested strategy
-        unless code == ok_code
-          case settings[:on_bad_code].to_s
-          when 'ignore'
-          when 'raise'
-            raise ResponseCodeNotAsExpected.new(@endpoint.name, @name, ok_code, code, @response.body)
-          when 'return_false'
-            return false
-          end
+        ok_code = true if code == expected_code
+      else
+        # Default: 200 <= OK < 300
+        ok_code = true if (code >= 200 && code < 300)
+      end
+      unless ok_code
+        puts attributes[:on_bad_code]
+        case attributes[:on_bad_code].to_s
+        when 'ignore'
+        when 'raise'
+          raise ResponseCodeNotAsExpected.new(path, expected_code, code, @response.body)
+        when 'return_false'
+          return false
         end
       end
     end
@@ -73,7 +79,7 @@ module ApiRecipes
     end
 
     def timeout
-      settings.fetch(:timeout, ApiRecipes::Settings::GLOBAL_TIMEOUT)
+      attributes.fetch(:timeout, ApiRecipes::Settings::GLOBAL_TIMEOUT)
     end
 
     def port
@@ -143,6 +149,10 @@ module ApiRecipes
       end
 
       object
+    end
+
+    def http_verb
+      @attributes[:method] || attributes[:verb]
     end
   end
 end

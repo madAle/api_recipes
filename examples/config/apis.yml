@@ -14,7 +14,7 @@ github:
       route: yes                # Optional Default: yes. Set 'no' if you don't want to create the route for this endpoint
       # path: 'users'           # Optional. Default: nil. If specified, replaces default path strategy that uses endpoint name (e.g. /users)
                                 # Example: path: TheUsersList  => path will be built in the form of /TheUsersList
-      # method: get             # Optional. Default: get
+      # verb: get               # Optional. Default: get. Alias: method
       # ok_code: 200            # Optional. Default: from 200 to 299 HTTP status code are considered OK
       # timeout: 2              # Optional. Overrides global property
       # on_bad_code:            # Optional. Overrides global property
