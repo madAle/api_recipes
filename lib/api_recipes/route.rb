@@ -4,13 +4,12 @@ module ApiRecipes
     attr_reader :request, :response
     attr_accessor :request_params, :attributes, :path
 
-    def initialize(api: nil, endpoint: nil, path: nil, attributes: {}, req_pars: [])
+    def initialize(api: nil, endpoint: nil, path: nil, attributes: {}, req_pars: {})
       @api = api
       @endpoint = endpoint
       @path = path.to_s
       @attributes = attributes
-      self.request_params = req_pars.extract_options!
-      @path_params = req_pars
+      self.request_params = req_pars
       @uri = nil
 
       prepare_request
@@ -29,6 +28,7 @@ module ApiRecipes
     end
 
     def start_request(&block)
+      puts request_params
       original_response = @request.send attributes[:method], @uri, request_params
       check_response_code
 
@@ -88,7 +88,7 @@ module ApiRecipes
 
     def prepare_request
       @uri = build_uri_from_path
-      # puts @uri
+      puts @uri
 
       @request = request_with_auth
     end

@@ -12,11 +12,14 @@ module ApiRecipes
 
       # Generate   some_api.some_endpoint  methods
       # e.g.  github.users
-      @configs[:endpoints].each do |ep_name, params|
-        unless respond_to? ep_name
-          define_singleton_method ep_name do |*request_params, &block|
-            # puts "API params: #{params}"
-            Endpoint.new api: self, name: ep_name, path: path, params: params, request_params: request_params, &block
+      endpoints = @configs[:endpoints]
+      if endpoints && endpoints.is_a?(Hash)
+        endpoints.each do |ep_name, params|
+          unless respond_to? ep_name
+            define_singleton_method ep_name do |*request_params, &block|
+              # puts "API params: #{params}"
+              Endpoint.new api: self, name: ep_name, path: path, params: params, request_params: request_params, &block
+            end
           end
         end
       end

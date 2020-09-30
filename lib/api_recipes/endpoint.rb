@@ -11,7 +11,8 @@ module ApiRecipes
       self.params = new_params
       @children = new_params.delete :endpoints
       @route = nil
-      @request_params = request_params
+      @request_params = request_params.extract_options!
+      self.path_params = request_params
 
       generate_route
       generate_children
@@ -33,7 +34,7 @@ module ApiRecipes
     def generate_route
       # Check if we have to generate route for this endpoint
       if create_route?
-        check_route_name_does_not_clash @name
+        ensure_route_does_not_clash @name
         # Generate route
         attrs = params.dup
         attrs.delete(:endpoints)
@@ -56,7 +57,7 @@ module ApiRecipes
       # Route.new(api: @api, endpoint: self, name: route_name, attributes: route_attrs, req_pars: request_params).start_request &block
     end
 
-    def check_route_name_does_not_clash(route_name)
+    def ensure_route_does_not_clash(route_name)
       # Check if a method named route_name has already been defined on this object
       if respond_to? route_name
         raise RouteNameClashWithExistentMethod.new(@name, route_name)
@@ -100,14 +101,22 @@ module ApiRecipes
       final_path = absolute_path
       # Check if provided path_params match with required path params
       req_params = required_params_for_path
-      if @request_params.size != req_params.size
+      if @path_params.size != req_params.size
         # puts "\nWARNING\n"
         raise PathParamsMismatch.new(final_path, req_params, @path_params)
       end
       # Replace required_params present in path with params provided by user (@path_params)
-      @request_params.each { |par| final_path.sub! /(:[^\/]+)/, par.to_s }
+      @path_params.each { |par| final_path.sub! /(:[^\/]+)/, par.to_s }
 
       final_path
+    end
+
+    def path_params=(params)
+      unless params.is_a? Array
+        raise ArgumentError, 'path params must be an Array'
+      end
+      # Merge route attributes with defaults and deep clone route attributes
+      @path_params = params
     end
 
     def required_params_for_path
