@@ -28,7 +28,7 @@ Or install it yourself as:
     
 ## Compatibility
 
-Ruby 1.9.3 or higher.
+Ruby 2.5.0 or higher.
 
 ## Usage
 
@@ -38,7 +38,7 @@ In the meantime take a look at the ``` examples ``` folder. Thank you.
 
 ## TODO
 
-* Write specs (I know... this code has been wrote down on a hurry so please do not beat me)
+* Re-write specs
 * Write a good Usage
 * Add more examples
 * Add documentation
