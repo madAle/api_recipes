@@ -2,12 +2,18 @@ module ApiRecipes
   class Route
 
     attr_reader :request, :response
+    attr_accessor :request_params, :attributes, :path
 
-    def initialize(name, endpoint)
-      @name = name
+    def initialize(api: nil, endpoint: nil, path: nil, attributes: {}, req_pars: [])
+      @api = api
       @endpoint = endpoint
+      @path = path.to_s
+      @attributes = attributes
+      self.request_params = req_pars.extract_options!
+      @path_params = req_pars
+      @uri = nil
 
-      generate_endpoints
+      prepare_request
     end
 
     def fill(object)
@@ -22,108 +28,63 @@ module ApiRecipes
       end
     end
 
+    def start_request(&block)
+      original_response = @request.send attributes[:method], @uri, request_params
+      check_response_code
+
+      @response = Response.new original_response, attributes
+      if block_given?
+        tap { block.call @response }
+      else
+        response
+      end
+    end
+
     private
 
-    def build_path(route_name, route_attributes, provided_params)
-      path = route_attributes[:path] || ''
-
-      required_params_for_path(path).each do |rp|
-        unless p = provided_params.delete(rp)
-          raise MissingRouteAttribute.new(@name, route_name, rp)
-        end
-        path.gsub! ":#{rp}", p.to_s
+    def build_path
+      final_path = path
+      # Check if provided path_params match with required path params
+      req_params = required_params_for_path
+      if @path_params.size != req_params.size
+        raise PathParamsMismatch.new(final_path, req_params, @path_params)
       end
-      path = "#{settings[:base_path]}/#{@name}#{path}"
-      return path, provided_params
+      # Replace required_params present in path with params provided by user (@path_params)
+      @path_params.each { |par| final_path.sub! /(:[^\/]+)/, par }
+
+      final_path
     end
 
-    def build_request(route, route_attributes, *pars)
-      unless route_attributes
-        route_attributes = {}
-      end
-      # Merge route attributes with defaults and deep clone route attributes
-      route_attributes = Marshal.load(Marshal.dump(Settings::DEFAULT_ROUTE_ATTRIBUTES.merge(route_attributes).deep_symbolize_keys))
 
-      params = pars.extract_options!
-      path, residual_params = build_path(route, route_attributes, params)
-      residual_params = nil unless residual_params.any?
-      uri = build_uri_from path
-
-      @request = request_with_auth
-      @response = @request.send(route_attributes[:method], uri, encode_residual_params(route_attributes, residual_params))
-      check_response_code route, route_attributes, @response
-
-      if block_given?
-        data = @response.parse
-        tap { yield data, @response.status }
-      else
-        self
-      end
-    end
-
-    def build_uri_from(path)
+    def build_uri_from(the_path)
       attrs = {
           scheme: settings[:protocol],
           host: settings[:host],
           port: port,
-          path: path
+          path: the_path
       }
       URI::Generic.build attrs
     end
 
-    def check_response_code(route, route_attributes, response)
-      # Check if :ok_code is present, check the response
-      if ok_code = route_attributes[:ok_code]
-        code = response.status.code
-        # If the code does not match, apply the requested strategy (see FAIL_OPTIONS)
+    def check_response_code
+      # If :ok_code property is present, check the response code
+      if ok_code = attributes[:ok_code]
+        code = @response.status.code
+        # If the code does not match, apply the requested strategy
         unless code == ok_code
-          case settings[:on_wrong_http_code]
-          when :do_nothing
-          when :raise
-            raise ResponseCodeNotAsExpected.new(nil, @name, route, ok_code, code, response.body)
-          when :return_false
+          case settings[:on_bad_code].to_s
+          when 'ignore'
+          when 'raise'
+            raise ResponseCodeNotAsExpected.new(@endpoint.name, @name, ok_code, code, @response.body)
+          when 'return_false'
             return false
           end
         end
       end
     end
 
-    def encode_residual_params(route_attributes, residual_params)
-      # If :encode_params_as is specified and available, use it
-      if Settings::AVAILABLE_PARAMS_ENCODINGS.include? route_attributes[:encode_params_as].to_s
-        { route_attributes[:encode_params_as].to_sym => residual_params }
-      else
-        # Default to query string params (get) or json (other methods)
-        case route_attributes[:method].to_sym
-        when :get
-          { params: residual_params }
-        when :post, :put, :patch, :delete
-          { json: residual_params }
-        end
-      end
-    end
-
     def extract_headers
       settings[:default_headers] || {}
-    end
-
-    # Generate endpoints  some_endpoint.some_resource.some_route  methods
-    # e.g. webapp.alarms.index
-    def generate_endpoints
-      @endpoints.each do |route, attrs|
-        # Check if route name clashes with resource name
-        if route.eql? @name
-          raise RouteAndResourceNamesClashError.new(route, @name)
-        end
-        unless respond_to? route.to_sym
-          define_singleton_method route.to_sym do |*params, &block|
-            build_request route, attrs, *params, &block
-          end
-        else
-          raise RouteNameClashWithExistentMethod.new(@name, route)
-        end
-      end
-      self
     end
 
     def timeout
@@ -139,28 +100,44 @@ module ApiRecipes
                          end
     end
 
+    def prepare_request
+      final_path = build_path
+      @uri = build_uri_from final_path
+      # puts @uri
+
+      @request = request_with_auth
+    end
+
+    def request_params=(params)
+      unless params.is_a? Hash
+        raise ArgumentError, 'provided params must be an Hash'
+      end
+      # Merge route attributes with defaults and deep clone route attributes
+      @request_params = params
+    end
+
     def request_with_auth
       req = HTTP
       req = req.headers(extract_headers)
                 .timeout(timeout)
 
-      basic_auth = @endpoint.basic_auth
+      basic_auth = @api.basic_auth
       if basic_auth
         req = req.basic_auth basic_auth
       end
-      authorization = @endpoint.authorization
+      authorization = @api.authorization
       if authorization
         req = req.auth authorization
       end
       req
     end
 
-    def required_params_for_path(path)
+    def required_params_for_path
       path.scan(/:(\w+)/).flatten.map { |p| p.to_sym }
     end
 
     def settings
-      @endpoint.configs
+      @api.configs
     end
 
     def try_to_fill(object, data)

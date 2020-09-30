@@ -8,14 +8,12 @@ end
 class Foo
   include ApiRecipes
 
-  endpoint :jsonplaceholder
+  api :jsonplaceholder
 end
 
 puts 'Use from class:'
-puts Foo.jsonplaceholder.users.list
-
+puts Foo.jsonplaceholder.users
 f1 = Foo.new
 
 puts "\n\nUse from instance:"
-sleep 1
-puts f1.jsonplaceholder.users.list
+puts f1.jsonplaceholder.users

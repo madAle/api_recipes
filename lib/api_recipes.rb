@@ -4,9 +4,12 @@ require 'api_recipes/utils'
 require 'api_recipes/exceptions'
 require 'api_recipes/configuration'
 require 'api_recipes/route'
+require 'api_recipes/endpoint'
 require 'api_recipes/api'
 require 'api_recipes/response'
 require 'api_recipes/settings'
+
+# TODO: Sistema i default nelle config
 
 module ApiRecipes
 
@@ -35,7 +38,7 @@ module ApiRecipes
         end
         define_singleton_method api_name do
           configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
-          api = Endpoint.new(api_name, configs)
+          api = Api.new(api_name, configs)
           ApiRecipes.copy_global_authorizations_to_api api
           api
         end

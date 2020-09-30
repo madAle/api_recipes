@@ -2,26 +2,27 @@ github:
   protocol: https               # Optional. Default: 'https'
   host: api.github.com          # Optional. Default: 'localhost'
   port: 443                     # Optional. Default: 80 for http and 443 for https
-  base_path:                    # Optional. Default: ''
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
-  on_wrong_http_code: :raise    # Optional. Default :raise. Possible values: [:do_nothing, :raise, :return_false]
+  on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise, return_false]
   default_headers:
     accept: 'application/vnd.github.v3+json'
     content_type: 'application/json'
 
   endpoints:
-    users:
-      list:                 # Route building method consists of appending endpoint/action (e.g users/list)
-        path:               # Optional. Default: ''. Overrides default route building.
-                            # Example: path: TheUsersList  => route will be build like protocol://host:port/base_path/TheUsersList
-        method: get         # Optional. Default: get
-        ok_code: 200        # Optional. Default: from 200 to 299 HTTP status code are considered OK
+    users:                      # Route building method consists of appending endpoint/action (e.g users/list)
+      route: yes                # Optional Default: yes. Set 'no' if you don't want to create the route for this endpoint
+      # path: 'users'           # Optional. Default: nil. If specified, replaces default path strategy that uses endpoint name (e.g. /users)
+                                # Example: path: TheUsersList  => path will be built in the form of /TheUsersList
+      # method: get             # Optional. Default: get
+      # ok_code: 200            # Optional. Default: from 200 to 299 HTTP status code are considered OK
+      # timeout: 2              # Optional. Overrides global property
+      # on_bad_code:            # Optional. Overrides global property
+      endpoints:
+        show:
+          path: /:user_id       # You can use :some_param notation and provide the param when calling the route (see examples/simple.rb)
 
-      show:
-        path: /:user_id     # You can use :some_param notation and provide the param when calling the route (see examples/simple.rb)
-
-      repos:
-        path: /:user_id/repos
+        repos:
+          path: /:user_id/repos
 
 
 # Example of test api with minimal configuration and multiple endpoints
@@ -29,15 +30,18 @@ jsonplaceholder:
   host: jsonplaceholder.typicode.com
 
   endpoints:
-    users:
-      list:
-      show:
-        path: /:user_id
+    users:                      # This creates the endpoints: '/user' and '/users/:user_id'
+      endpoints:
+        show:
+          path: /:user_id
 
-    posts:
-      list:
-      show:
-        path: /:post_id
+    posts:                      # This creates the endpoints: '/posts', '/posts/:post_id', '/posts/:post_id/comments', '/posts/:post_id/comments/:comment_id'
+      endpoints:
+        show:
+          path: /:post_id
 
-      comments:
-        path: /:post_id/comments
+        comments:
+          path: /:post_id/comments
+          endpoints:
+            show:
+              path: /:comment_id
