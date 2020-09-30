@@ -60,7 +60,7 @@ module ApiRecipes
     end
 
     def path
-      '/'
+      "/#{configs[:base_url]}/"
     end
   end
 end

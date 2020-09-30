@@ -2,6 +2,7 @@ github:
   protocol: https               # Optional. Default: 'https'
   host: api.github.com          # Optional. Default: 'localhost'
   port: 443                     # Optional. Default: 80 for http and 443 for https
+  base_url:                     # Optional. Default: ''. Useful for example when specifying API version
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
   on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise, return_false]
   default_headers:
@@ -37,6 +38,7 @@ github:
 # Example of test api with minimal configuration and multiple endpoints
 jsonplaceholder:
   host: jsonplaceholder.typicode.com
+  base_url: 'pippo'
 
   endpoints:
     users:                      # This creates the endpoints: '/user' and '/users/:user_id'

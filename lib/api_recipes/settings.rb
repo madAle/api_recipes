@@ -6,6 +6,7 @@ module ApiRecipes
         protocol: 'https',
         host: 'localhost',
         port: nil,
+        base_url: nil,
         timeout: 3,
         on_bad_code: 'raise',
         endpoints: {}
