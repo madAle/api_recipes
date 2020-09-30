@@ -63,7 +63,6 @@ module ApiRecipes
         ok_code = true if (code >= 200 && code < 300)
       end
       unless ok_code
-        puts attributes[:on_bad_code]
         case attributes[:on_bad_code].to_s
         when 'ignore'
         when 'raise'
