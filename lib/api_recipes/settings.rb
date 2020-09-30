@@ -13,7 +13,7 @@ module ApiRecipes
     }
 
     DEFAULT_ROUTE_ATTRIBUTES = {
-        method: :get,
+        verb: :get,
         route: 'yes',
         path: nil,
         ok_code: nil,
