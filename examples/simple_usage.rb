@@ -5,6 +5,7 @@ require 'yaml'
 # Take a look at examples/config/apis.yml  for details
 ApiRecipes.configure do |config|
   config.apis_configs = YAML.load_file(File.expand_path('examples/config/apis.yml'))
+  config.print_urls = true
 end
 
 # Let's create a simple class that uses ApiRecipes
