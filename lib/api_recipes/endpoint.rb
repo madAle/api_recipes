@@ -29,6 +29,10 @@ module ApiRecipes
       end
     end
 
+    def url
+      @route.url
+    end
+
     private
 
     def generate_route

@@ -4,7 +4,7 @@ github:
   port: 443                 # Optional, defaults to: 80 for http and 443 for https
   api_version:              # Optional, defaults to: ''
   timeout: 3                # Optional, defaults to: 3 (time expressed in seconds)
-  on_bad_code: :raise       # Optional, defaults to :raise. Possible values: [:ignore, :raise, :return_false]
+  on_bad_code: :raise       # Optional, defaults to :raise. Possible values: [:ignore, :raise]
   default_headers:
     accept: 'application/vnd.github.v3+json'
     content_type: 'application/json'

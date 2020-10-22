@@ -1,7 +1,7 @@
 module ApiRecipes
   class Configuration
 
-    attr_accessor :log_to, :log_level
+    attr_accessor :log_to, :log_level, :print_urls
 
     def apis_configs=(configs = {})
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash

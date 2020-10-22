@@ -1,7 +1,7 @@
 module ApiRecipes
   class Route
 
-    attr_reader :request, :response
+    attr_reader :request, :response, :url
     attr_accessor :request_params, :attributes, :path
 
     def initialize(api: nil, endpoint: nil, path: nil, attributes: {}, req_pars: {})
@@ -10,7 +10,7 @@ module ApiRecipes
       @path = path.to_s
       @attributes = attributes
       self.request_params = req_pars
-      @uri = nil
+      @url = nil
 
       prepare_request
     end
@@ -28,7 +28,7 @@ module ApiRecipes
     end
 
     def start_request(&block)
-      original_response = @request.send http_verb, @uri, request_params
+      original_response = @request.send http_verb, @url, request_params
       @response = Response.new original_response, attributes
       check_response_code
 
@@ -41,7 +41,7 @@ module ApiRecipes
 
     private
 
-    def build_uri_from_path
+    def build_url_from_path
       attrs = {
           scheme: settings[:protocol],
           host: settings[:host],
@@ -68,8 +68,6 @@ module ApiRecipes
         when 'ignore'
         when 'raise'
           raise ResponseCodeNotAsExpected.new(path, expected_code, code, @response.body)
-        when 'return_false'
-          return false
         end
       end
     end
@@ -92,8 +90,8 @@ module ApiRecipes
     end
 
     def prepare_request
-      @uri = build_uri_from_path
-      puts @uri if ApiRecipes.print_urls
+      @url = build_url_from_path
+      puts @url if ApiRecipes.configuration.print_urls
 
       @request = request_with_auth
     end
