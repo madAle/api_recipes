@@ -68,8 +68,6 @@ module ApiRecipes
         when 'ignore'
         when 'raise'
           raise ResponseCodeNotAsExpected.new(path, expected_code, code, @response.body)
-        when 'return_false'
-          return false
         end
       end
     end
