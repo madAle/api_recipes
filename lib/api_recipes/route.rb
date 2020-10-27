@@ -46,7 +46,7 @@ module ApiRecipes
           scheme: settings[:protocol],
           host: settings[:host],
           port: port,
-          path: path
+          path: URI.escape(path)
       }
       URI::Generic.build attrs
     end
