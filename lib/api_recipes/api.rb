@@ -16,6 +16,7 @@ module ApiRecipes
       if endpoints && endpoints.is_a?(Hash)
         endpoints.each do |ep_name, params|
           unless respond_to? ep_name
+            # TODO: store endpoints, routes and routes_urls
             define_singleton_method ep_name do |*request_params, &block|
               # puts "API params: #{params}"
               Endpoint.new api: self, name: ep_name, path: path, params: params, request_params: request_params, &block
