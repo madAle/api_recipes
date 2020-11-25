@@ -46,9 +46,9 @@ module ApiRecipes
           scheme: settings[:protocol],
           host: settings[:host],
           port: port,
-          path: URI.escape(path)
+          path: path
       }
-      URI::Generic.build attrs
+      URI::Generic.build2 attrs
     end
 
     def check_response_code
