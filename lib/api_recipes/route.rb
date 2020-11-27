@@ -53,6 +53,7 @@ module ApiRecipes
 
     def check_response_code
       # If :ok_code property is present, check the response code
+      # TODO: implement attributes[:verify_with]
       ok_code = false
       code = @response.code
       if expected_code = attributes[:ok_code]

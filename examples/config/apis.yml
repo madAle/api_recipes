@@ -5,6 +5,7 @@ github:
   base_url:                     # Optional. Default: ''. Useful for example when specifying API version
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
   on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise]
+  verify_with: api_level        # TODO: explain usage
   default_headers:
     accept: 'application/vnd.github.v3+json'
     content_type: 'application/json'
@@ -29,9 +30,11 @@ github:
     repos:
       route: false
       path: /repos/:owner_id/:repo_id     # This creates endpoint /repos/:owner_id/repo_id
+      verify_with: route_level            # TODO: explain usage
       endpoints:
         show:
-          path: ''                        # Path is empty (!not nil!) so it will be used instead of endpoint name (show), maintaining de facto the repos URL intact
+          verify_with: route_level        # TODO: explain usage
+          path: ''                        # Path is empty (not nil!) so it will be used instead of endpoint name (show), maintaining de facto the repos URL intact
         contributors:                     # Final path will be /repos/:owner_id/repo_id/contributors
 
 

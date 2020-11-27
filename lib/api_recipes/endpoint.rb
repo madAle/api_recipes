@@ -3,6 +3,8 @@ module ApiRecipes
 
     attr_reader :api, :name, :params, :route, :children
 
+    FORWARDABLE_PARAMS = %i[verify_with].freeze
+
     def initialize(api: nil, name: nil, path: nil, params: {}, request_params: [], &block)
       @api = api
       @name = name
@@ -52,6 +54,8 @@ module ApiRecipes
       # puts "generating children of #{@name}: #{children.inspect}"
       if children
         children.each do |ep_name, pars|
+          pars = forwardable_params.merge(pars) if pars
+          # TODO: Merge pars with params
           # puts "Creating Endpoint '#{@name}' child '#{ep_name}' passing path #{build_path}"
           define_singleton_method ep_name do |*request_params, &block|
             Endpoint.new api: @api, name: ep_name, path: build_path, params: pars, request_params: request_params, &block
@@ -89,7 +93,6 @@ module ApiRecipes
       end
       # Merge DEFAULT_ROUTE_ATTRIBUTES with Api base_configs
       # Then merge the result with provided attributes
-
       @params = Settings::DEFAULT_ROUTE_ATTRIBUTES.inject({}) do |out, key_val|
         new_val = @api.base_configs[key_val.first]
         out[key_val.first] = new_val.nil? ? key_val.last : new_val
@@ -125,6 +128,10 @@ module ApiRecipes
 
     def required_params_for_path
       absolute_path.scan(/:(\w+)/).flatten.map { |p| p.to_sym }
+    end
+
+    def forwardable_params
+      params.select { |k, v| FORWARDABLE_PARAMS.include? k }
     end
   end
 end

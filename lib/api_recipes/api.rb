@@ -4,7 +4,7 @@ module ApiRecipes
     attr_accessor :name, :configs, :authorization, :basic_auth
     attr_reader :base_configs
 
-    BASE_CONFIGS_KEYS = [:protocol, :host, :port, :api_version, :timeout, :on_bad_code]
+    BASE_CONFIGS_KEYS = [:protocol, :host, :port, :api_version, :timeout, :on_bad_code, :verify_with]
 
     def initialize(name, configs)
       @name = name
