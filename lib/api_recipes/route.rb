@@ -52,23 +52,31 @@ module ApiRecipes
     end
 
     def check_response_code
-      # If :ok_code property is present, check the response code
-      # TODO: implement attributes[:verify_with]
       ok_code = false
       code = @response.code
-      if expected_code = attributes[:ok_code]
-        # If the code does not match, apply the requested strategy
-        ok_code = true if code == expected_code
+      message = nil
+
+      verify_with = attributes[:verify_with]
+      if verify_with && @api.object.respond_to?(verify_with, true )
+        ok_code = @api.object.send verify_with, @response
+        message = "response for request on route '#{path}' was not valid. Verified with #{@api.object}##{verify_with}.\n\nResponse body:\n #{@response.body}"
       else
-        # Default: 200 <= OK < 300
-        ok_code = true if (code >= 200 && code < 300)
-        expected_code = '200 <= CODE < 300'
+        # If :ok_code property is present, check the response code
+        if expected_code = attributes[:ok_code]
+          # If the code does not match, apply the requested strategy
+          ok_code = true if code == expected_code
+        else
+          # Default: 200 <= OK < 300
+          ok_code = true if @response.status.success?
+          expected_code = '200 <= CODE < 300'
+        end
       end
+
       unless ok_code
         case attributes[:on_bad_code].to_s
         when 'ignore'
         when 'raise'
-          raise ResponseCodeNotAsExpected.new(path, expected_code, code, @response.body)
+          raise ResponseCodeNotAsExpected.new(path, expected_code, code, @response.body, message: message)
         end
       end
     end

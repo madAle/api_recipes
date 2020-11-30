@@ -40,8 +40,10 @@ module ApiRecipes
   end
 
   class ResponseCodeNotAsExpected < Exception
-    def initialize(path, expected_code = nil, response_code = nil, response_body = nil)
-      message = "response code for request on route '#{path}' has returned #{response_code}, but #{expected_code} was expected\n\nResponse body:\n #{response_body}"
+    def initialize(path, expected_code = nil, response_code = nil, response_body = nil, message: nil)
+      unless message
+        message = "response code for request on route '#{path}' has returned '#{response_code}', but '#{expected_code}' was expected\n\nResponse body:\n #{response_body}"
+      end
       super(message)
     end
   end

@@ -5,7 +5,7 @@ github:
   base_url:                     # Optional. Default: ''. Useful for example when specifying API version
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
   on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise]
-  verify_with: api_level        # TODO: explain usage
+  verify_with:                  # Optional. Default nil. Specify a method (on the api-calling object) that will be called in order to verify if response was OK. Given method must accept one argument (response)
   default_headers:
     accept: 'application/vnd.github.v3+json'
     content_type: 'application/json'
@@ -15,10 +15,11 @@ github:
       route: yes                # Optional Default: yes. Set 'no' if you don't want to create the route for this endpoint
       # path: 'users'           # Optional. Default: nil. If specified, replaces default path strategy that uses endpoint name (e.g. /users)
                                 # Example: path: TheUsersList  => path will be built in the form of /TheUsersList
-      # verb: get               # Optional. Default: get
-      # ok_code: 200            # Optional. Default: from 200 to 299 HTTP status code are considered OK
-      # timeout: 2              # Optional. Overrides global property
-      # on_bad_code:            # Optional. Overrides global property
+      verb: get                 # Optional. Default: get
+      ok_code: 200              # Optional. Default: from 200 to 299 HTTP status code are considered OK
+      timeout: 2                # Optional. Overrides global property
+      on_bad_code:              # Optional. Overrides global property
+      verify_with:              # Optional. Overrides global property
       endpoints:
         show:
           path: /:user_id       # You can use :some_param notation and provide the param when calling the route (see examples/simple.rb)
@@ -30,10 +31,8 @@ github:
     repos:
       route: false
       path: /repos/:owner_id/:repo_id     # This creates endpoint /repos/:owner_id/repo_id
-      verify_with: route_level            # TODO: explain usage
       endpoints:
         show:
-          verify_with: route_level        # TODO: explain usage
           path: ''                        # Path is empty (not nil!) so it will be used instead of endpoint name (show), maintaining de facto the repos URL intact
         contributors:                     # Final path will be /repos/:owner_id/repo_id/contributors
 

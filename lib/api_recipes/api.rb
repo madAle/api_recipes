@@ -2,13 +2,14 @@ module ApiRecipes
   class Api
 
     attr_accessor :name, :configs, :authorization, :basic_auth
-    attr_reader :base_configs
+    attr_reader :base_configs, :object
 
     BASE_CONFIGS_KEYS = [:protocol, :host, :port, :api_version, :timeout, :on_bad_code, :verify_with]
 
-    def initialize(name, configs)
+    def initialize(name, configs, object)
       @name = name
       @configs = ApiRecipes::Settings::DEFAULT.merge configs
+      @object = object
 
       # Generate   some_api.some_endpoint  methods
       # e.g.  github.users
