@@ -32,13 +32,13 @@ module ApiRecipes
 
         define_method api_name do
           configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
-          api = Api.new(api_name, configs)
+          api = Api.new(api_name, configs, self)
           ApiRecipes.copy_global_authorizations_to_api api
           api
         end
         define_singleton_method api_name do
           configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
-          api = Api.new(api_name, configs)
+          api = Api.new(api_name, configs, self)
           ApiRecipes.copy_global_authorizations_to_api api
           api
         end
@@ -105,7 +105,7 @@ module ApiRecipes
   def self._aprcps_define_global_apis
     configuration.apis_configs.each do |api_name, api_configs|
       api_name = api_name.to_sym
-      _aprcps_global_storage[api_name] = Api.new api_name, api_configs
+      _aprcps_global_storage[api_name] = Api.new api_name, api_configs, self
       define_singleton_method api_name do
         _aprcps_global_storage[api_name]
       end

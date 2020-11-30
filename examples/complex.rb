@@ -29,9 +29,8 @@ user_id = usernames.sample
 # Retrieve user repos
 repos = nil
 fancy_instance.github.users.repos(user_id) do |response|
-  repos = response.data#.map{ |post| post['id'] }
+  repos = response.data
 end
-
 # Select a random repo
 repo = repos.sample
 repo_name = repo['name']
