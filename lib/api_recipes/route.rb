@@ -43,7 +43,7 @@ module ApiRecipes
 
     def build_url_from_path
       attrs = {
-          scheme: settings[:protocol],
+          scheme: settings[:protocol].to_s,
           host: settings[:host],
           port: port,
           path: path
@@ -90,12 +90,12 @@ module ApiRecipes
     end
 
     def port
-      settings[:port] || case settings[:protocol]
-                         when 'http'
-                           80
-                         when 'https'
-                           443
-                         end
+      settings[:port].to_s || case settings[:protocol].to_s
+                              when 'http'
+                                '80'
+                              when 'https'
+                                '443'
+                              end
     end
 
     def prepare_request
