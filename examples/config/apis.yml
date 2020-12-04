@@ -40,7 +40,6 @@ github:
 # Example of test api with minimal configuration and multiple endpoints
 jsonplaceholder:
   host: jsonplaceholder.typicode.com
-  base_url: 'pippo'
 
   endpoints:
     users:                      # This creates the endpoints: '/user' and '/users/:user_id'
