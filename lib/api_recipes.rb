@@ -58,6 +58,7 @@ module ApiRecipes
     unless @configuration
       @configuration = Configuration.new
     end
+
     @configuration
   end
 

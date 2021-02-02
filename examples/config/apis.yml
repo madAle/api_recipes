@@ -16,7 +16,7 @@ github:
       # path: 'users'           # Optional. Default: nil. If specified, replaces default path strategy that uses endpoint name (e.g. /users)
                                 # Example: path: TheUsersList  => path will be built in the form of /TheUsersList
       verb: get                 # Optional. Default: get
-      ok_code: 200              # Optional. Default: from 200 to 299 HTTP status code are considered OK
+      ok_code: 300              # Optional. Default: from 200 to 299 HTTP status code are considered OK
       timeout: 2                # Optional. Overrides global property
       on_bad_code:              # Optional. Overrides global property
       verify_with:              # Optional. Overrides global property
