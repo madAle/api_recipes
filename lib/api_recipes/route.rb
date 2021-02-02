@@ -76,7 +76,7 @@ module ApiRecipes
         case attributes[:on_bad_code].to_s
         when 'ignore'
         when 'raise'
-          raise ResponseCodeNotAsExpected.new(path, expected_code, code, @response.body, message: message)
+          raise ResponseCodeNotAsExpected.new(path, expected_code, @response, message: message)
         end
       end
     end
