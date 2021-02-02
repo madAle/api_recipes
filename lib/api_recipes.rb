@@ -117,6 +117,7 @@ module ApiRecipes
     unless @storage
       @storage = {}
     end
+
     @storage
   end
 
@@ -131,11 +132,9 @@ module ApiRecipes
     unless api_name.is_a?(String) || api_name.is_a?(Symbol)
       raise ArgumentError, "no api_name provided. Given: #{api_name.inspect}"
     end
-    unless ApiRecipes.configuration.apis_configs[api_name]
-      ApiRecipes.configuration.apis_configs[api_name] = {}
-    end
+    global_api_configs = _aprcps_global_storage[api_name]&.configs || {}
     if configs
-      ApiRecipes.configuration.apis_configs[api_name].merge(configs) do |_, old_val, new_val|
+      global_api_configs.deep_merge(configs) do |_, old_val, new_val|
         if new_val.nil?
           old_val
         else
@@ -143,7 +142,7 @@ module ApiRecipes
         end
       end
     else
-      ApiRecipes.configuration.apis_configs[api_name]
+      global_api_configs
     end
   end
 end
