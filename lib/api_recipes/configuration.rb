@@ -1,5 +1,6 @@
 require 'yaml'
 require 'erb'
+require 'logger'
 
 module ApiRecipes
   class Configuration
@@ -33,7 +34,7 @@ module ApiRecipes
         # Merge file contents into apis_configs
         data.each do |api, params|
           if apis_configs[api]
-            logger.warn "File at #{file_path} overrides config for '#{api}' API"
+            logger.debug "File at #{file_path} overrides config for '#{api}' API"
           end
           apis_configs[api] = params
         end
@@ -53,7 +54,7 @@ module ApiRecipes
 
     def logger
       unless @logger
-        log = ::Logger.new(log_to)
+        log = ::Logger.new(log_to || STDOUT)
         log.level    = normalize_log_level
         log.progname = 'ApiRecipes'
         @logger = log
@@ -77,7 +78,7 @@ module ApiRecipes
       when :error, ::Logger::ERROR, 'error' then ::Logger::ERROR
       when :fatal, ::Logger::FATAL, 'fatal' then ::Logger::FATAL
       else
-        Logger::ERROR
+        ENV['LOG_LEVEL'] || Logger::DEBUG
       end
     end
   end

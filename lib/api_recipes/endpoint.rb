@@ -32,7 +32,12 @@ module ApiRecipes
     end
 
     def url
-      @route.url
+      if @route
+        @route.url
+      else
+        ApiRecipes.logger.debug "No route configured for '#{api.name}#{absolute_path}': Is option 'route: no' present?"
+        nil
+      end
     end
 
     private
