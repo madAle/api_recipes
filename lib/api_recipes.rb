@@ -65,6 +65,7 @@ module ApiRecipes
   def self.configure
     if block_given?
       yield(configuration)
+      configuration.setup
     else
       configuration
     end

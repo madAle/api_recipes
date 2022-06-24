@@ -1,10 +1,10 @@
 require 'api_recipes'
-require 'yaml'
 
-# Configure ApiRecipes through a yaml file.
+# Configure ApiRecipes through multiple yaml files.
 # Take a look at examples/config/apis.yml  for details
+
 ApiRecipes.configure do |config|
-  config.apis_configs = YAML.load_file(File.expand_path('examples/config/apis.yml'))
+  config.apis_files_paths = ['examples/config/github.yml.erb', 'examples/config/jsonplaceholder.yml.erb']
 end
 
 # Let's create a simple class that uses ApiRecipes
