@@ -12,7 +12,7 @@ module ApiRecipes
       return @data unless @data.nil?
 
       # TODO: rescue nil?
-      @data = @original_response.parse
+      @data = @original_response.parse @attributes[:mime_type]
     end
 
     # Forward method calls to 'original' Response class

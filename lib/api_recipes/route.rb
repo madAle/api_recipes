@@ -16,7 +16,7 @@ module ApiRecipes
     end
 
     def fill(object)
-      data = @response.parse
+      data = @response.parse @attributes[:mime_type]
       if block_given?
         tap do
           try_to_fill object, data
