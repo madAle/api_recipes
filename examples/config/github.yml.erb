@@ -5,6 +5,7 @@ github:
   base_url:                     # Optional. Default: ''. Useful for example when specifying API version
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
   on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise]
+  mime_type:                    # Optional. Default: nil. By default the library will try to automatically guess the mime type based on response's Content-Type header. Provide this option to override the default behaviour
   verify_with:                  # Optional. Default nil. Specify a method (on the api-calling object) that will be called in order to verify if response was OK. Given method must accept one argument (response)
   default_headers:
     accept: 'application/vnd.github.v3+json'
@@ -19,6 +20,7 @@ github:
       ok_code: 200              # Optional. Default: from 200 to 299 HTTP status code are considered OK
       timeout: 2                # Optional. Overrides global property
       on_bad_code:              # Optional. Overrides global property
+      mime_type:                # Optional. Overrides global property
       verify_with:              # Optional. Overrides global property
       endpoints:
         show:
@@ -35,25 +37,3 @@ github:
         show:
           path: ''                        # Path is empty (not nil!) so it will be used instead of endpoint name (show), maintaining de facto the repos URL intact
         contributors:                     # Final path will be /repos/:owner_id/repo_id/contributors
-
-
-# Example of test api with minimal configuration and multiple endpoints
-jsonplaceholder:
-  host: jsonplaceholder.typicode.com
-
-  endpoints:
-    users:                      # This creates the endpoints: '/user' and '/users/:user_id'
-      endpoints:
-        show:
-          path: /:user_id
-
-    posts:                      # This creates the endpoints: '/posts', '/posts/:post_id', '/posts/:post_id/comments', '/posts/:post_id/comments/:comment_id'
-      endpoints:
-        show:
-          path: /:post_id
-
-        comments:
-          path: /:post_id/comments
-          endpoints:
-            show:
-              path: /:comment_id

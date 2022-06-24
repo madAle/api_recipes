@@ -1,0 +1,24 @@
+# This file demonstrates the possibility to provide ERB files paths as params to ApiRecipes' configuration
+# ERB files will be automatically parsed when apis_files_paths option is provided into configuration
+# See apis_files_paths_config.rb example
+
+# Example of test api with minimal configuration and multiple endpoints
+jsonplaceholder:
+  host: jsonplaceholder.typicode.com
+
+  endpoints:
+    users:                      # This creates the endpoints: '/user' and '/users/:user_id'
+      endpoints:
+        show:
+          path: /:user_id
+
+    posts:                      # This creates the endpoints: '/posts', '/posts/:post_id', '/posts/:post_id/comments', '/posts/:post_id/comments/:comment_id'
+      endpoints:
+        show:
+          path: /:post_id
+
+        comments:
+          path: /:post_id/comments
+          endpoints:
+            show:
+              path: /:comment_id

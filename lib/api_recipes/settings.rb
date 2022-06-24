@@ -10,7 +10,8 @@ module ApiRecipes
         timeout: 3,
         on_bad_code: 'raise',
         endpoints: {},
-        verify_with: nil
+        verify_with: nil,
+        mime_type: nil
     }
 
     DEFAULT_ROUTE_ATTRIBUTES = {
@@ -20,6 +21,7 @@ module ApiRecipes
         ok_code: nil,
         timeout: DEFAULT[:timeout],
         on_bad_code: DEFAULT[:on_bad_code],
+        mime_type: DEFAULT[:mime_type],
         verify_with: DEFAULT[:verify_with]
     }
 

@@ -62,7 +62,6 @@ module ApiRecipes
           end
         end
       end
-      # Route.new(api: @api, endpoint: self, name: route_name, attributes: route_attrs, req_pars: request_params).start_request &block
     end
 
     def ensure_route_does_not_clash(route_name)

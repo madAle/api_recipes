@@ -1,12 +1,15 @@
+require 'yaml'
+require 'erb'
+
 module ApiRecipes
   class Configuration
 
-    attr_accessor :log_to, :log_level, :print_urls
+    attr_accessor :log_to, :log_level, :print_urls, :apis_files_paths
 
     def apis_configs=(configs = {})
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
+
       @apis_configs = configs.deep_symbolize_keys
-      ApiRecipes._aprcps_define_global_apis
     end
 
     def apis_configs
@@ -14,6 +17,34 @@ module ApiRecipes
         @apis_configs = {}
       end
       @apis_configs
+    end
+
+    def apis_files_paths=(paths = [])
+      raise ArgumentError, 'apis_files_paths must be an Array' unless paths.is_a? Array
+
+      @apis_files_paths = paths
+      @apis_files_paths.each do |file_path|
+        template = ERB.new File.read File.expand_path(file_path)
+        data = begin
+                 YAML.load(template.result(binding), aliases: true)
+               rescue ArgumentError
+                 YAML.load(template.result binding)
+               end.deep_symbolize_keys
+        # Merge file contents into apis_configs
+        data.each do |api, params|
+          if apis_configs[api]
+            logger.warn "File at #{file_path} overrides config for '#{api}' API"
+          end
+          apis_configs[api] = params
+        end
+      end
+    end
+
+    def apis_files_paths
+      unless @apis_files_paths
+        @apis_files_paths = []
+      end
+      @apis_files_paths
     end
 
     def logger=(logger)
@@ -29,6 +60,10 @@ module ApiRecipes
       end
 
       @logger
+    end
+
+    def setup
+      ApiRecipes._aprcps_define_global_apis
     end
 
     private

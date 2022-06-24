@@ -1,8 +1,9 @@
-# This example aims to demonstrate how to provide custom configs to endpoints
+# This example aims to demonstrate how to provide direct configurations for an API
 
 require 'api_recipes'
 
 # Configure ApiRecipes through custom settings
+
 FAKE_API_SETTINGS = {
     host: 'jsonplaceholder.typicode.com',
     timeout: 10,
