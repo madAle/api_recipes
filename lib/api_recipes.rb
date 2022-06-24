@@ -146,6 +146,10 @@ module ApiRecipes
       global_api_configs
     end
   end
+
+  def self.logger
+    configuration.logger
+  end
 end
 
 # Monkey-patch URI so it can accept dashed hostnames like "web-service-1"
