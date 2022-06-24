@@ -5,7 +5,7 @@ github:
   base_url:                     # Optional. Default: ''. Useful for example when specifying API version
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
   on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise]
-  mime_type:                    # Optional. Default: nil -> the library will try to automatically guess the mime type based on response's Content-Type header
+  mime_type:                    # Optional. Default: nil. By default the library will try to automatically guess the mime type based on response's Content-Type header. Provide this option to override the default behaviour
   verify_with:                  # Optional. Default nil. Specify a method (on the api-calling object) that will be called in order to verify if response was OK. Given method must accept one argument (response)
   default_headers:
     accept: 'application/vnd.github.v3+json'
