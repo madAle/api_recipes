@@ -48,7 +48,7 @@ module ApiRecipes
       @expected_code = expected_code
       @response = response
       unless message
-        message = "response code for request on route '#{@path}' has returned '#{@response.code}', but '#{@expected_code}' was expected\n\nResponse body:\n #{@response.body}"
+        message = "response code for request on route '#{@path}' has returned '#{@response.code}', but '#{@expected_code}' was expected"
       end
       super(message)
     end

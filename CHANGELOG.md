@@ -1,3 +1,9 @@
+## Version 2.10.1
+
+**SYNTAX COMPLETELY CHANGED**
+
+#### A lot of new stuff
+
 ## Version 0.6.0 - Default to HTTPS
 
 **POSSIBLE BREAKING CHANGES**
