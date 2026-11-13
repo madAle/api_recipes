@@ -32,4 +32,32 @@ describe 'ApiRecipes::Definition' do
     nested = ApiRecipes::Compiler.compile(:svc, endpoints: { users: { path: '/users/:uid', endpoints: { show: { path: ':id' } } } })
     expect(nested.routes.map(&:call)).to eq(['svc.users(uid)', 'svc.users(uid).show(id)'])
   end
+
+  describe 'what is shown' do
+    let(:secret_api) do
+      ApiRecipes::Compiler.compile(:svc, host: 'api.example.test', port: 8443,
+        default_headers: { 'Authorization' => 'Bearer s3cret' },
+        endpoints: { users: { endpoints: { show: { path: '/:id' } } }, repos: nil })
+    end
+
+    it 'inspects without header values or the tree' do
+      expect(secret_api.inspect).to eq('#<ApiRecipes::Definition::Api svc https://api.example.test:8443 endpoints: users, repos>')
+      show = secret_api.endpoints[:users].endpoints[:show]
+      expect(show.inspect).to eq('#<ApiRecipes::Definition::Endpoint svc.users.show GET /users/:id>')
+      expect([secret_api.inspect, show.inspect, secret_api.endpoints[:users].inspect].join).not_to include('s3cret')
+    end
+
+    it 'pretty prints like inspect' do
+      require 'pp'
+      expect(secret_api.pretty_inspect.strip).to eq(secret_api.inspect)
+      show = secret_api.endpoints[:users].endpoints[:show]
+      expect(show.pretty_inspect.strip).to eq(show.inspect)
+    end
+
+    it 'filters header values in to_h and keeps the real ones in the reader' do
+      expect(secret_api.to_h[:default_headers]).to eq('Authorization' => '[FILTERED]')
+      expect(secret_api.to_h.to_s).not_to include('s3cret')
+      expect(secret_api.default_headers).to eq('Authorization' => 'Bearer s3cret')
+    end
+  end
 end

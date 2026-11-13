@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ApiRecipes
   # Turns configuration Hashes into trees of Definition::Api and
   # Definition::Endpoint. Every rule of the configuration is checked here, once;
@@ -25,22 +27,17 @@ module ApiRecipes
 
     class << self
       def compile(name, config)
-        compiler = new
-        api = compiler.compile(name, config)
-        compiler.finish!
-        api
+        compile_all(name => config).values.first
       end
 
       def compile_all(configs)
         compiler = new
-        apis = (configs || {}).each_with_object({}) do |(name, config), out|
-          out[name.to_sym] = compiler.compile(name, config)
-        end
+        apis = compiler.compile_all(configs)
         compiler.finish!
-        apis.freeze
+        apis
       end
 
-      # scope: :api, :with_api or :with_endpoint. Never raises.
+      # scope: :api, :with_api or :with_endpoint. Returns the problems, never raises.
       def check_options(options, scope)
         raise ArgumentError, "unknown scope '#{scope}'" unless %i[api with_api with_endpoint].include?(scope)
 
@@ -49,13 +46,21 @@ module ApiRecipes
         compiler.errors
       end
 
+      # The validated options of a `with`, in the form the tree stores them.
+      def resolve_options(options, scope)
+        raise ArgumentError, "unknown scope '#{scope}'" unless %i[with_api with_endpoint].include?(scope)
+
+        compiler = new
+        resolved = compiler.resolve(options, scope)
+        compiler.finish!
+        resolved
+      end
+
       def normalize(value)
-        case value
-        when Hash
-          value.each_with_object({}) { |(key, item), out| out[key.respond_to?(:to_sym) ? key.to_sym : key] = normalize(item) }
-        when Array then value.map { |item| normalize(item) }
-        else value
-        end
+        compiler = new
+        normalized = compiler.normalize(value, '')
+        compiler.finish!
+        normalized
       end
 
       def deep_merge(base, override)
@@ -75,28 +80,44 @@ module ApiRecipes
       @errors = []
     end
 
-    # Validates one api and returns its definition, or nil when it has problems.
-    def compile(name, config)
-      name = name.to_sym
-      config = {} if config.nil?
-      unless config.is_a?(Hash)
-        add(name.to_s, 'must be a Hash')
-        return nil
+    def compile_all(configs)
+      return {} if configs.nil?
+
+      unless configs.is_a?(Hash)
+        add('apis', 'must be a Hash')
+        return {}
       end
-      attrs = api_attrs(name, self.class.normalize(config))
-      build_api(name, attrs) if attrs && @errors.empty?
+      normalize(configs, '').each_with_object({}) do |(name, config), out|
+        api = compile_one(name, config)
+        out[name] = api if api
+      end.freeze
     end
 
-    # Used by check_options: validates without building.
     def check(options, scope)
       unless options.is_a?(Hash)
         add('', 'options must be a Hash')
         return
       end
-      options = self.class.normalize(options)
-      case scope
-      when :api then api_attrs(nil, options, '')
-      else validate_with(options, scope)
+      options = normalize(options, '')
+      scope == :api ? api_attrs(nil, options, '') : validate_with(options, scope)
+    end
+
+    def resolve(options, scope)
+      unless options.is_a?(Hash)
+        add('', 'options must be a Hash')
+        return {}
+      end
+      validate_with(normalize(options, ''), scope)
+    end
+
+    # A copy with Symbol keys at every level. Strings are checked for their
+    # encoding; two keys that become the same Symbol are reported.
+    def normalize(value, location)
+      case value
+      when Hash then normalize_hash(value, location)
+      when Array then value.map { |item| normalize(item, location) }
+      when String then clean_string(value, location)
+      else value
       end
     end
 
@@ -106,16 +127,61 @@ module ApiRecipes
 
     private
 
+    def normalize_hash(hash, location)
+      kinds = {}
+      hash.each_with_object({}) do |(key, item), out|
+        unless key.is_a?(String) || key.is_a?(Symbol)
+          add(location, 'name must be a String or a Symbol')
+          next
+        end
+        text = key.is_a?(String) ? clean_string(key, location) : key.to_s
+        next if text.nil?
+
+        name = text.to_sym
+        if kinds.key?(name) && kinds[name] != key.class
+          add(location, "option #{shown(name)} is given twice (as a String and as a Symbol)")
+          next
+        end
+        kinds[name] = key.class
+        out[name] = normalize(item, join(location, name))
+      end
+    end
+
+    def clean_string(string, location)
+      text = [Encoding::UTF_8, Encoding::US_ASCII].include?(string.encoding) ? string : string.encode(Encoding::UTF_8)
+      return text if text.valid_encoding?
+
+      add(location, 'must be valid UTF-8')
+      nil
+    rescue EncodingError
+      add(location, 'must be valid UTF-8')
+      nil
+    end
+
+    def compile_one(name, config)
+      config = {} if config.nil?
+      unless config.is_a?(Hash)
+        add(label(name), 'must be a Hash')
+        return nil
+      end
+      attrs = api_attrs(name, config, label(name))
+      build_api(name, attrs) if @errors.empty?
+    end
+
     def add(location, message)
       @errors << (location.empty? ? message : "#{location}: #{message}")
     end
 
+    def label(value)
+      value.to_s.gsub(/[^[:print:]]/, '?')[0, 40]
+    end
+
     def join(location, key)
-      location.empty? ? key.to_s : "#{location}.#{key}"
+      location.empty? ? label(key) : "#{location}.#{label(key)}"
     end
 
     def shown(value)
-      "'#{value.to_s.gsub(/[^[:print:]]/, '?')[0, 40]}'"
+      "'#{label(value)}'"
     end
 
     def check_keys(hash, allowed, location)
@@ -128,7 +194,7 @@ module ApiRecipes
 
     # ---- api ----
 
-    def api_attrs(name, config, location = name.to_s)
+    def api_attrs(_name, config, location)
       check_keys(config, API_KEYS, location)
       variables = config[:variables].is_a?(Hash) ? config[:variables] : {}
       declared = variables.keys
@@ -151,13 +217,14 @@ module ApiRecipes
     end
 
     def validate_with(options, scope)
-      check_keys(options, SCOPE_KEYS.fetch(scope), '')
-      options.each_key do |key|
-        next unless SCOPE_KEYS.fetch(scope).include?(key)
-        next if %i[authorization basic_auth].include?(key)
+      allowed = SCOPE_KEYS.fetch(scope)
+      check_keys(options, allowed, '')
+      options.each_with_object({}) do |(key, value), out|
+        next unless allowed.include?(key)
 
-        option(key, options, '', scope, nil)
-      end
+        resolved = %i[authorization basic_auth].include?(key) ? deep_freeze(value) : option(key, options, '', scope, nil)
+        out[key] = resolved unless resolved.nil?
+      end.freeze
     end
 
     # ---- endpoints ----
@@ -234,16 +301,16 @@ module ApiRecipes
 
     def one_of(value, allowed, where)
       text = value.is_a?(String) || value.is_a?(Symbol) ? value.to_s : nil
-      return text if text && allowed.include?(text)
+      return text.dup.freeze if text && allowed.include?(text)
 
       add(where, "#{shown(value)} is not one of #{allowed.join(', ')}")
       nil
     end
 
     def positive_integer(value, where)
-      return value if value.is_a?(Integer) && value.positive?
+      return value if value.is_a?(Integer) && value.between?(1, 65_535)
 
-      add(where, 'must be a positive integer')
+      add(where, 'must be an integer from 1 to 65535')
       nil
     end
 
@@ -283,11 +350,14 @@ module ApiRecipes
         return nil
       end
       string = value.to_s
+      fixed = string.gsub(Template::VARIABLE, '')
       problem = nil
       if string.empty?
         problem = 'must not be empty'
-      elsif !HOST_FIXED.match?(string.gsub(Template::VARIABLE, ''))
+      elsif !HOST_FIXED.match?(fixed)
         problem = "must be a plain host name (letters, digits, '-', '_' and '.'): no scheme, path, port, user, space or other characters"
+      elsif fixed == string && (!string.match?(/[A-Za-z0-9]/) || string.include?('..'))
+        problem = "must contain a letter or a digit and must not contain '..'"
       end
       if problem
         add(where, problem)
@@ -305,12 +375,24 @@ module ApiRecipes
       end
       string = value.to_s
       check_variables(string, where, declared)
-      string.split(VARIABLE_TOKEN).map do |piece|
-        VARIABLE_TOKEN.match?(piece) ? piece : PathTemplate.parse(piece).to_s
-      end.join.freeze
-    rescue ArgumentError => e
-      add(where, e.message)
-      nil
+      placeholder = false
+      encoded = string.split(VARIABLE_TOKEN).map do |piece|
+        next piece if VARIABLE_TOKEN.match?(piece)
+
+        begin
+          template = PathTemplate.parse(piece)
+          placeholder ||= !template.param_names.empty?
+          template.to_s
+        rescue ArgumentError
+          placeholder = true
+          piece
+        end
+      end.join
+      if placeholder
+        add(where, 'path placeholders are not allowed here; declare a variable and write {name}')
+        return nil
+      end
+      encoded.freeze
     end
 
     def headers(value, where, declared)
@@ -330,7 +412,7 @@ module ApiRecipes
         add(header_where, 'must not contain control characters') if CONTROL.match?(text.gsub(Template::VARIABLE, ''))
         check_variables(text, header_where, declared)
         out[name.dup.freeze] = text.dup.freeze
-      end
+      end.freeze
     end
 
     def auth(value, where)
@@ -391,7 +473,7 @@ module ApiRecipes
         return nil
       end
       value.each_key { |name| add(join(where, name), 'is not a valid variable name') unless VARIABLE_NAME.match?(name.to_s) }
-      value
+      deep_freeze(value)
     end
 
     def recipe(value, where)

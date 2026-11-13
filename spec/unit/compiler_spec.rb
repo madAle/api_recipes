@@ -147,4 +147,140 @@ describe ApiRecipes::Compiler do
     expect(problems(auth: { type: 'query', name: "a\nb" })).to include(match(/svc\.auth\.name/))
     expect(problems(auth: { type: 'bearer' })).to eq([])
   end
+
+  describe 'immutability' do
+    it 'keeps frozen copies of the input strings' do
+      proto = +'https'
+      obc = +'ignore'
+      host = +'h.test'
+      api = compile(protocol: proto, on_bad_code: obc, host: host, endpoints: { a: { on_bad_code: obc } })
+      [proto, obc, host].each { |text| text.replace('ftp') }
+      expect([api.protocol, api.on_bad_code, api.host, api.endpoints[:a].on_bad_code]).to eq(%w[https ignore h.test ignore])
+    end
+
+    it 'freezes every string of the tree, defaults included' do
+      api = compile(default_headers: { 'X' => 'a' }, auth: { type: 'header', name: 'X-T' },
+                    variables: { v: { default: 'd', description: 'e' } }, recipe: { name: 'r', list: ['x'] },
+                    endpoints: { a: { path: '/p', ok_code: [200] } })
+      strings = [api.protocol, api.host, api.on_bad_code, api.default_headers['X'], api.default_headers.keys.first,
+                 api.auth[:name], api.variables[:v][:default], api.variables[:v][:description], api.recipe[:name],
+                 api.recipe[:list].first, api.endpoints[:a].path, api.endpoints[:a].full_path,
+                 api.endpoints[:a].full_name]
+      expect(strings).to all(be_frozen)
+      expect([api.default_headers, api.auth, api.variables, api.variables[:v], api.recipe, api.recipe[:list],
+              api.endpoints[:a].ok_code]).to all(be_frozen)
+    end
+
+    it 'does not let the caller change the tree through to_h' do
+      api = compile({})
+      expect { api.to_h[:protocol] << 'x' }.to raise_error(FrozenError)
+      expect { api.to_h[:host] << '.evil' }.to raise_error(FrozenError)
+      expect { api.host << '.evil' }.to raise_error(FrozenError)
+      expect(api.host).to eq('localhost')
+    end
+  end
+
+  describe 'duplicate keys' do
+    it 'reports a String and a Symbol key for the same option' do
+      expect(described_class.check_options({ host: 'good.test@evil.test', 'host' => 'good.test' }, :with_api))
+        .to include("option 'host' is given twice (as a String and as a Symbol)")
+      expect(problems('host' => 'evil.test', host: 'good.test')).to include(match(/option 'host' is given twice/))
+    end
+
+    it 'reports them at every level' do
+      expect(problems(endpoints: { 'a' => {}, a: {} })).to include("svc.endpoints: option 'a' is given twice (as a String and as a Symbol)")
+      expect(problems(variables: { 'v' => {}, v: {} })).to include(match(/svc\.variables: option 'v' is given twice/))
+      expect(problems(auth: { 'type' => 'basic', type: 'bearer' })).to include(match(/svc\.auth: option 'type'/))
+      expect(problems(recipe: { 'k' => 1, k: 2 })).to include(match(/svc\.recipe: option 'k'/))
+      expect { described_class.compile_all('a' => {}, a: {}) }
+        .to raise_error(ApiRecipes::ConfigurationError, /option 'a' is given twice/)
+      expect { described_class.normalize('a' => 1, a: 2) }.to raise_error(ApiRecipes::ConfigurationError)
+    end
+  end
+
+  describe 'invalid input' do
+    it 'reports invalid encodings instead of raising' do
+      bad = "h\xFF.test"
+      expect(problems(host: bad)).to include('svc.host: must be valid UTF-8')
+      expect(problems(default_headers: { 'X' => bad })).to include('svc.default_headers.X: must be valid UTF-8')
+      expect(problems(mime_type: bad)).to include('svc.mime_type: must be valid UTF-8')
+      expect(problems(protocol: bad, on_bad_code: bad)).to include('svc.protocol: must be valid UTF-8')
+      expect(problems(endpoints: { a: { verb: bad, route: bad } })).to include('svc.endpoints.a.verb: must be valid UTF-8')
+      expect(problems(bad => 1)).to include('svc: must be valid UTF-8')
+      expect(described_class.check_options({ host: bad.b }, :with_api)).to include('host: must be valid UTF-8')
+    end
+
+    it 'reports names that are not Strings or Symbols' do
+      expect(problems(endpoints: { 200 => {}, true => nil })).to include('svc.endpoints: name must be a String or a Symbol')
+      expect(problems(variables: { 1 => {} })).to include('svc.variables: name must be a String or a Symbol')
+      expect { described_class.compile_all(1 => {}) }
+        .to raise_error(ApiRecipes::ConfigurationError, /name must be a String or a Symbol/)
+      expect { described_class.compile(nil, {}) }.to raise_error(ApiRecipes::ConfigurationError)
+      expect { described_class.compile_all('x') }.to raise_error(ApiRecipes::ConfigurationError, /apis: must be a Hash/)
+    end
+
+    it 'never raises from check_options, whatever the input' do
+      [nil, 'x', 1, [], { 1 => 2 }, { host: Object.new }, { timeout: [] }, { endpoints: [1] }, { default_headers: [] },
+       { auth: 'x' }, { variables: { 'a b' => 3 } }, { 'x' => "\xFF" }].each do |input|
+        %i[api with_api with_endpoint].each do |scope|
+          expect(described_class.check_options(input, scope)).to be_an(Array)
+        end
+      end
+    end
+
+    it 'sanitizes the names shown in messages' do
+      errors = problems(default_headers: { "X\nY" => 'v' }, endpoints: { "a\nb" => { bogus: 1 } })
+      expect(errors.join).not_to match(/[\x00-\x1F]/)
+    end
+  end
+
+  describe 'hardening' do
+    it 'rejects hosts without a letter or a digit and hosts with ..' do
+      %w[. .. - a..b].each { |host| expect(problems(host: host)).to include(match(/svc\.host/)) }
+      expect(problems(host: '{shop}..x', variables: { shop: {} })).to eq([])
+    end
+
+    it 'accepts only ports from 1 to 65535' do
+      expect(problems(port: 65_536)).to include(match(/svc\.port/))
+      expect(problems(port: 65_535)).to eq([])
+    end
+
+    it 'rejects path placeholders in base_url' do
+      message = 'svc.base_url: path placeholders are not allowed here; declare a variable and write {name}'
+      expect(problems(base_url: 'v1/:version')).to eq([message])
+      expect(problems(base_url: 'files/*rest')).to eq([message])
+      expect(problems(base_url: 'v1/{version}', variables: { version: {} })).to eq([])
+    end
+  end
+
+  describe '.resolve_options' do
+    it 'returns the options as the tree stores them' do
+      source = { 'timeout' => 5, 'host' => +'h.test', protocol: :http, on_bad_code: :ignore, verify_with: 'check',
+                 base_url: 'my api', default_headers: { 'X' => +'1' }, variables: { shop: +'acme' }, 'x-note' => 1 }
+      resolved = described_class.resolve_options(source, :with_api)
+      source['host'].replace('evil.test')
+      source[:variables][:shop].replace('evil')
+      expect(resolved).to eq(timeout: 5, host: 'h.test', protocol: 'http', on_bad_code: 'ignore', verify_with: :check,
+                             base_url: 'my%20api', default_headers: { 'X' => '1' }, variables: { shop: 'acme' })
+      expect([resolved, resolved[:host], resolved[:default_headers], resolved[:variables][:shop]]).to all(be_frozen)
+    end
+
+    it 'handles endpoint options and credentials' do
+      expect(described_class.resolve_options({ 'ok_code' => [200], timeout: nil }, :with_endpoint))
+        .to eq(ok_code: [200])
+      credential = { user: +'u' }
+      resolved = described_class.resolve_options({ basic_auth: credential }, :with_api)
+      credential[:user].replace('x')
+      expect(resolved[:basic_auth]).to eq(user: 'u')
+    end
+
+    it 'raises the same messages check_options returns' do
+      options = { host: 'a@b', 'host' => 'c', bogus: 1 }
+      expected = described_class.check_options(options, :with_api)
+      expect(expected).not_to be_empty
+      expect { described_class.resolve_options(options, :with_api) }
+        .to raise_error(ApiRecipes::ConfigurationError) { |e| expect(e.errors).to eq(expected) }
+      expect { described_class.resolve_options('x', :with_api) }.to raise_error(ApiRecipes::ConfigurationError)
+    end
+  end
 end

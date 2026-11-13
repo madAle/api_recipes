@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ApiRecipes
   # The immutable result of compiling a configuration: one node per api and one
   # per endpoint. Nodes are built by ApiRecipes::Compiler, never by hand.
@@ -53,10 +55,20 @@ module ApiRecipes
         {
           name: name, protocol: protocol, host: host, port: port, base_url: base_url, timeout: timeout,
           on_bad_code: on_bad_code, mime_type: mime_type, verify_with: verify_with,
-          default_headers: Definition.plain(default_headers), auth: Definition.plain(auth),
+          default_headers: default_headers.transform_values { '[FILTERED]' }, auth: Definition.plain(auth),
           variables: Definition.plain(variables), recipe: Definition.plain(recipe),
           endpoints: endpoints.transform_values(&:to_h)
         }
+      end
+
+      # Never shows header values or the tree below.
+      def inspect
+        list = endpoints.empty? ? '' : " endpoints: #{endpoints.keys.join(', ')}"
+        "#<#{self.class} #{name} #{protocol}://#{host}#{port && ":#{port}"}#{list}>"
+      end
+
+      def pretty_print(printer)
+        printer.text(inspect)
       end
 
       private
@@ -117,6 +129,14 @@ module ApiRecipes
         return value unless value.nil? && key == :verify_with && parent.is_a?(Endpoint)
 
         parent.own(key)
+      end
+
+      def inspect
+        "#<#{self.class} #{full_name} #{verb.to_s.upcase} #{full_path}>"
+      end
+
+      def pretty_print(printer)
+        printer.text(inspect)
       end
 
       def to_h
