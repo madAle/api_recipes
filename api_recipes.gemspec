@@ -18,5 +18,8 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
   spec.required_ruby_version = '>= 2.7.0'
 
-  spec.add_dependency 'http', '>= 4.4', '<= 5.1'
+  # '<= 5.1' let in 5.1.0 only, which requires base64 without declaring it: from
+  # Ruby 3.4 base64 is no longer a default gem. 5.x stays API compatible; 6.0 is
+  # left out until it is verified.
+  spec.add_dependency 'http', '>= 4.4', '< 6'
 end
