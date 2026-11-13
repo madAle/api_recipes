@@ -53,4 +53,55 @@ describe ApiRecipes::Context do
     ctx = described_class.new(definition: api, owner: ApiRecipes).with(default_headers: { 'X-One' => '1' })
     expect(ctx.headers).to eq('Accept' => 'a', 'X-One' => '1')
   end
+
+  it 'keeps exactly the values the compiler resolved' do
+    options = { mime_type: (+"caf\xE9").force_encoding('ISO-8859-1'), host: 'h.test'.encode('ISO-8859-1'),
+                variables: { shop: ['a'] }, base_url: 'x y', verify_with: 'check', 'x-note' => 1 }
+    overrides = context.with(options).overrides
+    expect(overrides).to eq(ApiRecipes::Compiler.resolve_options(options, :with_api))
+    expect(overrides.values_at(:mime_type, :host).map(&:encoding)).to eq([Encoding::UTF_8, Encoding::UTF_8])
+    expect(overrides[:variables][:shop]).to be_frozen
+    expect { context.with(timeout: 1, 'timeout' => 2) }.to raise_error(ApiRecipes::ConfigurationError, /twice/)
+  end
+
+  it 'reads nil by the keys as given: no credential, or no override' do
+    api = ApiRecipes::Compiler.compile(:svc, host: '{shop}.h.test', default_headers: { 'Accept' => 'a' },
+                                             variables: { shop: { default: 'main' } })
+    ctx = described_class.new(definition: api, owner: ApiRecipes, global_definition: api)
+    ApiRecipes::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Credential.authorization('T')) }
+    expect(ctx.with(default_headers: { 'X' => '1' }).with(default_headers: nil).headers).to eq('Accept' => 'a')
+    expect(ctx.with(variables: { shop: 'other' }).with('variables' => nil).origin).to eq('https://main.h.test')
+    expect(ctx.with(timeout: 9).with('timeout' => nil).setting(:timeout)).to eq(3)
+    expect(ctx.credential).not_to be_nil
+    expect(ctx.with('authorization' => nil).credential).to be_nil
+    expect(ctx.with(basic_auth: nil).credential).to be_nil
+    expect(ctx.with(authorization: 'C').with(authorization: nil).credential).to be_nil
+  end
+
+  it 'is not changed by the caller after with' do
+    host = +'a.h.test'
+    shop = +'acme'
+    list = ['x']
+    headers = { 'X' => +'1' }
+    ctx = context.with(host: host, variables: { shop: shop, zone: list }, default_headers: headers)
+    host.replace('evil.test')
+    shop.replace('evil')
+    list << 'y'
+    headers['X'].replace('2')
+    headers['Y'] = '3'
+    expect(ctx.origin).to eq('https://a.h.test')
+    expect(ctx.overrides[:variables]).to eq(shop: 'acme', zone: ['x'])
+    expect(ctx.headers).to eq('X' => '1')
+  end
+
+  it 'takes the declared defaults of the global level from the global definition' do
+    global = ApiRecipes::Compiler.compile(:svc, host: '{shop}.h.test', variables: { shop: { default: 'global' } })
+    ctx = described_class.new(definition: definition, owner: klass.new, global_definition: global)
+    expect(ctx.variables(up_to: :global)).to eq(shop: 'global')
+    expect(ctx.origin(up_to: :global)).to eq('https://global.h.test')
+    expect(ctx.variables).to eq(shop: 'main')
+    no_global = described_class.new(definition: definition, owner: klass.new)
+    expect(no_global.variables(up_to: :global)).to eq({})
+    expect(no_global.origin(up_to: :global)).to be_nil
+  end
 end

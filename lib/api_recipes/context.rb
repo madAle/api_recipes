@@ -18,16 +18,16 @@ module ApiRecipes
       freeze
     end
 
-    # A new context with these options on top of the current ones.
-    # default_headers and variables add up, the other options replace.
+    # A new context with these options on top of the current ones, as the
+    # compiler resolved them. default_headers and variables add up, the other
+    # options replace. A key given with nil: no credential for authorization
+    # and basic_auth, no override for the others.
     def with(options)
-      problems = Compiler.check_options(options, :with_api)
-      raise ConfigurationError.new(problems) unless problems.empty?
-
+      resolved = Compiler.resolve_options(options, :with_api)
       merged = @overrides.dup
-      options.each do |key, value|
-        key = key.to_sym
-        merge_option(merged, key, value) if Compiler::WITH_API_KEYS.include?(key)
+      options.each_key do |key|
+        name = key.to_sym
+        merge_option(merged, name, resolved[name]) if Compiler::WITH_API_KEYS.include?(name)
       end
       self.class.new(definition: @definition, owner: @owner, global_definition: @global_definition,
                      overrides: merged, handles: @handles)
@@ -48,10 +48,11 @@ module ApiRecipes
       @definition.respond_to?(key) ? @definition.public_send(key) : nil
     end
 
-    # Declared defaults, then the levels from the farthest up to up_to.
+    # Declared defaults, then the levels from the farthest up to up_to. For
+    # :global the defaults are those of the global definition (none without it).
     def variables(up_to: :with)
       chain = levels
-      sum_variables(@definition, chain, start_of(chain, up_to), up_to == :with)
+      sum_variables(definition_for(up_to), chain, start_of(chain, up_to), up_to == :with)
     end
 
     # "scheme://host" or "scheme://host:port". Only :with applies the protocol,
@@ -59,8 +60,7 @@ module ApiRecipes
     # no global definition, except for :with, which raises MissingVariable.
     def origin(up_to: :with)
       chain = levels
-      api = up_to == :global ? @global_definition : @definition
-      origin_from(api, chain, start_of(chain, up_to), with: up_to == :with)
+      origin_from(definition_for(up_to), chain, start_of(chain, up_to), with: up_to == :with)
     end
 
     def base_path
@@ -111,6 +111,9 @@ module ApiRecipes
 
     def levels = Levels.chain(@owner, @definition.name)
 
+    # The tree a level reads: the global one for the global level, else the owner's.
+    def definition_for(kind) = kind == :global ? @global_definition : @definition
+
     # Index of the first level of chain at or farther than up_to.
     def start_of(chain, up_to)
       rank = RANKS.fetch(up_to) { raise ArgumentError, "unknown level '#{up_to}'" }
@@ -119,7 +122,7 @@ module ApiRecipes
 
     def sum_variables(api, chain, start, with)
       values = {}
-      api.variables.each { |name, spec| values[name] = spec[:default] unless spec[:default].nil? }
+      api&.variables&.each { |name, spec| values[name] = spec[:default] unless spec[:default].nil? }
       chain[start..].reverse_each do |_kind, level|
         level.variables&.each { |name, value| values[name.respond_to?(:to_sym) ? name.to_sym : name] = value }
       end
@@ -147,47 +150,25 @@ module ApiRecipes
     # The origin of a credential comes from its own level and the farther ones,
     # by position: a nearer level that moves the destination does not move it.
     # The global level uses the global definition, the others the owner's one.
+    # This relies on one declaration of an api name per class hierarchy, so
+    # that every class level of the chain reads the owner's tree.
     def check_origin(chain, index, destination)
-      api = chain[index].first == :global ? @global_definition : @definition
-      bound = origin_from(api, chain, index, with: false)
+      bound = origin_from(definition_for(chain[index].first), chain, index, with: false)
       return if bound && destination && bound.casecmp?(destination)
 
       raise CredentialOriginMismatch.new(@definition.name, bound, destination)
     end
 
+    # value is the one resolved by the compiler, nil when the key was given as nil.
     def merge_option(merged, key, value)
-      case key
-      when :authorization, :basic_auth
-        merged[:credential] = Credential.from(key, key == :basic_auth ? Compiler.normalize(value) : value)
-      when :default_headers
-        return if value.nil?
-
-        added = value.to_h { |name, text| [name.to_s.dup.freeze, text.to_s.dup.freeze] }
-        merged[key] = (merged[key] || {}).merge(added).freeze
-      when :variables
-        return if value.nil?
-
-        added = value.to_h { |name, text| [name.to_sym, text.is_a?(String) ? text.dup.freeze : text] }
-        merged[key] = (merged[key] || {}).merge(added).freeze
+      if %i[authorization basic_auth].include?(key)
+        merged[:credential] = Credential.from(key, value)
+      elsif value.nil?
+        merged.delete(key)
+      elsif %i[default_headers variables].include?(key)
+        merged[key] = (merged[key] || {}).merge(value).freeze
       else
-        if value.nil?
-          merged.delete(key)
-        else
-          merged[key] = plain_option(key, value)
-        end
-      end
-    end
-
-    # The same normalized values the compiler keeps for these options.
-    def plain_option(key, value)
-      case key
-      when :protocol, :host, :on_bad_code, :mime_type then value.to_s.dup.freeze
-      when :verify_with then value.to_sym
-      when :base_url
-        value.to_s.split(Compiler::VARIABLE_TOKEN).map do |piece|
-          Compiler::VARIABLE_TOKEN.match?(piece) ? piece : PathTemplate.parse(piece).to_s
-        end.join.freeze
-      else value
+        merged[key] = value
       end
     end
   end
