@@ -59,6 +59,64 @@ describe ApiRecipes::Configuration do
     expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
   end
 
+  it 'does not need the logger before the files' do
+    logger = Logger.new(IO::NULL)
+    expect(logger).to receive(:debug).with(/svc_override\.yml overrides config for 'svc'/)
+    ApiRecipes.configure do |config|
+      config.apis_files_paths = [fixture('svc.yml.erb'), fixture('svc_override.yml')]
+      config.logger = logger
+    end
+  end
+
+  it 'applies the sources in the order they are assigned' do
+    ApiRecipes.configure do |config|
+      config.logger = Logger.new(IO::NULL)
+      config.apis_files_paths = [fixture('two_apis.yml')]
+      config.apis_configs = { svc: { host: 'hash.example.test', endpoints: { users: nil } } }
+    end
+    expect(ApiRecipes.svc.users.url.to_s).to eq('https://hash.example.test/users')
+    expect(ApiRecipes.billing.invoices.url.to_s).to eq('http://billing_service:3000/invoices')
+  end
+
+  it 'keeps the options between two calls to configure' do
+    configure_files('svc.yml.erb')
+    ApiRecipes.configure { |config| config.print_urls = false }
+    expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
+  end
+
+  it 'reads no file before load' do
+    configuration = ApiRecipes::Configuration.new
+    configuration.apis_files_paths = [fixture('missing.yml')]
+    expect { configuration.load }.to raise_error(ApiRecipes::RecipeFileError)
+  end
+
+  {
+    'missing.yml' => /missing\.yml: file not found/,
+    'empty.yml'   => /empty\.yml: file is empty/,
+    'list.yml'    => /list\.yml: must contain a mapping/,
+    'unsafe.yml'  => /unsafe\.yml: invalid YAML/
+  }.each do |name, pattern|
+    it "names the file when #{name} cannot be loaded" do
+      expect { configure_files(name) }.to raise_error(ApiRecipes::RecipeFileError, pattern)
+    end
+  end
+
+  it 'refuses a shared recipe among the files evaluated with ERB' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'x.recipe.yml')
+      File.write(path, "svc:\n  host: <%= 'evil.test' %>\n")
+      expect do
+        ApiRecipes.configure { |config| config.apis_files_paths = [path] }
+      end.to raise_error(ApiRecipes::RecipeFileError, /recipes_paths/)
+    end
+  end
+
+  it 'has defaults for variables and upgrade_warnings' do
+    configuration = ApiRecipes::Configuration.new
+    expect(configuration.variables).to eq({})
+    expect(configuration.upgrade_warnings).to eq(true)
+  end
+
   describe 'logger' do
     let(:configuration) { ApiRecipes::Configuration.new }
 

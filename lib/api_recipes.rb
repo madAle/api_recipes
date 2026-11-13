@@ -67,7 +67,7 @@ module ApiRecipes
   def self.configure
     if block_given?
       yield(configuration)
-      configuration.setup
+      _aprcps_define_global_apis(configuration.load)
     else
       configuration
     end
@@ -106,8 +106,8 @@ module ApiRecipes
     end
   end
 
-  def self._aprcps_define_global_apis
-    configuration.apis_configs.each do |api_name, api_configs|
+  def self._aprcps_define_global_apis(apis)
+    apis.each do |api_name, api_configs|
       api_name = api_name.to_sym
       _aprcps_global_storage[api_name] = Api.new api_name, api_configs, self
       define_singleton_method api_name do
