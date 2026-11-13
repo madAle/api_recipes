@@ -10,9 +10,11 @@
 Describe an HTTP API once, in YAML, and call it with plain Ruby methods.
 
 ```ruby
-ApiRecipes.github.users.repos('octocat').run.data
+ApiRecipes.github.users.repos('octocat') do |response|
+  response.data.each { |repo| puts repo['name'] }
+end
 # GET https://api.github.com/users/octocat/repos
-# => [{ "name" => "Hello-World", ... }, ...]
+# prints "Hello-World" and the other repository names
 ```
 
 There are no client classes to write. Hosts, paths, verbs, timeouts and expected
