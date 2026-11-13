@@ -69,7 +69,9 @@ module ApiRecipes
 
     def hidden_pair?(pair)
       name = pair.split('=', 2).first.to_s
-      URI.decode_www_form_component(name) == @hidden_param
+      name == @hidden_param || URI.decode_www_form_component(name) == @hidden_param
+    rescue ArgumentError
+      false
     end
 
     def fill_object(object, attributes, only, except)

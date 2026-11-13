@@ -157,6 +157,15 @@ describe ApiRecipes::Response do
       expect(build("#{base_url}/a?k=1&x=2&y=a%20b", hidden_param: 'k').uri.to_s).to eq("#{base_url}/a?x=2&y=a%20b")
     end
 
+    it 'keeps a pair whose name is not valid percent-encoding, and never raises' do
+      expect(build("#{base_url}/a?key=1&%zz=2", hidden_param: 'key').uri.to_s).to eq("#{base_url}/a?%zz=2")
+      expect(build("#{base_url}/a?%zz=2&%", hidden_param: 'key').uri.to_s).to eq("#{base_url}/a?%zz=2&%")
+    end
+
+    it 'removes every pair of the hidden parameter, also when its name is percent-encoded' do
+      expect(build("#{base_url}/a?key=1&x=2&key=3&ke%79=4", hidden_param: 'key').uri.to_s).to eq("#{base_url}/a?x=2")
+    end
+
     it 'drops the query when the hidden parameter is the only one' do
       expect(build("#{base_url}/a?k=1", hidden_param: :k).uri.to_s).to eq("#{base_url}/a")
     end
