@@ -114,6 +114,17 @@ module ApiRecipes
     end
   end
 
+  # Removes the global api methods, the storage and the configuration.
+  def self.reset!
+    _aprcps_global_storage.each_key do |api_name|
+      singleton_class.send(:remove_method, api_name) if singleton_class.method_defined?(api_name, false)
+    end
+    @storage = nil
+    @configuration = nil
+    @print_urls = nil
+    nil
+  end
+
   def self._aprcps_global_storage
     unless @storage
       @storage = {}

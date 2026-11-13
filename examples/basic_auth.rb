@@ -16,10 +16,11 @@ class MyFancyClass
   api :github
 end
 
-# Setup Basic Auth
-MyFancyClass.github.basic_auth = { user: ENV['GITHUB_USERNAME'], pass: ENV['GITHUB_PASSWORD'] }
+# Setup Basic Auth. Credentials are set on the api of the ApiRecipes module
+ApiRecipes.github.basic_auth = { user: ENV['GITHUB_USERNAME'], pass: ENV['GITHUB_PASSWORD'] }
 
-# From now on every github's api request will be authenticated with basic auth
+# From now on every github's api request will be authenticated with basic auth,
+# including those made by MyFancyClass and its instances
 
 # Get user's usernames from Github's Apis (https://github.com)
 usernames = nil

@@ -1,5 +1,4 @@
 require 'spec_helper'
-require 'support/constants'
 
 # Route#build_uri builds request URLs with URI::Generic.build2, which validates the
 # host with URI::DEFAULT_PARSER. The uri gem's RFC 2396 parser (uri < 1.0) rejects

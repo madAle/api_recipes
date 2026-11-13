@@ -1,3 +1,11 @@
+## Unreleased
+
+- Declares `logger` as a dependency: from Ruby 4.0 it is no longer a default gem.
+- Adds `ApiRecipes.reset!`, which clears the global configuration and the apis defined
+  on the module. It is meant for test suites.
+- Adds changelog and source code links to the gem metadata.
+- The README is now a complete usage guide.
+
 ## Version 2.10.3 - uri 1.x and Ruby 3.4
 
 - `Hash#transform_keys` and `#transform_keys!` are no longer redefined: Ruby's own are
@@ -20,6 +28,39 @@
 **SYNTAX COMPLETELY CHANGED**
 
 #### A lot of new stuff
+
+## Version 2.10.0
+
+- Adds the `apis_files_paths` configuration option: api configurations can be loaded
+  from YAML files.
+
+## Version 2.9.0
+
+- Requires Ruby >= 2.7.0. Upgrades dependencies.
+
+## Version 2.8.1
+
+- Fixes the deep merge of global configurations.
+
+## Version 2.8.0
+
+- `ResponseCodeNotAsExpected` gives access to the response object.
+
+## Version 2.7.1
+
+- More robust handling of port and protocol settings.
+
+## Version 2.7.0
+
+- Adds the `verify_with` option.
+
+## Version 2.6.2
+
+- Builds urls with `URI::Generic.build2`.
+
+## Version 2.6.1
+
+- Escapes the url path.
 
 ## Version 0.6.0 - Default to HTTPS
 

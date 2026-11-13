@@ -1,33 +1,18 @@
-$LOAD_PATH.unshift File.expand_path('../../lib', __FILE__)
+require 'simplecov'
+SimpleCov.start do
+  add_filter '/spec/'
+  # Enforced on CI only, so that running a single file locally does not fail.
+  minimum_coverage 90 if ENV['CI']
+end
 
-require 'bundler'
-Bundler.require(:default, :test)
-
+require 'webmock/rspec'
 require 'api_recipes'
+require 'support/test_apis'
+
+WebMock.disable_net_connect!
 
 RSpec.configure do |config|
-
-  config.before(:suite) do
-  end
-
-  config.after(:suite) do
-  end
-
-  config.before :each do
-    if Module.const_defined?('ApiRecipes')
-      Object.send(:remove_const, 'ApiRecipes')
-      # Reloads the module and all other files
-      load 'api_recipes.rb'
-      Dir.glob('lib/api_recipes/**').each do |filename|
-        load filename
-      end
-    end
-
-    # Remove CLASS_NAME definition
-    Object.send(:remove_const, CLASS_NAME.to_s)
-    # Re-define CLASS_NAME
-    eval("class #{CLASS_NAME}; end")
-  end
-
+  config.include TestApis
+  config.before(:each) { ApiRecipes.reset! }
   config.order = :random
 end
