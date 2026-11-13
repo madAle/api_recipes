@@ -39,15 +39,16 @@ module ApiRecipes
 
     def encode(value, name, api)
       text = value.to_s
+      bytes = text.b
       case @position
       when :host
-        reject(api, name, 'must contain only letters, digits, dots, hyphens and underscores') unless HOST_VALUE.match?(text)
+        reject(api, name, 'must contain only letters, digits, dots, hyphens and underscores') unless HOST_VALUE.match?(bytes)
         text
       when :base_url
         reject(api, name, 'must not be blank, "." or ".."') if value.nil? || text.empty? || text == '.' || text == '..'
         PathTemplate.escape(text)
       else
-        reject(api, name, 'must not contain control characters') if CONTROL.match?(text)
+        reject(api, name, 'must not contain control characters') if CONTROL.match?(bytes)
         text
       end
     end

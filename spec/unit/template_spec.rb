@@ -42,4 +42,20 @@ describe ApiRecipes::Template do
   it 'names the missing variable' do
     expect { expand('{shop}.myshopify.com', :host, {}) }.to raise_error(ApiRecipes::MissingVariable, /shop/)
   end
+
+  describe 'a value with an invalid byte' do
+    let(:bad) { "a\xFF".dup.force_encoding('UTF-8') }
+
+    it 'is rejected in a host' do
+      expect { expand('{shop}.myshopify.com', :host, shop: bad) }.to raise_error(ApiRecipes::InvalidVariable, /shop/)
+    end
+
+    it 'is not a control character in a header, so it expands' do
+      expect(expand('Shop {shop}', :header, shop: bad)).to eq("Shop #{bad}")
+    end
+
+    it 'is percent-encoded in a base_url' do
+      expect(expand('admin/{account}', :base_url, account: bad)).to eq('admin/a%FF')
+    end
+  end
 end
