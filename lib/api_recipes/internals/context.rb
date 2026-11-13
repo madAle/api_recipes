@@ -3,7 +3,9 @@ module ApiRecipes
     # Who uses which api: the compiled tree, the owner whose levels hold
     # credentials and variables, the declaration in use (nil for a global api)
     # and the options given to with. Immutable: with returns a new context.
-    # Values are read when a request is built, never cached.
+    # Values are read when a request is built, never cached. generation is the
+    # one of the registry the tree was compiled for (nil: a context built by
+    # hand, which no configure replaces).
     class Context
       # Levels by distance from the request: the smaller, the nearer.
       RANKS = { with: 0, instance: 1, class: 2, global: 3 }.freeze
@@ -11,13 +13,15 @@ module ApiRecipes
 
       attr_reader :definition, :owner, :global_definition, :overrides, :handles, :declaration
 
-      def initialize(definition:, owner:, global_definition: nil, overrides: nil, handles: nil, declaration: nil)
+      def initialize(definition:, owner:, global_definition: nil, overrides: nil, handles: nil, declaration: nil,
+                     generation: nil)
         @definition = definition
         @owner = owner
         @global_definition = global_definition
         @overrides = (overrides || {}).freeze
         @handles = handles
         @declaration = declaration
+        @generation = generation
         freeze
       end
 
@@ -37,7 +41,7 @@ module ApiRecipes
           merge_option(merged, name, resolved[name]) if Compiler::WITH_API_KEYS.include?(name)
         end
         self.class.new(definition: @definition, owner: @owner, global_definition: @global_definition,
-                       overrides: merged, handles: @handles, declaration: @declaration)
+                       overrides: merged, handles: @handles, declaration: @declaration, generation: @generation)
       end
 
       # The key of the levels of this api for its readers and writers: the
@@ -195,10 +199,23 @@ module ApiRecipes
       # every other level of the chain was written through the declaration in
       # use, whose tree that is.
       def check_origin(chain, index, destination)
-        bound = origin_from(definition_for(chain[index].first), chain, index, with: false)
+        bound = origin_from(definition_in_force(chain[index].first), chain, index, with: false)
         return if bound && destination && bound.casecmp?(destination)
 
         raise CredentialOriginMismatch.new(@definition.name, bound, destination)
+      end
+
+      # The tree a level reads now. An api or an endpoint kept across a
+      # configure still holds the tree it was created with, and so its
+      # destination, while the levels are read when the request is sent: their
+      # credentials are bound to the origin that the configuration in force
+      # gives them. nil when that configuration no longer has the api.
+      def definition_in_force(kind)
+        registry = Registry.current
+        return definition_for(kind) if @generation.nil? || @generation == registry.generation
+        return registry.definitions[@definition.name] if kind == :global || @declaration.nil?
+
+        @declaration.definition
       end
 
       # value is the one resolved by the compiler, nil when the key was given as nil.

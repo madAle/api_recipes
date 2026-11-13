@@ -845,6 +845,12 @@ end
 EnterpriseClient.github.authorization = "Bearer #{ENV.fetch('ENTERPRISE_TOKEN')}"
 ```
 
+An API or an endpoint kept in a variable keeps the destination it was created
+with. If a later `configure` moves the API to another origin, a request made
+through it raises the same error instead of sending a credential of the levels
+to the old origin: ask `ApiRecipes` (or the class, or the object) for the API
+again. A `configure` that does not move the origin changes nothing for it.
+
 The readers `authorization` and `basic_auth` return the nearest credential that
 was assigned. They do not apply that check: only a request does.
 

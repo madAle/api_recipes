@@ -123,7 +123,7 @@ module ApiRecipes
         @generation = generation
         @globals = definitions.to_h do |name, definition|
           context = Context.new(definition: definition, owner: ApiRecipes, global_definition: definition,
-                                handles: handles[name])
+                                handles: handles[name], generation: generation)
           [name, handles[name].for(definition).new(context)]
         end.freeze
         freeze

@@ -125,8 +125,11 @@ module ApiRecipes
         tree = current_tree
         check_owner(owner, tree.generation)
         tree.api_class.new(Context.new(definition: tree.definition, owner: owner, global_definition: tree.global,
-                                       handles: tree.handles, declaration: self))
+                                       handles: tree.handles, declaration: self, generation: tree.generation))
       end
+
+      # The tree of this declaration under the configuration in force.
+      def definition = current_tree.definition
 
       # Writes the declared variables in the level of the class, again after
       # a reset! of the levels.
