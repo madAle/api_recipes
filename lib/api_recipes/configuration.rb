@@ -32,7 +32,7 @@ module ApiRecipes
     def apis_configs=(configs = {})
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
 
-      @apis_configs = Compiler.normalize(configs)
+      @apis_configs = Compiler.normalize(configs, :options_map)
       record_source(:hash)
     end
 
@@ -137,7 +137,7 @@ module ApiRecipes
       raise RecipeFileError.new(path, 'file is empty') if data.nil?
       raise RecipeFileError.new(path, 'must contain a mapping of api names') unless data.is_a?(Hash)
 
-      Compiler.normalize(data)
+      Compiler.normalize(data, :options_map)
     end
 
     # @private

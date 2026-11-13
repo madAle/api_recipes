@@ -94,6 +94,38 @@ describe 'Configuration files and secrets' do
     expect(ApiRecipes.svc.users.run.data).to eq('x' => "<%= raise 'evaluated' %>")
   end
 
+  describe 'the content of an x- or x_ option' do
+    let(:cyclic) { {}.tap { |hash| hash['self'] = hash } }
+    let(:hostile) do
+      [{ 1 => 2, true => false }, { "a\xff".dup.force_encoding('UTF-8') => 1 }, { 'k' => 1, k: 2 }, cyclic]
+    end
+
+    def hash_with(content)
+      { svc: { host: 'h.test', 'x-note' => content, x_other: content,
+               endpoints: { users: { 'x-doc' => content, x_more: content, endpoints: { show: { 'x-deep' => content } } } } } }
+    end
+
+    it 'is never inspected, in a Hash' do
+      hostile.each do |content|
+        ApiRecipes.reset!
+        expect { configure_test_apis(hash_with(content)) }.not_to raise_error
+        expect(ApiRecipes.svc.users.url.to_s).to eq('https://h.test/users')
+      end
+    end
+
+    it 'is never inspected, in a YAML file' do
+      yaml = "svc:\n  host: h.test\n  x-note: &n\n    1: 2\n    true: false\n  endpoints:\n    users:\n      x-doc: *n\n" \
+             "      endpoints:\n        show:\n          x-deep:\n            3: 4\n"
+      file('x.yml', yaml) do |path|
+        ApiRecipes.configure do |c|
+          c.logger = Logger.new(IO::NULL)
+          c.apis_files_paths = [path]
+        end
+        expect(ApiRecipes.svc.users.url.to_s).to eq('https://h.test/users')
+      end
+    end
+  end
+
   describe 'a configuration that is refused before anything is built' do
     def refused(apis)
       expect { configure_test_apis(apis) }.to raise_error(ApiRecipes::ConfigurationError)
@@ -133,6 +165,10 @@ describe 'Configuration files and secrets' do
     it 'has a placeholder in base_url, or a host with a character a host cannot have' do
       refused(svc: { host: 'h.test', base_url: 'v1/:id' })
       ['h.test/x', 'h.test:80', 'u@h.test', 'h.test?x', 'h .test', "h.test\r\n"].each { |host| refused(svc: { host: host }) }
+    end
+
+    it 'refuses a top-level api given as a String and as a Symbol' do
+      refused('svc' => { host: 'a.test' }, svc: { host: 'b.test' })
     end
 
     it 'keeps the previous configuration when the new one is refused' do

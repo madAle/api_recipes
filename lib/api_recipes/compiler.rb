@@ -56,9 +56,9 @@ module ApiRecipes
         resolved
       end
 
-      def normalize(value)
+      def normalize(value, kind = :options)
         compiler = new
-        normalized = compiler.normalize(value, '')
+        normalized = compiler.normalize(value, '', kind)
         compiler.finish!
         normalized
       end
@@ -544,10 +544,22 @@ module ApiRecipes
       nil
     end
 
-    def deep_freeze(value)
+    # memo maps what is being copied to its copy, so that the content of an x-
+    # option, which is not inspected, can hold a structure that contains itself.
+    def deep_freeze(value, memo = {}.compare_by_identity)
       case value
-      when Hash then value.each_with_object({}) { |(key, item), out| out[key] = deep_freeze(item) }.freeze
-      when Array then value.map { |item| deep_freeze(item) }.freeze
+      when Hash
+        return memo[value] if memo.key?(value)
+
+        copy = memo[value] = {}
+        value.each { |key, item| copy[key] = deep_freeze(item, memo) }
+        copy.freeze
+      when Array
+        return memo[value] if memo.key?(value)
+
+        copy = memo[value] = []
+        value.each { |item| copy << deep_freeze(item, memo) }
+        copy.freeze
       when String then value.dup.freeze
       else value
       end
