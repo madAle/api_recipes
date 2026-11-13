@@ -9,7 +9,7 @@ stable line until `3.0.0` is final.
 
 | Stage | Content |
 | --- | --- |
-| `3.0.0.beta1` | the new core and the fixes that change behaviour |
+| `3.0.0.beta1` | the new core, the fixes that change behaviour and the upgrade guide |
 | `3.0.0.beta2` | the OpenAPI importer |
 | `3.0.0.beta3` | portable recipes and a command to install them |
 | `3.0.0` | all of the above, after real use |
@@ -32,6 +32,17 @@ changes is underneath.
 - The URL and the http.rb client are built once, when the request is sent.
 - The tree does not depend on where it comes from: YAML files, a Hash and
   imported descriptions are interchangeable sources.
+- `with` returns a copy of an api or of an endpoint with some options changed,
+  for the chain or the request that follows it, and stores nothing:
+  `github.with(host: 'github.example.com')`, `users.show('octocat').with(timeout: 10)`.
+- Two api options arrive with `3.0.0.beta1`, because they change how a request
+  is made: `auth` says where the credential goes (a header, the query string),
+  and `variables` declares `{name}` placeholders for `host`, `base_url` and
+  header values, with values taken along the same chain as credentials.
+- `definition` gives a read-only description of an api or of an endpoint, and
+  `inspect` never shows a credential.
+- Requests are made with http.rb 6 (`>= 6.0.4, < 7`); http.rb 5 is no longer
+  supported.
 
 ### Fixes that change behaviour
 
@@ -53,6 +64,15 @@ behaviour of these.
 | Logging | STDOUT at debug level by default; `print_urls` uses `puts` | silent by default; URLs go to the logger |
 | Dead code | unused public methods, constants and four error classes | removed |
 | Ruby | `required_ruby_version >= 2.7.0` | the oldest maintained version |
+
+### Upgrading from 2.x
+
+- `UPGRADING.md` lists what stops with a message, what changes without one,
+  what was removed, what is new and what to check for security.
+- The gem logs a warning, once for each endpoint, when a path parameter value is
+  sent differently than in 2.x. `config.upgrade_warnings = false` turns it off.
+- `api_recipes upgrade` searches the Ruby code and the configuration files of an
+  application for what changed. It never changes a file.
 
 ### OpenAPI importer
 
