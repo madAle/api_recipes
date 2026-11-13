@@ -18,6 +18,15 @@ module ApiRecipes
 
     attr_reader :names
 
+    # Shows the variable names only: the string can hold a secret.
+    def inspect
+      "#<#{self.class} #{@position} variables: #{@names.empty? ? 'none' : @names.join(', ')}>"
+    end
+
+    def pretty_print(printer)
+      printer.text(inspect)
+    end
+
     def static?
       @names.empty?
     end

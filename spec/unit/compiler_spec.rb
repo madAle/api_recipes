@@ -283,4 +283,98 @@ describe ApiRecipes::Compiler do
       expect { described_class.resolve_options('x', :with_api) }.to raise_error(ApiRecipes::ConfigurationError)
     end
   end
+
+  describe 'x- keys' do
+    let(:odd) { { 200 => 'ok', true => 1, 'a' => 1, a: 2, "bad\xFF" => "v\xFF" } }
+
+    it 'never looks inside the value of an x- or x_ option, at any option level' do
+      config = { 'x-codes' => odd, x_flags: odd, endpoints: { a: { 'x-doc' => odd, endpoints: { b: { x_n: odd } } } } }
+      expect(problems(config)).to eq([])
+      expect(described_class.check_options(config, :api)).to eq([])
+      expect { described_class.compile_all(svc: config) }.not_to raise_error
+      expect(described_class.check_options({ 'x-a' => odd, timeout: 1 }, :with_api)).to eq([])
+      expect(described_class.check_options({ 'x-a' => odd }, :with_endpoint)).to eq([])
+      expect(described_class.resolve_options({ 'x-a' => odd, timeout: 1 }, :with_api)).to eq(timeout: 1)
+    end
+
+    it 'leaves the value untouched in normalize and deep_merge' do
+      normalized = described_class.normalize('x-a' => odd, 'endpoints' => { 'b' => { 'x_c' => odd } })
+      expect(normalized[:'x-a']).to equal(odd)
+      expect(normalized[:endpoints][:b][:x_c]).to equal(odd)
+      merged = described_class.deep_merge({ 'x-a' => { 'k' => 1 } }, { 'x-a' => odd })
+      expect(merged[:'x-a']).to equal(odd)
+      expect { described_class.deep_merge({ 'x-a' => odd }, { host: 'h' }) }.not_to raise_error
+    end
+
+    it 'still validates names inside default_headers, variables and recipe' do
+      expect(problems(default_headers: { 'x-api-key' => "a\nb" })).to include(match(/default_headers\.x-api-key/))
+      expect(problems(default_headers: { 'x-api-key' => 'a', 'X-Api-Key' => 'b', :'x-api-key' => 'c' }))
+        .to include(match(/default_headers: option 'x-api-key' is given twice/))
+      expect(problems(variables: { 'x-k' => {} })).to include(match(/svc\.variables\.x-k/))
+      expect(problems(recipe: { 'x-r' => { 1 => 2 } })).to include(match(/svc\.recipe\.x-r: name must be a String/))
+    end
+
+    it 'keeps endpoint names that look like x- keys' do
+      api = compile(endpoints: { 'x-ray' => { path: '/xr' } })
+      expect(api.endpoints[:'x-ray'].full_path).to eq('/xr')
+    end
+  end
+
+  describe 'names and keys' do
+    it 'reports two Strings that become the same Symbol' do
+      key = 'host'.encode('UTF-16LE')
+      expect(described_class.check_options({ 'host' => 'a@evil.test', key => 'good.test' }, :with_api))
+        .to include(match(/option 'host' is given twice/))
+    end
+
+    it 'does not quote a raw path in its messages' do
+      errors = problems(endpoints: { a: { path: "/:id/:id\n#{'x' * 500}" }, "n\n:i/:i" => nil })
+      expect(errors.join).not_to match(/[\x00-\x1F]/)
+      expect(errors.map(&:size).max).to be < 200
+      expect(errors).to include(match(/svc\.endpoints\.a\.path: placeholder 'id' is repeated/))
+    end
+
+    it 'refuses empty names and names with control characters' do
+      expect { described_class.compile("a\nb", {}) }.to raise_error(ApiRecipes::ConfigurationError) { |e| expect(e.message).not_to match(/a\nb/) }
+      expect { described_class.compile('', {}) }.to raise_error(ApiRecipes::ConfigurationError, /must not be empty/)
+      expect(problems(endpoints: { '' => {}, "a\nb" => {} }).join("\n")).not_to match(/a\nb/)
+      expect(problems(endpoints: { '' => {} }).size).to eq(1)
+      expect(problems(endpoints: { "a\nb" => {} })).to include(match(/svc\.endpoints: .*control/))
+      expect(problems(variables: { "a\nb" => {}, '' => {} }).join("\n")).not_to match(/a\nb/)
+      expect(problems(variables: { '' => {} }).size).to eq(1)
+    end
+
+    it 'keeps names such as pull-requests, 2fa, end and class' do
+      expect(problems(endpoints: { 'pull-requests' => {}, '2fa' => {}, 'end' => {}, 'class' => {} })).to eq([])
+    end
+
+    it 'returns a frozen Hash for no configuration' do
+      expect(described_class.compile_all(nil)).to be_frozen
+    end
+  end
+
+  describe 'cycles' do
+    def cycle
+      config = { host: 'h.test' }
+      config[:endpoints] = config
+      config
+    end
+
+    it 'reports a cycle among the inspected values instead of overflowing the stack' do
+      expect(problems(cycle)).to include(match(/must not contain itself/))
+      expect(described_class.check_options(cycle, :api)).to include(match(/must not contain itself/))
+      expect { described_class.compile_all(svc: cycle) }.to raise_error(ApiRecipes::ConfigurationError, /must not contain itself/)
+      expect { described_class.normalize(cycle) }.to raise_error(ApiRecipes::ConfigurationError, /must not contain itself/)
+      list = []
+      list << list
+      expect(problems(endpoints: { a: { ok_code: list } })).to include(match(/must not contain itself/))
+    end
+
+    it 'does not visit a cycle under an x- key, and accepts a value used twice' do
+      loop_hash = {}
+      loop_hash[:self] = loop_hash
+      shared = { path: '/s' }
+      expect(problems('x-self' => loop_hash, endpoints: { a: shared, b: shared })).to eq([])
+    end
+  end
 end

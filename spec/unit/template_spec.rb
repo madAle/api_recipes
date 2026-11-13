@@ -58,4 +58,21 @@ describe ApiRecipes::Template do
       expect(expand('admin/{account}', :base_url, account: bad)).to eq('admin/a%FF')
     end
   end
+
+  describe 'what is shown' do
+    it 'inspects the position and the variable names, never the string' do
+      expect(described_class.new('{shop}.s3cret.test', :header).inspect).to eq('#<ApiRecipes::Template header variables: shop>')
+      expect(described_class.new('Bearer s3cret', :header).inspect).to eq('#<ApiRecipes::Template header variables: none>')
+      expect(described_class.new('{a}{b}/s3cret', :base_url).inspect).to eq('#<ApiRecipes::Template base_url variables: a, b>')
+      expect(described_class.new('h.test', :host).inspect).to eq('#<ApiRecipes::Template host variables: none>')
+    end
+
+    it 'pretty prints like inspect and keeps to_s' do
+      require 'pp'
+      template = described_class.new('Bearer s3cret', :header)
+      expect(template.pretty_inspect.strip).to eq(template.inspect)
+      expect(template.to_s).to eq('Bearer s3cret')
+      expect { template.instance_variable_set(:@x, 1) }.to raise_error(FrozenError) { |e| expect(e.message).not_to include('s3cret') }
+    end
+  end
 end

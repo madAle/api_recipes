@@ -64,11 +64,21 @@ module ApiRecipes
       end
 
       def deep_merge(base, override)
-        merged = normalize(base)
-        normalize(override).each do |key, value|
+        merge(normalize(base), normalize(override))
+      end
+
+      private
+
+      def merge(base, override)
+        merged = base.dup
+        override.each do |key, value|
           next if value.nil?
 
-          merged[key] = value.is_a?(Hash) && merged[key].is_a?(Hash) ? deep_merge(merged[key], value) : value
+          merged[key] = if IGNORED_KEY.match?(key.to_s) || !(value.is_a?(Hash) && merged[key].is_a?(Hash))
+                          value
+                        else
+                          merge(merged[key], value)
+                        end
         end
         merged
       end
@@ -81,13 +91,13 @@ module ApiRecipes
     end
 
     def compile_all(configs)
-      return {} if configs.nil?
+      return {}.freeze if configs.nil?
 
       unless configs.is_a?(Hash)
         add('apis', 'must be a Hash')
         return {}
       end
-      normalize(configs, '').each_with_object({}) do |(name, config), out|
+      normalize(configs, '', :options_map).each_with_object({}) do |(name, config), out|
         api = compile_one(name, config)
         out[name] = api if api
       end.freeze
@@ -112,10 +122,12 @@ module ApiRecipes
 
     # A copy with Symbol keys at every level. Strings are checked for their
     # encoding; two keys that become the same Symbol are reported.
-    def normalize(value, location)
+    #
+    # kind is :options for a Hash of options (the value of an x- key is left
+    # alone), :options_map for a Hash of names to options, :free otherwise.
+    def normalize(value, location, kind = :options)
       case value
-      when Hash then normalize_hash(value, location)
-      when Array then value.map { |item| normalize(item, location) }
+      when Hash, Array then guard_cycle(value, location) { normalize_container(value, location, kind) }
       when String then clean_string(value, location)
       else value
       end
@@ -127,8 +139,28 @@ module ApiRecipes
 
     private
 
-    def normalize_hash(hash, location)
-      kinds = {}
+    def guard_cycle(value, location)
+      @visiting ||= []
+      if @visiting.any? { |other| other.equal?(value) }
+        add(location, 'must not contain itself')
+        return value.is_a?(Hash) ? {} : []
+      end
+      @visiting.push(value)
+      begin
+        yield
+      ensure
+        @visiting.pop
+      end
+    end
+
+    def normalize_container(value, location, kind)
+      return value.map { |item| normalize(item, location, :free) } if value.is_a?(Array)
+
+      normalize_hash(value, location, kind)
+    end
+
+    def normalize_hash(hash, location, kind)
+      seen = {}
       hash.each_with_object({}) do |(key, item), out|
         unless key.is_a?(String) || key.is_a?(Symbol)
           add(location, 'name must be a String or a Symbol')
@@ -138,13 +170,22 @@ module ApiRecipes
         next if text.nil?
 
         name = text.to_sym
-        if kinds.key?(name) && kinds[name] != key.class
-          add(location, "option #{shown(name)} is given twice (as a String and as a Symbol)")
+        if seen.key?(name)
+          kinds = seen[name] == key.class ? "two #{key.class}s" : 'a String and as a Symbol'
+          add(location, "option #{shown(name)} is given twice (as #{kinds})")
           next
         end
-        kinds[name] = key.class
-        out[name] = normalize(item, join(location, name))
+        seen[name] = key.class
+        out[name] = normalize_item(name, item, location, kind)
       end
+    end
+
+    def normalize_item(name, item, location, kind)
+      return item if kind == :options && IGNORED_KEY.match?(name.to_s)
+
+      child = kind == :options_map ? :options : :free
+      child = :options_map if kind == :options && name == :endpoints
+      normalize(item, join(location, name), child)
     end
 
     def clean_string(string, location)
@@ -160,12 +201,26 @@ module ApiRecipes
 
     def compile_one(name, config)
       config = {} if config.nil?
+      return nil unless valid_name?(name, '', 'an api')
+
       unless config.is_a?(Hash)
         add(label(name), 'must be a Hash')
         return nil
       end
       attrs = api_attrs(name, config, label(name))
       build_api(name, attrs) if @errors.empty?
+    end
+
+    def valid_name?(name, location, what)
+      text = name.to_s
+      if text.empty?
+        add(location, "#{what} name must not be empty")
+      elsif CONTROL.match?(text)
+        add(location, "#{what} name #{shown(name)} must not contain control characters")
+      else
+        return true
+      end
+      false
     end
 
     def add(location, message)
@@ -238,10 +293,8 @@ module ApiRecipes
       end
       value.each_with_object({}) do |(name, options), out|
         node_location = join(location, name)
-        if name.to_s.empty?
-          add(location, 'an endpoint name must not be empty')
-          next
-        end
+        next unless valid_name?(name, location, 'an endpoint')
+
         if options.nil?
           options = {}
         elsif !options.is_a?(Hash)
@@ -267,7 +320,9 @@ module ApiRecipes
     def parse_path(path, location, written)
       PathTemplate.parse(path)
     rescue ArgumentError => e
-      add(location, written ? e.message : "the endpoint name makes an invalid path: #{e.message}")
+      repeated = e.message[/\Aplaceholder '(.*?)' is repeated/m, 1]
+      problem = repeated ? "placeholder #{shown(repeated)} is repeated" : 'is not a valid path'
+      add(location, written ? problem : "the endpoint name makes an invalid path: #{problem}")
       PathTemplate.parse('')
     end
 
