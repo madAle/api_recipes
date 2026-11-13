@@ -28,7 +28,7 @@ Or install it yourself as:
     
 ## Compatibility
 
-Ruby 2.5.0 or higher.
+Ruby 2.7.0 or higher.
 
 ## Usage
 
