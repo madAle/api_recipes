@@ -728,7 +728,7 @@ configuration file with every option commented.
 
 ## Compatibility
 
-- Ruby 2.7 or higher
+- Ruby 2.7 or higher. The test suite runs on the maintained versions: 3.3, 3.4 and 4.0
 - http.rb from 4.4 to 5.x
 - uri 0.x and 1.x
 
