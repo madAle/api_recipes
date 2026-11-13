@@ -1,71 +1,68 @@
+# frozen_string_literal: true
+
 module ApiRecipes
+  # One configured api, as ApiRecipes.github, MyClass.github and
+  # client.github return it. The subclass generated for the tree adds a
+  # method per root endpoint.
+  #
+  # Every method of this class is a name an endpoint cannot use as a method:
+  # the class has only the public methods below, and inside them the only
+  # private methods called are raise and block_given?.
   class Api
-
-    attr_accessor :name, :configs, :authorization, :basic_auth
-    attr_reader :base_configs, :object
-
-    BASE_CONFIGS_KEYS = [:protocol, :host, :port, :api_version, :timeout, :on_bad_code, :mime_type, :verify_with]
-
-    def initialize(name, configs, object)
-      @name = name
-      @configs = ApiRecipes::Settings::DEFAULT.merge configs
-      @object = object
-
-      # Generate   some_api.some_endpoint  methods
-      # e.g.  github.users
-      endpoints = @configs[:endpoints]
-      if endpoints && endpoints.is_a?(Hash)
-        endpoints.each do |ep_name, params|
-          unless respond_to? ep_name
-            # TODO: store endpoints, routes and routes_urls
-            define_singleton_method ep_name do |*request_params, &block|
-              # puts "API params: #{params}"
-              Endpoint.new api: self, name: ep_name, path: path, params: params, request_params: request_params, &block
-            end
-          end
-        end
-      end
+    def initialize(context)
+      @context = context
     end
 
-    def authorization=(auth)
-      @authorization = auth
-
-      # Check if I'm the global api
-      if global?
-        # Set authorization also on every "children" (classes that define the same api)
-        ApiRecipes.set_authorization_for_api auth, name
-      end
+    # The root endpoint called name. With a block, sends its request at once.
+    def [](name, *args, &block)
+      endpoint = @context.handles.endpoint(@context, @context.definition, @context.base_path, name, args)
+      endpoint.run(&block) if block
+      endpoint
     end
 
-    def basic_auth=(auth)
-      @basic_auth = auth
+    # A copy with options for the chain that follows it only.
+    def with(options) = self.class.new(@context.with(options))
 
-      # Check if I'm the global api
-      if global?
-        # Set authorization also on every "children" (classes that define the same api)
-        ApiRecipes.set_basic_auth_for_api auth, name
-      end
+    def definition = @context.definition
+
+    # The credential resolved along the chain; nil for the other kind.
+    def authorization
+      credential = @context.assigned_credential
+      credential && credential.kind == :authorization ? credential.value : nil
     end
 
-    def base_configs
-      @configs.select { |c| BASE_CONFIGS_KEYS.include? c }
+    # Sets the credential of the caller's level; nil means "send none".
+    def authorization=(value)
+      credential = Credential.from(:authorization, value)
+      LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(credential: credential) }
     end
 
-    private
-
-    def check_route_name_does_not_clash(route_name)
-      # Check if a method named route_name has already been defined on this object
-      if respond_to? route_name
-        raise RouteNameClashWithExistentMethod.new(@name, route_name)
-      end
+    def basic_auth
+      credential = @context.assigned_credential
+      credential && credential.kind == :basic_auth ? credential.value : nil
     end
 
-    def global?
-      ApiRecipes._aprcps_global_storage[name] == self
+    def basic_auth=(value)
+      credential = Credential.from(:basic_auth, value)
+      LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(credential: credential) }
     end
 
-    def path
-      "/#{configs[:base_url]}/"
+    # The variable values of the caller's level.
+    def variables
+      level = LevelSet.read(@context.owner, @context.definition.name)
+      (level && level.variables) || {}
+    end
+
+    # Sets the variable values of the caller's level; nil removes them.
+    def variables=(values)
+      values = Registry.variable_values(values)
+      LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(variables: values) }
+    end
+
+    def inspect
+      definition = @context.definition
+      list = definition.endpoints.empty? ? '' : " endpoints: #{definition.endpoints.keys.join(', ')}"
+      "#<ApiRecipes::Api #{definition.name} #{@context.shown_origin}#{list}>"
     end
   end
 end

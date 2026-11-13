@@ -13,6 +13,6 @@ WebMock.disable_net_connect!
 
 RSpec.configure do |config|
   config.include TestApis
-  config.before(:each) { ApiRecipes.reset!; ApiRecipes::LevelSet.reset! }
+  config.before(:each) { ApiRecipes.reset! }
   config.order = :random
 end

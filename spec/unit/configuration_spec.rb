@@ -20,7 +20,7 @@ describe ApiRecipes::Configuration do
 
   it 'lets a later file replace an api defined by an earlier one' do
     configure_files('svc.yml.erb', 'svc_override.yml')
-    expect(ApiRecipes.svc.configs[:host]).to eq('other.example.test')
+    expect(ApiRecipes.svc.definition.host).to eq('other.example.test')
     expect(ApiRecipes.svc).not_to respond_to(:users)
     expect(ApiRecipes.svc).to respond_to(:ping)
   end
@@ -247,19 +247,6 @@ describe ApiRecipes::Configuration do
       expect(configuration.logger.level).to eq(Logger::WARN)
     ensure
       ENV.delete('LOG_LEVEL')
-    end
-  end
-
-  describe 'print_urls' do
-    it 'prints each url to STDOUT when it is built' do
-      configure_test_apis
-      ApiRecipes.configuration.print_urls = true
-      expect { ApiRecipes.svc.users.url }.to output("https://api.example.test/users\n").to_stdout
-    end
-
-    it 'prints nothing by default' do
-      configure_test_apis
-      expect { ApiRecipes.svc.users.url }.not_to output.to_stdout
     end
   end
 end

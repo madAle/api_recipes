@@ -67,6 +67,10 @@ module ApiRecipes
         merge(normalize(base), normalize(override))
       end
 
+      # A deep copy whose Hashes, Arrays and Strings are frozen: input kept
+      # for a later compilation cannot be changed by the caller.
+      def frozen_copy(value) = new.frozen_copy(value)
+
       private
 
       def merge(base, override)
@@ -136,6 +140,8 @@ module ApiRecipes
     def finish!
       raise ConfigurationError.new(@errors) unless @errors.empty?
     end
+
+    def frozen_copy(value) = deep_freeze(value)
 
     private
 

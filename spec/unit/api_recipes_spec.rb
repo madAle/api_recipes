@@ -27,11 +27,6 @@ describe ApiRecipes do
       configure_test_apis
       expect(ApiRecipes.svc).to equal(ApiRecipes.svc)
     end
-
-    it 'gives the ApiRecipes module to global apis as object' do
-      configure_test_apis
-      expect(ApiRecipes.svc.object).to equal(ApiRecipes)
-    end
   end
 
   describe '.configuration' do

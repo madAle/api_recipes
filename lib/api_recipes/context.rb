@@ -102,6 +102,27 @@ module ApiRecipes
       nil
     end
 
+    # The credential a request would look at first, as assigned, without
+    # checking its origin: what the readers of an api return. Nil when no
+    # level has one; Credential::NONE when the nearest one is "none".
+    def assigned_credential
+      given = @overrides[:credential]
+      return given if given
+
+      levels.each do |_kind, level|
+        return level.credential unless level.credential.nil?
+      end
+      nil
+    end
+
+    # The origin for inspect. It never raises: a host whose variables have
+    # no valid value is shown as written.
+    def shown_origin
+      origin
+    rescue Error
+      address(@definition, @overrides[:host] || @definition.host, with: true)
+    end
+
     def inspect = "#<#{self.class.name} #{@definition.name}>"
 
     def to_s = inspect
@@ -138,14 +159,19 @@ module ApiRecipes
 
       values = sum_variables(api, chain, start, with)
       host = with && @overrides[:host] ? Template.new(@overrides[:host], :host) : api.host_template
-      protocol = (with && @overrides[:protocol]) || api.protocol
-      port = (with && @overrides[:port]) || api.port
-      port = nil if port == DEFAULT_PORTS[protocol]
-      "#{protocol}://#{host.expand(values, api: api.name)}#{":#{port}" if port}"
+      address(api, host.expand(values, api: api.name), with: with)
     rescue MissingVariable
       raise if with
 
       nil
+    end
+
+    # "scheme://host" or "scheme://host:port", without the default port.
+    def address(api, host, with:)
+      protocol = (with && @overrides[:protocol]) || api.protocol
+      port = (with && @overrides[:port]) || api.port
+      port = nil if port == DEFAULT_PORTS[protocol]
+      "#{protocol}://#{host}#{":#{port}" if port}"
     end
 
     # The origin of a credential comes from its own level and the farther ones,

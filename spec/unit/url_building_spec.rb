@@ -103,7 +103,7 @@ describe 'URL building' do
     end
 
     it 'creates a route by default' do
-      expect(api(host: 'h.test', endpoints: { ping: {} }).ping.route).to be_a(ApiRecipes::Route)
+      expect(api(host: 'h.test', endpoints: { ping: {} }).ping.definition.route?).to eq(true)
     end
   end
 end

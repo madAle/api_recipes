@@ -8,7 +8,7 @@ describe 'ApiRecipes.reset!' do
     ApiRecipes.reset!
 
     expect(ApiRecipes).not_to respond_to(:svc)
-    expect(ApiRecipes._aprcps_global_storage).to eq({})
+    expect(ApiRecipes.apis).to eq([])
     expect(ApiRecipes.configuration.apis_configs).to eq({})
   end
 
@@ -17,8 +17,8 @@ describe 'ApiRecipes.reset!' do
   end
 
   it 'resets print_urls' do
-    ApiRecipes.print_urls = true
+    ApiRecipes.configuration.print_urls = true
     ApiRecipes.reset!
-    expect(ApiRecipes.print_urls).to eq(false)
+    expect(ApiRecipes.configuration.print_urls).to eq(false)
   end
 end

@@ -13,6 +13,7 @@ module ApiRecipes
       @apis_configs = {}
       @apis_files_paths = []
       @variables = {}
+      @print_urls = false
       @upgrade_warnings = true
     end
 

@@ -134,6 +134,9 @@ describe 'Request options' do
   end
 
   describe 'timeout' do
+    # The client is built when the request is sent.
+    before { stub_request(:get, url).to_return(status: 200, body: '{}', headers: json) }
+
     # The value reaches http.rb through HTTP::Client#timeout.
     def expect_timeout(seconds)
       expect_any_instance_of(HTTP::Client).to receive(:timeout).with(seconds).and_call_original
@@ -142,19 +145,19 @@ describe 'Request options' do
     it 'is 3 seconds by default' do
       svc = configure
       expect_timeout(3)
-      svc.things
+      svc.things.run
     end
 
     it 'takes the value of the api' do
       svc = configure({}, timeout: 10)
       expect_timeout(10)
-      svc.things
+      svc.things.run
     end
 
     it 'takes the value of the endpoint over that of the api' do
       svc = configure({ timeout: 1 }, timeout: 10)
       expect_timeout(1)
-      svc.things
+      svc.things.run
     end
 
     it 'takes the value a class gives to api' do
@@ -164,7 +167,7 @@ describe 'Request options' do
         api :svc, timeout: 10
       end
       expect_timeout(10)
-      klass.svc.things
+      klass.svc.things.run
     end
 
     it 'raises HTTP::TimeoutError when the request times out' do

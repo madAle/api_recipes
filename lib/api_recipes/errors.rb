@@ -28,8 +28,14 @@ module ApiRecipes
   end
 
   class UnknownEndpoint < Error
+    # A name that is not printable text in a known encoding is shown with inspect.
     def initialize(parent, name, available)
-      super("'#{parent}' has no endpoint '#{name}'. Available: #{available.join(', ')}")
+      shown = name.to_s if name.is_a?(String) || name.is_a?(Symbol)
+      unless shown && [Encoding::UTF_8, Encoding::US_ASCII].include?(shown.encoding) && shown.valid_encoding? &&
+             !shown.match?(/[[:cntrl:]]/)
+        shown = name.inspect
+      end
+      super("'#{parent}' has no endpoint '#{shown}'. Available: #{available.join(', ')}")
     end
   end
 
@@ -73,9 +79,14 @@ module ApiRecipes
   end
 
   class ApiNameClashError < Error
-    def initialize(object, endpoint_name)
-      message = "#{object.class} already defines a method called '#{endpoint_name}'. Tip: change api name"
-      super(message)
+    # declared_in: the class or module of the hierarchy that already declares the api.
+    def initialize(owner, name, declared_in = nil)
+      if declared_in
+        super("api '#{name}' is already declared by #{declared_in}: an api can be declared once per class " \
+              'hierarchy. Use with(...) for other options')
+      else
+        super("#{owner} already has a method called '#{name}'. Give the api another method name with as:")
+      end
     end
   end
 
@@ -108,13 +119,6 @@ module ApiRecipes
   class ApiConfigIsNotAnHash < Error
     def initialize(endpoint)
       message = "provided config for endpoint '#{endpoint}' must be an Hash"
-      super(message)
-    end
-  end
-
-  class RouteNameClashWithExistentMethod < Error
-    def initialize(endpoint_name, route_name)
-      message = "can't define route '#{route_name}' method in endpoint '#{endpoint_name}' because method '#{route_name}' has already been defined"
       super(message)
     end
   end
