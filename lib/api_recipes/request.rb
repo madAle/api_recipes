@@ -4,6 +4,7 @@ module ApiRecipes
   class Request
     ORIGIN = %r{\A(https?)://([^:/]+)(?::(\d+))?\z}
     DEFAULT_EXPECTED = '200 <= CODE < 300'.freeze
+    FOLLOW_PROBLEM = 'follow: must be true, false or a Hash'.freeze
 
     def initialize(context:, definition:, path:, options:, overrides: nil)
       @context = context
@@ -26,6 +27,7 @@ module ApiRecipes
     def perform
       raise NoRouteExists.new(@definition.name) unless @definition.route?
 
+      check_follow
       origin = @context.origin
       credential = @context.credential(origin)
       address = checked(url, origin)
@@ -97,14 +99,22 @@ module ApiRecipes
         options = options.merge(params: params << [auth[:name], credential.value])
       end
       follow = options[:follow]
-      options = options.merge(follow: protected_follow(follow, origin)) if follow == true || follow.is_a?(Hash)
+      options = options.merge(follow: protected_follow(follow, origin)) if follow.equal?(true) || follow.is_a?(Hash)
       options
+    end
+
+    # http.rb follows any value that responds to fetch, so only the values the
+    # protection can wrap are accepted. Checked before anything is sent.
+    def check_follow
+      case @options[:follow]
+      when nil, true, false, Hash then nil
+      else raise ConfigurationError.new([FOLLOW_PROBLEM])
+      end
     end
 
     # true or a Hash: follows redirects, but a request that leaves the origin
     # loses Authorization, Cookie and what auth names, wherever they came from.
-    # Then the on_redirect of the caller is called. Any other value is left to
-    # http.rb.
+    # Then the on_redirect of the caller is called.
     def protected_follow(follow, origin)
       settings = follow.is_a?(Hash) ? symbol_keys(follow) : {}
       given = settings[:on_redirect]
@@ -134,8 +144,18 @@ module ApiRecipes
       false
     end
 
+    # A plain Hash whose String keys become Symbols, read as UTF-8 like the
+    # compiler reads names. A key that cannot be read is left as it is.
     def symbol_keys(hash)
-      hash.transform_keys { |key| key.is_a?(String) && key.valid_encoding? ? key.to_sym : key }
+      hash.each_with_object({}) { |(key, value), out| out[symbol_key(key)] = value }
+    end
+
+    def symbol_key(key)
+      return key unless key.is_a?(String)
+
+      key.encode(Encoding::UTF_8).to_sym
+    rescue EncodingError
+      key
     end
 
     def respond(http_response)

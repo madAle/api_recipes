@@ -78,15 +78,34 @@ describe 'Redirects' do
     expect(WebMock).to have_requested(:get, 'https://evil.test/steal').with { |r| !r.headers.key?('Authorization') }
   end
 
-  it 'leaves an unsupported follow value to http.rb, with or without a credential' do
+  it 'refuses any follow value other than true, false, nil or a Hash, with or without a credential' do
     stub_request(:get, 'https://api.example.test/users').to_return(to_evil)
-    [nil, { authorization: nil }].each do |overrides|
-      expect { new_request(base, %i[users], overrides: overrides, options: { follow: 'yes' }).perform }
-        .to raise_error(HTTP::Error, /follow/)
+    fetcher = Object.new
+    def fetcher.fetch(_key, default = nil) = default
+    options = [fetcher, 'yes', 1, []].map { |follow| { follow: follow } } +
+              [{ 'follow' => fetcher }, { 'follow'.encode('UTF-16LE') => fetcher }]
+    options.each do |given|
+      [nil, { authorization: nil }].each do |overrides|
+        request = new_request(base, %i[users], overrides: overrides, options: given.merge(headers: { 'Cookie' => 's=1' }))
+        expect { request.perform }.to raise_error(ApiRecipes::ConfigurationError) { |error|
+          expect(error.errors).to eq(['follow: must be true, false or a Hash'])
+        }
+      end
     end
-    expect { new_request(base, %i[users], options: { follow: false }).perform }
-      .to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
+    expect(WebMock).not_to have_requested(:any, /example\.test|evil\.test/)
+  end
+
+  it 'follows with true or a Hash, and not with false or nil' do
+    stub_request(:get, 'https://api.example.test/users').to_return(to_evil)
+    [false, nil].each do |follow|
+      expect { new_request(base, %i[users], options: { follow: follow }).perform }
+        .to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
+    end
     expect(WebMock).not_to have_requested(:get, 'https://evil.test/steal')
+    [true, { max_hops: 2 }, { 'max_hops' => 2 }].each do |follow|
+      new_request(base, %i[users], options: { follow: follow }).perform
+    end
+    expect(WebMock).to have_requested(:get, 'https://evil.test/steal').with { |r| !r.headers.key?('Authorization') }.times(3)
   end
 
   it 'does not follow redirects unless asked' do
