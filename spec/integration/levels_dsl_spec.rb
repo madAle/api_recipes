@@ -205,6 +205,20 @@ describe 'Credentials, variables and class trees through the DSL' do
     expect(klass.shopify.orders.url.to_s).to eq('https://class.example.test/orders')
   end
 
+  it 'reads the levels once per request, for the origin, the credential and the headers' do
+    configure_test_apis(shopify: shopify.merge(default_headers: { 'X-Shop' => '{shop}' }))
+    klass = Class.new do
+      include ApiRecipes
+      api :shopify, variables: { shop: 'acme' }
+    end
+    klass.shopify.authorization = 'token-class'
+    endpoint = klass.new.shopify.orders
+    expect(ApiRecipes::Levels).to receive(:chain).once.and_call_original
+    endpoint.run
+    expect(WebMock).to have_requested(:get, 'https://acme.example.test/orders')
+      .with(headers: { 'X-Token' => 'token-class', 'X-Shop' => 'acme' })
+  end
+
   it 'reads the credential resolved along the chain, and nil for the other kind' do
     configure_test_apis
     ApiRecipes.svc.basic_auth = { user: 'u', pass: 'p' }
