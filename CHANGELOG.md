@@ -21,6 +21,39 @@
 
 #### A lot of new stuff
 
+## Version 2.10.0
+
+- Adds the `apis_files_paths` configuration option: api configurations can be loaded
+  from YAML files.
+
+## Version 2.9.0
+
+- Requires Ruby >= 2.7.0. Upgrades dependencies.
+
+## Version 2.8.1
+
+- Fixes the deep merge of global configurations.
+
+## Version 2.8.0
+
+- `ResponseCodeNotAsExpected` gives access to the response object.
+
+## Version 2.7.1
+
+- More robust handling of port and protocol settings.
+
+## Version 2.7.0
+
+- Adds the `verify_with` option.
+
+## Version 2.6.2
+
+- Builds urls with `URI::Generic.build2`.
+
+## Version 2.6.1
+
+- Escapes the url path.
+
 ## Version 0.6.0 - Default to HTTPS
 
 **POSSIBLE BREAKING CHANGES**
