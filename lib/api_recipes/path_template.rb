@@ -89,7 +89,7 @@ module ApiRecipes
 
     def encode_splat(value, name, endpoint)
       raise InvalidPathParameter.new(endpoint, name, 'is nil') if value.nil?
-      pieces = value.to_s.split('/', -1)
+      pieces = value.to_s.b.split('/', -1)
       pieces = [''] if pieces.empty?
       pieces.map { |piece| encode_value(piece, name, endpoint) }.join('/')
     end

@@ -58,6 +58,17 @@ describe ApiRecipes::PathTemplate do
     end
   end
 
+  it 'encodes bytes that are not valid UTF-8, for a placeholder and for a splat' do
+    expect(expand('/:id', "a\xFFb")).to eq('/a%FFb')
+    expect(expand('/contents/*path', "a\xFF/b")).to eq('/contents/a%FF/b')
+  end
+
+  it 'encodes the bytes of a value in another encoding, for a placeholder and for a splat' do
+    value = 'ab'.encode('UTF-16LE')
+    expect(expand('/:id', value)).to eq('/a%00b%00')
+    expect(expand('/contents/*path', value)).to eq('/contents/a%00b%00')
+  end
+
   it 'never puts the value in the message' do
     expect { expand('/contents/*path', 'private/../x') }
       .to raise_error(ApiRecipes::InvalidPathParameter) { |e| expect(e.message).not_to include('private') }
