@@ -23,11 +23,10 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
   spec.required_ruby_version = '>= 3.3.0'
 
-  # 5.1.1 is the first version whose HTTP::Redirector accepts on_redirect, which
-  # the gem uses to drop the credential when a redirect leaves the origin.
-  # 5.1.1 requires base64 without declaring it (5.2.0 declares it): from Ruby 3.4
-  # base64 is no longer a default gem. 5.x stays API compatible; 6.0 is left out
+  # The redirect protection needs the on_redirect option of HTTP::Redirector
+  # (from 5.1.1). 5.2.0 is the first version that declares base64, which http.rb
+  # requires and which is no longer a default gem from Ruby 3.4. 6.0 is left out
   # until it is verified.
-  spec.add_dependency 'http', '>= 5.1.1', '< 6'
+  spec.add_dependency 'http', '>= 5.2.0', '< 6'
   spec.add_dependency 'logger'
 end
