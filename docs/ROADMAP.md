@@ -46,10 +46,9 @@ changes is underneath.
 
 ### Fixes that change behaviour
 
-Each item is a known defect of the 2.x line. Specs must not pin the present
-behaviour of these.
+Each item is a known defect of the 2.x line.
 
-| Area | Today | In 3.0 |
+| Area | In 2.x | In 3.0 |
 | --- | --- | --- |
 | Errors | inherit from `Exception`; a bare `rescue` does not catch them | one base class `ApiRecipes::Error < StandardError` |
 | Path parameters | inserted as given: `/` spans two segments, `nil` builds the parent URL, a `:` in a value breaks nested endpoints, `/:name.json` loses the suffix | URL encoded per segment; `nil`, empty, `.` and `..` raise |
@@ -58,12 +57,12 @@ behaviour of these.
 | Api and endpoint names | a name equal to an existing method is skipped silently or replaces that method | reported when the api is configured; reachable with `[]` |
 | `verify_with` errors | the message contains the response body | the body stays on `error.response` only |
 | `Response` | `respond_to?` is false for the methods it forwards | explicit delegation |
-| `Route#fill` | every error raised by a setter is swallowed | only missing writers are skipped |
+| `fill` | `Route#fill` swallows every error raised by a setter | `Response#fill` skips only missing writers |
 | YAML files | a missing or empty file fails without context | a clear `ApiRecipes` error naming the file |
 | Core extensions | methods added to `Hash` and `Array`; `URI::DEFAULT_PARSER` replaced with uri < 1.0 | no monkey patches |
 | Logging | STDOUT at debug level by default; `print_urls` uses `puts` | silent by default; URLs go to the logger |
 | Dead code | unused public methods, constants and four error classes | removed |
-| Ruby | `required_ruby_version >= 2.7.0` | the oldest maintained version |
+| Ruby | `required_ruby_version >= 2.7.0` | Ruby 3.3 or higher |
 
 ### Upgrading from 2.x
 

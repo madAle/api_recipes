@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ApiRecipes
   module Internals
     # A secret sent with requests. It never shows its value: not in inspect, not

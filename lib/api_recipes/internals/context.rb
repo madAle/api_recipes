@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ApiRecipes
   module Internals
     # Who uses which api: the compiled tree, the owner whose levels hold

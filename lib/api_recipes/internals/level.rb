@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ApiRecipes
   module Internals
     # What was assigned to one api at one level: a credential (nil when never

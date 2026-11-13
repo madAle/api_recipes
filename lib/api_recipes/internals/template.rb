@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ApiRecipes
   module Internals
     # A string with {name} variables, used for the host, the base_url and the

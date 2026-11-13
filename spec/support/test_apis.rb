@@ -51,7 +51,7 @@ module TestApis
       .and_call_original
   end
 
-  # Builds a context and a request on the new core, without the DSL. Each node
+  # Builds a context and a request without the DSL. Each node
   # of endpoint_path takes from values as many values as its path params. The
   # levels of owner are read through declaration (nil: the global level only).
   def new_request(config, endpoint_path, values = [], owner: ApiRecipes, overrides: nil, options: {}, global: :same,

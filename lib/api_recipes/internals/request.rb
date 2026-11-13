@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module ApiRecipes
   module Internals
     # One request to one endpoint: builds the URL and the http.rb client, sends
