@@ -18,15 +18,17 @@ module ApiRecipes
       @upgrade_warnings = true
     end
 
-    # configure works on a copy: the lists and Hashes that a setter or the
-    # caller can change in place are copied, so the original stays as it was.
+    # configure works on a copy: what a setter or the caller can change in
+    # place (the list of sources, and the Hashes, Arrays and Strings of
+    # apis_configs, apis_files_paths and variables at every depth) is copied,
+    # so the original stays as it was. The logger of the application is shared.
     def initialize_copy(source)
       super
       @default_logger = nil
       @sources = @sources.dup
-      @apis_configs = @apis_configs.dup
-      @apis_files_paths = @apis_files_paths.dup
-      @variables = @variables.dup
+      @apis_configs = deep_copy(@apis_configs)
+      @apis_files_paths = deep_copy(@apis_files_paths)
+      @variables = deep_copy(@variables)
     end
 
     def apis_configs=(configs = {})
@@ -160,6 +162,17 @@ module ApiRecipes
     end
 
     # @private
+    # A copy of value whose Hashes, Arrays and unfrozen Strings are new
+    # objects; any other object is the same.
+    def deep_copy(value)
+      case value
+      when Hash then value.to_h { |key, item| [deep_copy(key), deep_copy(item)] }
+      when Array then value.map { |item| deep_copy(item) }
+      when String then value.frozen? ? value : value.dup
+      else value
+      end
+    end
+
     # @private
     def default_logger
       log = ::Logger.new(log_to || $stderr)

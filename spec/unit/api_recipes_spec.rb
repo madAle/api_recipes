@@ -59,6 +59,41 @@ describe ApiRecipes do
       expect(ApiRecipes.logger).to equal(other_logger)
       expect(ApiRecipes.svc.ping.url.to_s).to eq('https://other.example.test/ping')
     end
+
+    it 'keeps the previous configuration when a failed configure changed what it holds in place' do
+      logger = Logger.new(IO::NULL)
+      path = File.expand_path('../fixtures/two_apis.yml', __dir__)
+      ApiRecipes.configure do |config|
+        config.logger = logger
+        config.apis_files_paths = [path.dup]
+        config.apis_configs = { svc: { host: 'api.example.test', endpoints: { users: { path: '/people' } } } }
+        config.variables = { svc: { region: 'eu' } }
+      end
+      before = ApiRecipes.configuration
+      failures = [
+        ->(config) { config.apis_configs[:svc][:bogus] = 1 },
+        lambda do |config|
+          config.apis_configs[:svc][:endpoints][:users][:path].replace('/evil')
+          config.variables[:svc] = 1
+        end,
+        lambda do |config|
+          config.variables[:svc][:region] = 'us'
+          config.apis_configs[:svc][:host] = 1
+        end,
+        ->(config) { config.apis_files_paths.first.replace('missing.yml') }
+      ]
+      failures.each do |change|
+        expect { ApiRecipes.configure { |config| change.call(config) } }.to raise_error(ApiRecipes::ConfigurationError)
+      end
+      expect(before.apis_configs).to eq(svc: { host: 'api.example.test', endpoints: { users: { path: '/people' } } })
+      expect([before.apis_files_paths, before.variables]).to eq([[path], { svc: { region: 'eu' } }])
+      shared = nil
+      ApiRecipes.configure { |config| shared = config.logger }
+      expect(shared).to equal(logger)
+      expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/people')
+      expect(ApiRecipes.svc.variables).to eq(region: 'eu')
+      expect(ApiRecipes.apis).to contain_exactly(:svc, :billing)
+    end
   end
 
   describe '.configuration' do
