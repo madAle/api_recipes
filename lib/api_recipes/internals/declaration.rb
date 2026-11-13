@@ -37,8 +37,11 @@ module ApiRecipes
           api_name = name.to_sym
           check_clash(klass, api_name, method_name)
           variables = Registry.variable_values(variables)
-          check_variables(api_name, variables)
-          errors = Compiler.check_options(options, :api)
+          global = Registry.current.definitions[api_name]
+          check_variables(api_name, variables, global)
+          # The variables that the options use are those of the global api.
+          # Without one yet, the tree compiled at the first use checks them.
+          errors = Compiler.check_options(options, :api, variables: global ? global.variables.keys : :any)
           raise ConfigurationError.new(errors) unless errors.empty?
 
           declaration = new(klass, api_name, Compiler.frozen_copy(options), variables)
@@ -54,8 +57,7 @@ module ApiRecipes
 
         # The names of variables against the global api, when it is configured
         # already; else refresh checks them at the first use.
-        def check_variables(api_name, variables)
-          definition = Registry.current.definitions[api_name]
+        def check_variables(api_name, variables, definition)
           return unless definition
 
           problems = Compiler.unknown_variables(variables, definition, api_name.to_s)
@@ -193,7 +195,7 @@ module ApiRecipes
           definition = global
           handles = global_handles
         else
-          definition = Compiler.compile(@name, Compiler.deep_merge(registry.configs[@name] || {}, @options))
+          definition = Compiler.compile(@name, own_config(registry.configs[@name]))
           handles = Handles.new(definition)
           warnings = handles.warnings - (global_handles ? global_handles.warnings : [])
           warnings.each { |message| ApiRecipes.logger.warn(message) }
@@ -204,6 +206,16 @@ module ApiRecipes
         write_variables if @variables_generation != LevelSet.generation
         @tree = Tree.new(generation: registry.generation, definition: definition, handles: handles, global: global,
                          api_class: handles.for(definition))
+      end
+
+      # The configuration of the tree of the class: its options over those of
+      # the global api. For an api that only the class declares, the names
+      # given in variables: are its variables.
+      def own_config(global_config)
+        return Compiler.deep_merge(global_config, @options) if global_config
+        return @options if @variables.nil? || @variables.empty?
+
+        @options.merge(variables: @variables.to_h { |name, _value| [name, {}] })
       end
     end
   end

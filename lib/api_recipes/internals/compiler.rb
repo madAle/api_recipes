@@ -56,11 +56,13 @@ module ApiRecipes
         end
 
         # scope: :api, :with_api or :with_endpoint. Returns the problems, never raises.
-        def check_options(options, scope)
+        # variables, for :api only: the names that the options may use beside
+        # those they declare; :any when they are not known yet.
+        def check_options(options, scope, variables: [])
           raise ArgumentError, "unknown scope '#{scope}'" unless %i[api with_api with_endpoint].include?(scope)
 
           compiler = new
-          compiler.check(options, scope)
+          compiler.check(options, scope, variables)
           compiler.errors
         end
 
@@ -128,13 +130,13 @@ module ApiRecipes
         end.freeze
       end
 
-      def check(options, scope)
+      def check(options, scope, variables = [])
         unless options.is_a?(Hash)
           add('', 'options must be a Hash')
           return
         end
         options = normalize(options, '')
-        scope == :api ? api_attrs(nil, options, '') : validate_with(options, scope)
+        scope == :api ? api_attrs(nil, options, '', variables) : validate_with(options, scope)
       end
 
       def resolve(options, scope)
@@ -289,10 +291,11 @@ module ApiRecipes
 
       # ---- api ----
 
-      def api_attrs(_name, config, location)
+      # known: names of variables declared elsewhere, or :any to accept every name.
+      def api_attrs(_name, config, location, known = [])
         check_keys(config, API_KEYS, location)
         variables = config[:variables].is_a?(Hash) ? config[:variables] : {}
-        declared = variables.keys
+        declared = known == :any ? nil : variables.keys + known
         attrs = {}
         attrs[:protocol] = option(:protocol, config, location, :api, declared)
         host = option(:host, config, location, :api, declared)

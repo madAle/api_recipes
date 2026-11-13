@@ -112,13 +112,85 @@ describe 'Variables that the api does not declare' do
       expect { klass.new.shopify }.to raise_error(ApiRecipes::ConfigurationError, /shpo/)
     end
 
-    it 'raises at the first use for an api declared by the class alone, which has no variables' do
+    it 'lets a class use a variable of the global api in its own options' do
+      configure_test_apis(shopify: shopify)
       klass = Class.new do
         include ApiRecipes
-        api :local, host: 'local.example.test', variables: { shop: 'x' }
+        api :shopify, host: '{shop}.staging.example.test', base_url: 'staging/{api_version}',
+                      default_headers: { 'X-Shop' => '{shop}' }
       end
-      expect { klass.local }
-        .to raise_error(ApiRecipes::ConfigurationError, /local.variables: unknown variable 'shop' \(none declared\)/)
+      api = klass.shopify.with(variables: { shop: 'acme' })
+      expect(api.orders.url.to_s).to eq('https://acme.staging.example.test/staging/2026-10/orders')
+      api.orders.run
+      expect(WebMock).to have_requested(:get, 'https://acme.staging.example.test/staging/2026-10/orders')
+        .with(headers: { 'X-Shop' => 'acme' })
+    end
+
+    it 'raises when the declaration is made for an unknown variable in the options, if the global api is configured' do
+      configure_test_apis(shopify: shopify)
+      expect do
+        Class.new do
+          include ApiRecipes
+          api :shopify, host: '{shpo}.staging.example.test'
+        end
+      end.to raise_error(ApiRecipes::ConfigurationError) { |e|
+        expect(problems(e)).to eq(["host: unknown variable 'shpo'"])
+      }
+    end
+
+    it 'raises at the first use for an unknown variable in the options, if the api is not known at declaration' do
+      klass = Class.new do
+        include ApiRecipes
+        api :shopify, host: '{shpo}.staging.example.test'
+      end
+      configure_test_apis(shopify: shopify)
+      expect { klass.shopify }.to raise_error(ApiRecipes::ConfigurationError) { |e|
+        expect(problems(e)).to eq(["shopify.host: unknown variable 'shpo'"])
+      }
+    end
+
+    describe 'for an api declared by the class alone' do
+      let(:klass) do
+        Class.new do
+          include ApiRecipes
+          api :local, host: '{shop}.example.test', variables: { shop: 'acme' }, endpoints: { orders: nil }
+        end
+      end
+
+      it 'declares the variables named in variables:, with their values at the level of the class' do
+        expect(klass.local.orders.url.to_s).to eq('https://acme.example.test/orders')
+        expect(klass.local.definition.variables.keys).to eq([:shop])
+      end
+
+      it 'lets an instance and with give another value' do
+        client = klass.new
+        client.local.variables = { shop: 'zed' }
+        expect(client.local.orders.url.to_s).to eq('https://zed.example.test/orders')
+        expect(klass.local.with(variables: { shop: 'one' }).orders.url.to_s).to eq('https://one.example.test/orders')
+      end
+
+      it 'still refuses a name that is not among them' do
+        expect { klass.new.local.variables = { shpo: 'x' } }
+          .to raise_error(ApiRecipes::ConfigurationError, /unknown variable 'shpo' \(declared: shop\)/)
+      end
+
+      it 'raises at the first use for a variable that the options use and variables: does not name' do
+        other = Class.new do
+          include ApiRecipes
+          api :local, host: '{shop}.example.test'
+        end
+        expect { other.local }.to raise_error(ApiRecipes::ConfigurationError) { |e|
+          expect(problems(e)).to eq(["local.host: unknown variable 'shop'"])
+        }
+      end
+
+      it 'uses the declaration of the global api as soon as there is one' do
+        klass.local
+        configure_test_apis(local: { host: 'global.example.test', endpoints: { orders: nil } })
+        expect { klass.local }.to raise_error(ApiRecipes::ConfigurationError) { |e|
+          expect(problems(e)).to eq(["local.host: unknown variable 'shop'"])
+        }
+      end
     end
 
     it 'does not store a declaration that fails' do

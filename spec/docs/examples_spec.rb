@@ -30,7 +30,7 @@ require 'yaml'
 module DocExamples
   DOCUMENTS = %w[README.md UPGRADING.md].freeze
   API_NAMES = %w[github billing shopify].freeze
-  PAIRS = { 'README.md' => 26, 'UPGRADING.md' => 6 }.freeze
+  PAIRS = { 'README.md' => 27, 'UPGRADING.md' => 6 }.freeze
   RESPONSE_BODY = { login: 'octocat', name: 'The Octocat', id: 583_231 }.to_json.freeze
   PAIR = /\A\s*# => (".*")\s*\z/
 

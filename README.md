@@ -289,6 +289,22 @@ store.shopify.products.url.to_s
 # => "https://zed.myshopify.com/admin/api/2026-10/products"
 ```
 
+The options that a class gives to `api` can use the variables of the API, as in
+`api :shopify, host: '{shop}.staging.example.test'`. When an API exists only in
+a class, the names given in `variables:` are its variables, so each one gets a
+value there, and an object or `with` can give another:
+
+```ruby
+class Sandbox
+  include ApiRecipes
+  api :sandbox, host: '{tenant}.sandbox.example.test', variables: { tenant: 'demo' },
+                endpoints: { ping: nil }
+end
+
+Sandbox.sandbox.with(variables: { tenant: 'acme' }).ping.url.to_s
+# => "https://acme.sandbox.example.test/ping"
+```
+
 Or for everybody, when the application starts:
 
 ```ruby
