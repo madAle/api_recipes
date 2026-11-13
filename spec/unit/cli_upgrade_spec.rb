@@ -24,6 +24,33 @@ describe 'api_recipes upgrade' do
     expect(out).to include('What this command cannot find', '4 findings')
   end
 
+  it 'finds a rescue of an error class that was removed' do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'a.rb'), <<~RUBY)
+        begin
+          call
+        rescue ApiRecipes::RouteAndResourceNamesClashError, ApiRecipes::MissingRouteAttribute
+        end
+        rescue ApiRecipes::ProvidedObjectNotAsResponseData
+        rescue ApiRecipes::NoConfigurationGivenForEndpoint
+      RUBY
+      code, out, = run('upgrade', dir)
+      expect(code).to eq(1)
+      expect(out.scan('[breaks] this error class was removed').size).to eq(3)
+      expect(out).to include('a.rb:3:', 'a.rb:5:', 'a.rb:6:')
+    end
+  end
+
+  it 'lists the accessors and changes that a text search cannot tell apart' do
+    _, out, = run('upgrade', File.join(root, 'app'))
+    expect(out).to include('Endpoint#name, #params, #children, #api and Api#name, #configs, #object',
+                           'an object restored from a serialized form',
+                           'response.uri leaves out the credential query parameter',
+                           'a redirect to a host with non-ASCII characters needs the addressable gem',
+                           'an endpoint called with, definition, authorization, basic_auth or variables',
+                           'or run, url, with or definition')
+  end
+
   it 'lists the changes that a search in the text cannot find' do
     _, out, = run('upgrade', File.join(root, 'app'))
     expect(out).to include('a class with its own host, protocol or port that relied on the global credential',

@@ -14,6 +14,8 @@ module ApiRecipes
         Rule.new(:breaks, /\.route\b/, 'endpoint.route was removed: use response.fill or endpoint.definition'),
         Rule.new(:breaks, /RouteNameClashWithExistentMethod/,
                  'this error class was removed: a name clash is now a warning'),
+        Rule.new(:breaks, /RouteAndResourceNamesClashError|MissingRouteAttribute|ProvidedObjectNotAsResponseData|NoConfigurationGivenForEndpoint/,
+                 'this error class was removed: nothing raised it, so the rescue clause can go'),
         Rule.new(:breaks, /\.base_configs\b/, 'Api#base_configs was removed: use api.definition'),
         Rule.new(:breaks, /ApiRecipes\.print_urls/, 'use config.print_urls inside ApiRecipes.configure'),
         Rule.new(:breaks, /_aprcps_|set_authorization_for_api|set_basic_auth_for_api|copy_global_authorizations_to_api/,
@@ -38,12 +40,16 @@ module ApiRecipes
         'a block passed to run whose return value is used: it is now the Response',
         'apis_configs assigned after the files to discard them: do not assign the files',
         'a nested endpoint without options under a parent with verify_with: it now inherits the verification',
-        'an endpoint called with, definition or variables: reach it with []; the warning at configuration reports it',
+        'an endpoint called with, definition, authorization, basic_auth or variables (on an api), or run, url, with or definition (on an endpoint): reach it with []; the warning at configuration reports it',
         'fill with private setters, or code that relies on swallowed errors: make the setters public, handle the errors',
         'follow: true together with a credential: the credential no longer follows to another host',
         'a class with its own host, protocol or port that relied on the global credential: set the credential on the class',
         'cookies set by a server during a redirect chain: they are no longer carried to the next hop',
         'api names that are methods of Kernel, such as :open or :format: they raise ApiNameClashError, use as:',
+        'Endpoint#name, #params, #children, #api and Api#name, #configs, #object were removed: use definition (a search cannot tell them from other methods called like that)',
+        'an object restored from a serialized form (Marshal, YAML) has no credential: assign it again',
+        'response.uri leaves out the credential query parameter when the api declares auth type query',
+        'a redirect to a host with non-ASCII characters needs the addressable gem',
         'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable'
       ].freeze
 
