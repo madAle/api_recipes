@@ -91,15 +91,18 @@ module ApiRecipes
 
         private
 
-        def merge(base, override)
+        # A nil option keeps what the base has. Among endpoints a nil value
+        # for a name that the base does not have is kept: it is an endpoint
+        # given without options.
+        def merge(base, override, endpoints = false)
           merged = base.dup
           override.each do |key, value|
-            next if value.nil?
+            next if value.nil? && (!endpoints || merged.key?(key))
 
             merged[key] = if IGNORED_KEY.match?(key.to_s) || !(value.is_a?(Hash) && merged[key].is_a?(Hash))
                             value
                           else
-                            merge(merged[key], value)
+                            merge(merged[key], value, !endpoints && key == :endpoints)
                           end
           end
           merged
