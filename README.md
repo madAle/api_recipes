@@ -310,6 +310,9 @@ every level, so a misspelled name is never ignored.
 it on. Assigning `nil` clears them. At the global level (`ApiRecipes.shopify`)
 that includes the values given with `config.variables`, which are the same level;
 a default declared in the file applies again.
+The values given with `config.variables` are applied again at every `configure`,
+so a value assigned directly with `ApiRecipes.shopify.variables = ...` under the
+same name lasts only until the next `configure`.
 
 ## Loading the configuration
 
