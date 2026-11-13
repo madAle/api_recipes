@@ -44,6 +44,18 @@ module ApiRecipes
         configuration.logger.warn(message) if first
       end
 
+      # The upgrade warning for a path parameter: kind is :slash or :encoded.
+      def warn_upgrade(endpoint, param, kind)
+        message = if kind == :slash
+                    "#{endpoint}: the value of '#{param}' contains '/' and is now sent as %2F. " \
+                      "To span several segments use *#{param} in the path."
+                  else
+                    "#{endpoint}: the value of '#{param}' looks already percent-encoded. " \
+                      'ApiRecipes now encodes path parameters itself.'
+                  end
+        warn_once([endpoint, param, kind], message)
+      end
+
       # Removes the methods generated on ApiRecipes and empties the registry.
       def reset!
         LOCK.synchronize do

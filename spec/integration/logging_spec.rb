@@ -79,6 +79,48 @@ describe 'Logging' do
     expect(lines.last).to match(%r{GET https://api\.example\.test/users/x%0AFORGED%20line%2F -> 200})
   end
 
+  it 'detects a slash and an encoded sequence in a value that is not valid UTF-8' do
+    configure
+    ApiRecipes.svc.users.show("\xff/".dup.force_encoding('UTF-8')).url
+    expect(io.string).to include("contains '/'")
+    expect(io.string).not_to include('percent-encoded')
+    io.truncate(0)
+    io.rewind
+    ApiRecipes.svc.users.show("\xff%41".dup.force_encoding('UTF-8')).url
+    expect(io.string).to include('looks already percent-encoded')
+    expect(io.string).not_to include("contains '/'")
+  end
+
+  it 'does not take a lone percent sign for an encoded value' do
+    configure
+    ApiRecipes.svc.users.show('100%').url
+    ApiRecipes.svc.users.show('%4').url
+    expect(io.string).to eq('')
+  end
+
+  it 'warns about an encoded sequence in a splat value' do
+    log = io
+    ApiRecipes.configure do |config|
+      config.log_to = log
+      config.apis_configs = { svc: { host: 'api.example.test', endpoints: { files: { path: '/*rest' } } } }
+    end
+    ApiRecipes.svc.files('a/b%41/c').url
+    expect(io.string).to include("svc.files: the value of 'rest' looks already percent-encoded")
+  end
+
+  it 'leaves the level and the output of a logger given by the application alone' do
+    log = Logger.new(io, level: Logger::ERROR)
+    ApiRecipes.configure do |config|
+      config.logger = log
+      config.print_urls = true
+      config.apis_configs = { svc: { host: 'api.example.test', endpoints: { users: { path: '/:id' } } } }
+    end
+    stub_request(:any, /example\.test/).to_return(status: 200)
+    ApiRecipes.svc.users(7).run
+    expect(log.level).to eq(Logger::ERROR)
+    expect(io.string).to eq('')
+  end
+
   it 'works with a logger that only has debug, info and warn' do
     calls = []
     custom = Object.new

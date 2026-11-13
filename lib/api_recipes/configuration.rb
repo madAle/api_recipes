@@ -185,8 +185,16 @@ module ApiRecipes
       when :error, ::Logger::ERROR, 'error' then ::Logger::ERROR
       when :fatal, ::Logger::FATAL, 'fatal' then ::Logger::FATAL
       else
-        ENV['LOG_LEVEL'] || (print_urls ? ::Logger::INFO : ::Logger::WARN)
+        env_log_level || (print_urls ? ::Logger::INFO : ::Logger::WARN)
       end
+    end
+
+    # @private
+    # The level named by LOG_LEVEL in any letter case, or nil: a value that is
+    # not a level is ignored.
+    def env_log_level
+      name = ENV['LOG_LEVEL'].to_s.strip.downcase
+      %w[debug info warn error fatal].index(name)
     end
   end
 end

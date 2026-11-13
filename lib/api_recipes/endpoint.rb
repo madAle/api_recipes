@@ -8,6 +8,10 @@ module ApiRecipes
   # the class has only the public methods below, and inside them the only
   # private methods called are raise and block_given?.
   class Endpoint
+    # One Proc for all the endpoints: a block written in initialize costs an
+    # object per endpoint, in a chain that is built again at every call.
+    UPGRADE_WARNING = proc { |param, kind, endpoint| Registry.warn_upgrade(endpoint, param, kind) }
+
     # args: the path values, then optionally a Hash of options for http.rb.
     # overrides: the options given to with, for this request only.
     def initialize(context, definition, parent_path, args, overrides = nil)
@@ -22,16 +26,7 @@ module ApiRecipes
       count = @options ? args.size - 1 : args.size
       raise PathParamsMismatch.new(definition.full_path, params, args.first(count)) unless count == params.size
 
-      name = definition.full_name
-      own = definition.template.expand(args, endpoint: name) do |param, kind|
-        if kind == :slash
-          Registry.warn_once([name, param, kind], "#{name}: the value of '#{param}' contains '/' and is now sent " \
-                                                  "as %2F. To span several segments use *#{param} in the path.")
-        else
-          Registry.warn_once([name, param, kind], "#{name}: the value of '#{param}' looks already " \
-                                                  'percent-encoded. ApiRecipes now encodes path parameters itself.')
-        end
-      end
+      own = definition.template.expand(args, endpoint: definition.full_name, &UPGRADE_WARNING)
       if own.empty?
         @path = parent_path
       else

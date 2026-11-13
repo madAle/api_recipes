@@ -263,6 +263,28 @@ describe ApiRecipes::Configuration do
       ENV.delete('LOG_LEVEL')
     end
 
+    it 'ignores a LOG_LEVEL that is not a level, as if it was not set' do
+      ENV['LOG_LEVEL'] = 'bogus'
+      configuration.log_to = StringIO.new
+      expect(configuration.logger.level).to eq(Logger::WARN)
+      configuration.print_urls = true
+      expect(configuration.logger.level).to eq(Logger::INFO)
+    ensure
+      ENV.delete('LOG_LEVEL')
+    end
+
+    it 'honours LOG_LEVEL in any letter case' do
+      { 'debug' => Logger::DEBUG, 'DEBUG' => Logger::DEBUG, 'Info' => Logger::INFO, 'ERROR' => Logger::ERROR }
+        .each do |value, level|
+        ENV['LOG_LEVEL'] = value
+        config = ApiRecipes::Configuration.new
+        config.log_to = StringIO.new
+        expect(config.logger.level).to eq(level)
+      end
+    ensure
+      ENV.delete('LOG_LEVEL')
+    end
+
     it 'takes the default level from the LOG_LEVEL variable' do
       ENV['LOG_LEVEL'] = 'warn'
       configuration.log_to = StringIO.new
