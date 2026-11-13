@@ -78,6 +78,23 @@ describe 'Credentials, variables and class trees through the DSL' do
     expect(definitions.uniq(&:object_id).size).to eq(1)
   end
 
+  it 'compiles the tree of a class from the registry current when the lock is taken' do
+    configure_test_apis(svc: { host: 'one.example.test', endpoints: { users: nil } })
+    klass = Class.new do
+      include ApiRecipes
+      api :svc, timeout: 10
+    end
+    lock = klass.instance_variable_get(:@__api_recipes_declarations)[:svc].instance_variable_get(:@lock)
+    waiting = nil
+    lock.synchronize do
+      waiting = Thread.new { klass.svc.definition }
+      Thread.pass until waiting.status == 'sleep'
+      configure_test_apis(svc: { host: 'two.example.test', endpoints: { users: nil } })
+    end
+    expect(waiting.value.host).to eq('two.example.test')
+    expect(klass.svc.definition).to equal(waiting.value)
+  end
+
   it 'lets a subclass inherit the api and the class credential, without leaking back' do
     configure_test_apis(svc: { host: 'api.example.test', endpoints: { users: nil } })
     parent = Class.new do

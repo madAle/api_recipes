@@ -17,6 +17,7 @@ require 'api_recipes/api'
 require 'api_recipes/endpoint'
 require 'api_recipes/handles'
 require 'api_recipes/registry'
+require 'api_recipes/declaration'
 
 module ApiRecipes
   # `include ApiRecipes` adds the class macro `api`. options is a positional
@@ -25,7 +26,7 @@ module ApiRecipes
   # of the class).
   def self.included(receiver)
     def receiver.api(name, options = {})
-      Registry::Declaration.declare(self, name, options)
+      Declaration.declare(self, name, options)
     end
   end
 
