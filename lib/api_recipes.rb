@@ -1,7 +1,7 @@
 require 'http'
 
 require 'api_recipes/utils'
-require 'api_recipes/exceptions'
+require 'api_recipes/errors'
 require 'api_recipes/configuration'
 require 'api_recipes/route'
 require 'api_recipes/endpoint'

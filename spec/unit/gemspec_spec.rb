@@ -13,4 +13,9 @@ describe 'api_recipes.gemspec' do
       'source_code_uri' => 'https://github.com/madAle/api_recipes'
     )
   end
+
+  it 'requires a maintained Ruby and MFA to publish' do
+    expect(gemspec.required_ruby_version).to eq(Gem::Requirement.new('>= 3.3.0'))
+    expect(gemspec.metadata['rubygems_mfa_required']).to eq('true')
+  end
 end

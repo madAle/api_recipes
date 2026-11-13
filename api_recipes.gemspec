@@ -14,13 +14,14 @@ Gem::Specification.new do |spec|
   spec.license       = 'MIT'
   spec.metadata      = {
     'changelog_uri'   => 'https://github.com/madAle/api_recipes/blob/master/CHANGELOG.md',
-    'source_code_uri' => 'https://github.com/madAle/api_recipes'
+    'source_code_uri' => 'https://github.com/madAle/api_recipes',
+    'rubygems_mfa_required' => 'true'
   }
 
   spec.files         = Dir['README.md', 'MIT-LICENSE', 'lib/**/*.rb']
   spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }
   spec.require_paths = ['lib']
-  spec.required_ruby_version = '>= 2.7.0'
+  spec.required_ruby_version = '>= 3.3.0'
 
   # '<= 5.1' let in 5.1.0 only, which requires base64 without declaring it: from
   # Ruby 3.4 base64 is no longer a default gem. 5.x stays API compatible; 6.0 is
