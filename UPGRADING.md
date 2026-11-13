@@ -417,13 +417,15 @@ config/apis/github.yml: [config] github: unknown option 'hots'
 A directory is searched for `*.rb` files only; a file you name is read whatever
 its name. The command then prints the list of changes that a search in the text
 cannot find, which you check by hand (this guide has the details of each), and a
-summary line: `Nothing to change`, `1 finding` or `N findings`.
+summary line: `Nothing to change`, `1 finding` or `N findings`. The summary line
+is left out when there is no finding and something could not be read.
 
-A file or a directory that could not be read (missing, binary, not valid UTF-8)
-is reported on the error stream, as `<file>: <reason>`, and is not a finding. The
-exit code is 1 when there is at least one finding, even if something could not be
-read; otherwise it is 2 when something could not be read, and 0 when there is
-nothing to change. It can run in a CI.
+A file or a directory that could not be read (missing, binary, not valid UTF-8,
+or not readable for lack of permission) is reported on the error stream, as
+`<file>: <reason>`, and is not a finding. The exit code is 1 when there is at
+least one finding, even if something could not be read; otherwise it is 2 when
+something could not be read, and 0 when there is nothing to change. It can run
+in a CI.
 
 The command does not rewrite code. What matters most depends on values that exist
 only when the program runs, and an automatic rewrite would give a false sense of
