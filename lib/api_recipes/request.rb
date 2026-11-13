@@ -9,7 +9,7 @@ module ApiRecipes
       @context = context
       @definition = definition
       @path = path
-      @options = (options || {}).transform_keys { |key| key.respond_to?(:to_sym) ? key.to_sym : key }
+      @options = symbol_keys(options || {})
       @overrides = overrides
     end
 
@@ -96,20 +96,46 @@ module ApiRecipes
         params = options[:params].to_a.reject { |key, _| key.to_s == auth[:name] }
         options = options.merge(params: params << [auth[:name], credential.value])
       end
-      options = options.merge(follow: follow_option(origin)) if credential && options[:follow]
+      follow = options[:follow]
+      options = options.merge(follow: protected_follow(follow, origin)) if follow == true || follow.is_a?(Hash)
       options
     end
 
-    # Follows redirects, but drops the credential and the cookies before a
-    # request that leaves the origin. Then calls the on_redirect of the caller.
-    def follow_option(origin)
-      settings = @options[:follow].is_a?(Hash) ? @options[:follow] : {}
+    # true or a Hash: follows redirects, but a request that leaves the origin
+    # loses Authorization, Cookie and what auth names, wherever they came from.
+    # Then the on_redirect of the caller is called. Any other value is left to
+    # http.rb.
+    def protected_follow(follow, origin)
+      settings = follow.is_a?(Hash) ? symbol_keys(follow) : {}
       given = settings[:on_redirect]
-      names = ['Authorization', 'Cookie', (auth[:name] if auth[:type] == :header)].compact
       settings.merge(on_redirect: lambda do |response, request|
-        names.each { |name| request.headers.delete(name) } unless same_origin?(request.uri, origin)
+        leave_origin(request) unless same_origin?(request.uri, origin)
         given.call(response, request) if given.respond_to?(:call)
       end)
+    end
+
+    def leave_origin(request)
+      name = auth[:name]
+      ['Authorization', 'Cookie', name].compact.each { |header| request.headers.delete(header) }
+      drop_param(request.uri, name) if auth[:type] == :query
+    end
+
+    def drop_param(uri, name)
+      return if uri.query.nil?
+
+      kept = uri.query.split('&').reject { |pair| param_named?(pair, name) }
+      uri.query = kept.empty? ? nil : kept.join('&')
+    end
+
+    def param_named?(pair, name)
+      key = pair.split('=', 2).first.to_s
+      key == name || URI.decode_www_form_component(key) == name
+    rescue ArgumentError
+      false
+    end
+
+    def symbol_keys(hash)
+      hash.transform_keys { |key| key.is_a?(String) && key.valid_encoding? ? key.to_sym : key }
     end
 
     def respond(http_response)

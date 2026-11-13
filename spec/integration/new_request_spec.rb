@@ -72,4 +72,16 @@ describe ApiRecipes::Request do
     expect { request.perform }.to raise_error(ApiRecipes::InvalidUrl)
     expect(WebMock).not_to have_requested(:any, /evil\.test/)
   end
+
+  it 'refuses to send to a url that http.rb cannot parse or reads as another origin' do
+    stub_request(:any, /evil\.test/).to_return(status: 200)
+    unparsable = URI::HTTPS.new('https', nil, 'api example.test', nil, nil, '/users', nil, nil, nil, nil, false)
+    [unparsable, URI('http://api.example.test:443/users'), URI('https://api.example.test:8443/users'),
+     URI('https://api.example.test@evil.test/users')].each do |url|
+      request = new_request(base, %i[users])
+      allow(request).to receive(:url).and_return(url)
+      expect { request.perform }.to raise_error(ApiRecipes::InvalidUrl)
+    end
+    expect(WebMock).not_to have_requested(:any, /example\.test|evil\.test/)
+  end
 end
