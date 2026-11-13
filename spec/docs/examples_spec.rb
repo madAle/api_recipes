@@ -12,9 +12,16 @@ require 'yaml'
 # code that is directly followed by a line `# => "..."`. The code of the block
 # up to that line is evaluated and the `to_s` of the result must equal the
 # string. Lines that are not followed by a comment of that form are context:
-# they run, but nothing is compared. A `# =>` comment that is not a string
-# literal is illustrative and is not checked. A line that cannot be evaluated
-# fails the example.
+# they run, but nothing is compared. A line that cannot be evaluated fails the
+# example.
+#
+# What it does not cover: a `# =>` comment whose value is not a plain double
+# quoted String (`# => 200`, `# => [{ ... }]`) and the comments at the end of a
+# line of code (`code # => 200`) are illustrations and are not checked. The
+# text of an expected String is read as JSON, never evaluated. A `# =>` line
+# that is not directly under a line of text, and a fence such as "```ruby title",
+# fail the examples instead of being skipped. The number of checked pairs of
+# each document is pinned: change PAIRS when you add or remove one on purpose.
 #
 # The APIs are configured with the ```yaml blocks of the same document whose
 # first key is github, billing or shopify: for each name, the last block that
@@ -23,6 +30,7 @@ require 'yaml'
 module DocExamples
   DOCUMENTS = %w[README.md UPGRADING.md].freeze
   API_NAMES = %w[github billing shopify].freeze
+  PAIRS = { 'README.md' => 26, 'UPGRADING.md' => 6 }.freeze
   RESPONSE_BODY = { login: 'octocat', name: 'The Octocat', id: 583_231 }.to_json.freeze
   PAIR = /\A\s*# => (".*")\s*\z/
 
@@ -50,6 +58,8 @@ module DocExamples
         else
           current.lines << text
         end
+      elsif text.match?(/\A```(ruby|yaml)\S/) || text.match?(/\A```(ruby|yaml)\s+\S/)
+        raise "#{document}:#{number}: the fence #{text.inspect} is not exactly ```ruby or ```yaml, so its code would be skipped"
       elsif (match = text.match(/\A```(ruby|yaml)\z/))
         fence = match[1]
         current = Block.new(document: document, title: title, first_line: number + 1, lines: [], yaml: yaml.dup)
@@ -65,8 +75,24 @@ module DocExamples
     block.lines.each_index.filter_map do |index|
       next unless (match = block.lines[index + 1]&.match(PAIR))
 
-      [index, Kernel.eval(match[1])]
+      [index, expected_string(block, index + 1, match[1])]
     end
+  end
+
+  def expected_string(block, index, text)
+    value = JSON.parse(text)
+    raise TypeError unless value.is_a?(String)
+
+    value
+  rescue JSON::ParserError, TypeError
+    raise "#{block.document}:#{block.first_line + index}: #{text} is not a plain double quoted String"
+  end
+
+  # The lines "# =>" that are not directly under a line of text.
+  def detached(block)
+    block.lines.each_index.select do |index|
+      block.lines[index].match?(/\A\s*# =>/) && (index.zero? || block.lines[index - 1].strip.empty?)
+    end.map { |index| block.first_line + index }
   end
 
   def apis_of(block)
@@ -79,11 +105,18 @@ end
 RSpec.describe 'the examples in the documents' do
   DocExamples::DOCUMENTS.each do |document|
     describe document do
-      blocks = DocExamples.blocks(document).select { |block| DocExamples.pairs(block).any? }
+      all_blocks = DocExamples.blocks(document)
+      blocks = all_blocks.select { |block| DocExamples.pairs(block).any? }
 
-      it 'has examples to check' do
+      it 'checks exactly the pinned number of examples' do
         total = blocks.sum { |block| DocExamples.pairs(block).size }
-        expect(total).to be >= (document == 'README.md' ? 12 : 4)
+        expect(total).to eq(DocExamples::PAIRS.fetch(document)),
+                         "#{document} has #{total} checked examples; update PAIRS on purpose if that is right"
+      end
+
+      it 'has no "# =>" line that is detached from its code' do
+        lines = all_blocks.flat_map { |block| DocExamples.detached(block) }
+        expect(lines).to be_empty, "#{document}: lines #{lines.join(', ')} start with # => without a line above"
       end
 
       blocks.each do |block|
