@@ -1,7 +1,8 @@
 ## Unreleased
 
-The first pre-release of 3.0. The DSL is the same, and a valid YAML file needs no
-change. Read [UPGRADING.md](UPGRADING.md) before you move: it lists what stops, what
+The first pre-release of 3.0. The DSL is the same, and a YAML file that is valid
+for 2.x needs no change, except for a placeholder in `base_url` and a `{word}` in
+a header value. Read [UPGRADING.md](UPGRADING.md) before you move: it lists what stops, what
 changes silently and what was removed, and explains `api_recipes upgrade`, which
 looks for them in your code.
 
@@ -17,15 +18,21 @@ looks for them in your code.
   lists every problem. Keys starting with `x-` are free. A failed `configure`
   leaves the previous configuration active.
 - A `base_url` with a path placeholder is a configuration error: use a variable.
+- A word in braces in a value of `default_headers`, such as `{id}`, is a
+  variable: one that is not declared is a configuration error.
 - A credential is valid only for the origin (scheme, host, port) of the level that
   set it. A class with its own `host`, `protocol` or `port` needs its own
-  credential, or the request raises `ApiRecipes::CredentialOriginMismatch`.
+  credential, or the request raises `ApiRecipes::CredentialOriginMismatch`. The
+  same error is raised through an api or an endpoint kept in a variable across a
+  `configure` that moves the api to another origin.
 - A path parameter that is `nil`, empty, `.` or `..` raises
   `ApiRecipes::InvalidPathParameter`.
 - `api :open`, `api :test` and other names of existing methods raise
   `ApiNameClashError`; use `as:`. An api can be declared once in a class hierarchy.
-- A credential with a line break or a control character raises
-  `ApiRecipes::InvalidCredential`.
+- A credential with a line break or a control character, or one that is not a
+  String, raises `ApiRecipes::InvalidCredential`.
+- A control character in a name or a value of the `headers:` of a request raises
+  `ApiRecipes::ConfigurationError`, which never shows the value.
 - Empty names and names with control characters are refused for apis and
   endpoints.
 - `follow` accepts only `true`, `false`, `nil` or a Hash with `strict`,
@@ -57,7 +64,12 @@ looks for them in your code.
 - `Response#fill` calls only public writers and no longer swallows their errors.
 - `Response#uri` leaves out the credential query parameter when the api declares
   `auth: { type: 'query' }`.
-- `Api`, `Endpoint` and `Response` refuse serialization.
+- `Response#request` was removed, because the request holds the credentials;
+  `Response#to_s` returns the body.
+- A redirect to an address that http.rb reads only with the `addressable` gem
+  raises `ApiRecipes::InvalidUrl` when the gem is missing.
+- `Api`, `Endpoint` and `Response` refuse serialization. A definition refuses
+  `Marshal` and YAML, and its JSON is its `to_h`.
 
 #### Removed
 
@@ -79,9 +91,12 @@ looks for them in your code.
 - Credentials and variables are looked up along a chain: `with`, the object, the
   class and its ancestors, the global api. Assigning `nil` means "no credential".
 - The `auth` option (`none`, `bearer`, `basic`, `header`, `query`) and the
-  `variables` option, with `config.variables`.
+  `variables` option, with `config.variables`. A class can use the variables of
+  the api in its own options, and for an api that only the class declares the
+  names given in `variables:` are its variables.
 - `ok_code` accepts a list of statuses. `Response#success?`.
-- `definition` and `definition.routes` on apis and endpoints, and a safe `inspect`.
+- `definition` and `definition.routes` on apis and endpoints, and a safe `inspect`,
+  also on the configuration.
 - `config.upgrade_warnings`, `LOG_LEVEL` in any letter case, `log_to` and
   `log_level` for the default logger.
 - The `api_recipes` command with `upgrade`, and the guide UPGRADING.md.
