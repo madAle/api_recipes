@@ -17,25 +17,29 @@ module ApiRecipes
 
     # Scheme, host, port and path. Never a query string: parameters and a
     # credential sent in the query are added only when the request is sent.
-    def url
+    # origin: the one the request already computed, if any.
+    def url(origin = nil)
       return nil unless @definition.route?
 
-      scheme, host, port = parts(@context.origin)
+      scheme, host, port = parts(origin || @context.origin)
       path = @path.start_with?('/') ? @path : "/#{@path}"
       (scheme == 'https' ? URI::HTTPS : URI::HTTP).new(scheme, nil, host, port, nil, path, nil, nil, nil, nil, false)
     end
 
+    # The levels of the context are read once: the origin, the credential and
+    # the headers all come from the same chain.
     def perform
       raise NoRouteExists.new(@definition.name) unless @definition.route?
 
       check_follow
-      origin = @context.origin
-      credential = @context.credential(origin)
-      address = checked(url, origin)
+      chain = @context.levels
+      origin = @context.origin(chain: chain)
+      credential = @context.credential(origin, chain: chain)
+      address = checked(url(origin), origin)
       logger = ApiRecipes.logger
       logger.info(address) if ApiRecipes.configuration.print_urls
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      http_response = client(credential).request(@definition.verb, address, **send_options(credential, origin))
+      http_response = client(credential, chain).request(@definition.verb, address, **send_options(credential, origin))
       elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000
       logger.debug("#{@definition.verb.to_s.upcase} #{address} -> #{http_response.code} (#{elapsed.round(1)}ms)")
       respond(http_response)
@@ -100,13 +104,13 @@ module ApiRecipes
     # An HTTP::Client, not the HTTP::Session the chainable methods of http.rb
     # return: along redirects a session keeps a cookie jar and sets every
     # cookie in it on each hop, after on_redirect and whatever the origin.
-    def client(credential)
-      HTTP::Client.new(configured(credential).default_options)
+    def client(credential, chain)
+      HTTP::Client.new(configured(credential, chain).default_options)
     end
 
     # default_headers, then the credential, then headers: of the request.
-    def configured(credential)
-      session = HTTP.headers(@context.headers).timeout(setting(:timeout))
+    def configured(credential, chain)
+      session = HTTP.headers(@context.headers(chain: chain)).timeout(setting(:timeout))
       return session unless credential
 
       if credential.kind == :basic_auth

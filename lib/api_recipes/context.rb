@@ -1,20 +1,22 @@
 module ApiRecipes
   # Who uses which api: the compiled tree, the owner whose levels hold
-  # credentials and variables, and the options given to with. Immutable: with
-  # returns a new context. Values are read when a request is built, never cached.
+  # credentials and variables, the declaration in use (nil for a global api)
+  # and the options given to with. Immutable: with returns a new context.
+  # Values are read when a request is built, never cached.
   class Context
     # Levels by distance from the request: the smaller, the nearer.
     RANKS = { with: 0, instance: 1, class: 2, global: 3 }.freeze
     DEFAULT_PORTS = { 'http' => 80, 'https' => 443 }.freeze
 
-    attr_reader :definition, :owner, :global_definition, :overrides, :handles
+    attr_reader :definition, :owner, :global_definition, :overrides, :handles, :declaration
 
-    def initialize(definition:, owner:, global_definition: nil, overrides: nil, handles: nil)
+    def initialize(definition:, owner:, global_definition: nil, overrides: nil, handles: nil, declaration: nil)
       @definition = definition
       @owner = owner
       @global_definition = global_definition
       @overrides = (overrides || {}).freeze
       @handles = handles
+      @declaration = declaration
       freeze
     end
 
@@ -31,8 +33,16 @@ module ApiRecipes
         merge_option(merged, name, resolved[name]) if Compiler::WITH_API_KEYS.include?(name)
       end
       self.class.new(definition: @definition, owner: @owner, global_definition: @global_definition,
-                     overrides: merged, handles: @handles)
+                     overrides: merged, handles: @handles, declaration: @declaration)
     end
+
+    # The key of the levels of this api for its readers and writers: the
+    # declaration in use, or the api name for a global api.
+    def level_key = @declaration || @definition.name
+
+    # The levels that hold a value for this api, nearest first. A request
+    # reads them once and passes them as chain to the methods below.
+    def levels = Levels.chain(@owner, @definition.name, @declaration)
 
     # The value of an option, from the nearest place that has one.
     def setting(key, endpoint = nil, endpoint_overrides = nil)
@@ -51,16 +61,14 @@ module ApiRecipes
 
     # Declared defaults, then the levels from the farthest up to up_to. For
     # :global the defaults are those of the global definition (none without it).
-    def variables(up_to: :with)
-      chain = levels
+    def variables(up_to: :with, chain: levels)
       sum_variables(definition_for(up_to), chain, start_of(chain, up_to), up_to == :with)
     end
 
     # "scheme://host" or "scheme://host:port". Only :with applies the protocol,
     # host and port given to with. nil when a variable is missing or there is
     # no global definition, except for :with, which raises MissingVariable.
-    def origin(up_to: :with)
-      chain = levels
+    def origin(up_to: :with, chain: levels)
       origin_from(definition_for(up_to), chain, start_of(chain, up_to), with: up_to == :with)
     end
 
@@ -73,8 +81,8 @@ module ApiRecipes
     end
 
     # The default headers with their variables filled, then the ones given to with.
-    def headers
-      values = variables
+    def headers(chain: levels)
+      values = variables(chain: chain)
       templates = @definition.header_templates
       added = @overrides[:default_headers] || {}
       templates = templates.merge(added.transform_values { |text| Template.new(text, :header) }) unless added.empty?
@@ -86,17 +94,17 @@ module ApiRecipes
     # A credential taken from a level is bound to the origin of that level: if
     # destination (the origin of the request, by default) is another one, it
     # raises CredentialOriginMismatch.
-    def credential(destination = nil)
+    def credential(destination = nil, chain: nil)
       given = @overrides[:credential]
       return (given.none? ? nil : given) if given
 
-      chain = levels
+      chain ||= levels
       chain.each_with_index do |(_kind, level), index|
         found = level.credential
         next if found.nil?
         return nil if found.none?
 
-        check_origin(chain, index, destination || origin)
+        check_origin(chain, index, destination || origin(chain: chain))
         return found
       end
       nil
@@ -130,8 +138,6 @@ module ApiRecipes
     def pretty_print(queue) = queue.text(inspect)
 
     private
-
-    def levels = Levels.chain(@owner, @definition.name)
 
     # The tree a level reads: the global one for the global level, else the owner's.
     def definition_for(kind) = kind == :global ? @global_definition : @definition
@@ -176,9 +182,9 @@ module ApiRecipes
 
     # The origin of a credential comes from its own level and the farther ones,
     # by position: a nearer level that moves the destination does not move it.
-    # The global level uses the global definition, the others the owner's one.
-    # This relies on one declaration of an api name per class hierarchy, so
-    # that every class level of the chain reads the owner's tree.
+    # The global level uses the global definition, the others the owner's one:
+    # every other level of the chain was written through the declaration in
+    # use, whose tree that is.
     def check_origin(chain, index, destination)
       bound = origin_from(definition_for(chain[index].first), chain, index, with: false)
       return if bound && destination && bound.casecmp?(destination)

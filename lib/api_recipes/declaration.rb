@@ -7,10 +7,13 @@ module ApiRecipes
   # instance variable and the generated methods); its subclasses and the
   # classes that include the module share it.
   #
-  # Every level of a credential chain is read with the tree of the
-  # declaration in use, so an api name is declared once per hierarchy. That is
-  # checked when `api` is called and again when a declaration serves an
-  # owner, since include and extend can bring a second declaration later.
+  # A credential or a variable set through a declaration is stored under it
+  # and read only by requests that the same declaration serves (see
+  # Levels.chain), so it never reaches the tree of another declaration of the
+  # api. An api name is also declared once per hierarchy, checked when `api`
+  # is called and again when a declaration serves an owner, to give a clear
+  # error when include or extend brings a second one: the levels do not
+  # depend on that check.
   class Declaration
     IVAR = :@__api_recipes_declarations
     Tree = Data.define(:generation, :definition, :handles, :global, :api_class)
@@ -99,13 +102,16 @@ module ApiRecipes
       @checked = ObjectSpace::WeakMap.new
     end
 
+    # The class or module where `api` was called.
+    def declared_in = @klass
+
     # The api for owner: the class or module, a subclass, an includer, or an
     # instance of one of them.
     def api(owner)
       tree = current_tree
       check_owner(owner, tree.generation)
       tree.api_class.new(Context.new(definition: tree.definition, owner: owner, global_definition: tree.global,
-                                     handles: tree.handles))
+                                     handles: tree.handles, declaration: self))
     end
 
     # Writes the declared variables in the level of the class, again after
@@ -113,7 +119,7 @@ module ApiRecipes
     def write_variables
       return if @variables.nil?
 
-      LevelSet.write(@klass, @name) { |level| level.with(variables: @variables) }
+      LevelSet.write(@klass, self) { |level| level.with(variables: @variables) }
       @variables_generation = LevelSet.generation
     end
 
@@ -127,9 +133,11 @@ module ApiRecipes
 
     # Refuses an owner whose hierarchy holds another declaration of this api.
     # The ancestors of its class (the owner itself for a class or module) are
-    # checked once per class and registry generation, without creating a
-    # singleton class. An owner that reaches a module's declaration through
-    # extend has a singleton class already: its ancestors are checked too.
+    # checked once per class and registry generation. An owner that reaches a
+    # module's declaration through extend has a singleton class: its
+    # ancestors are checked too. Only an owner with singleton methods has
+    # one, so asking for it never creates one (an object can also reach the
+    # declaration through a method copied with define_method).
     def check_owner(owner, generation)
       klass = owner.is_a?(Module) ? owner : owner.class
       unless @checked[klass] == generation
@@ -138,7 +146,7 @@ module ApiRecipes
 
         @checked[klass] = generation
       end
-      return if @klass.is_a?(Class) || klass <= @klass
+      return if @klass.is_a?(Class) || klass <= @klass || owner.singleton_methods.empty?
 
       holder = other_declarer(owner.singleton_class.ancestors)
       raise ApiNameClashError.new(klass, @name, holder) if holder

@@ -5,10 +5,22 @@ describe 'Credentials' do
   let(:base) { { host: 'api.example.test', endpoints: { users: nil } } }
   let(:klass) { Class.new }
 
+  # The levels of classes and objects belong to a declaration (one for every
+  # owner here); the global level keeps the api name.
+  let(:declaration) { ApiRecipes::Declaration.new(klass, :svc, {}, nil) }
+
   before { stub_request(:any, /example\.test/).to_return(status: 200, body: '{}', headers: json) }
 
+  def declaration_for(owner) = owner.equal?(ApiRecipes) ? nil : declaration
+
   def assign(owner, value)
-    ApiRecipes::LevelSet.write(owner, :svc) { |l| l.with(credential: ApiRecipes::Credential.from(:authorization, value)) }
+    credential = ApiRecipes::Credential.from(:authorization, value)
+    ApiRecipes::LevelSet.write(owner, declaration_for(owner) || :svc) { |l| l.with(credential: credential) }
+  end
+
+  # The helper of TestApis, with the levels of owner read through the declaration.
+  def new_request(*args, owner: ApiRecipes, **options)
+    super(*args, owner: owner, declaration: declaration_for(owner), **options)
   end
 
   def sent(headers) = have_requested(:get, 'https://api.example.test/users').with(headers: headers)
@@ -92,7 +104,7 @@ describe 'Credentials' do
     parent = Class.new
     child = Class.new(parent)
     assign(parent, 'Bearer parent')
-    ApiRecipes::LevelSet.write(child, :svc) { |l| l.with(variables: { shop: 'other' }.freeze) }
+    ApiRecipes::LevelSet.write(child, declaration) { |l| l.with(variables: { shop: 'other' }.freeze) }
     expect { new_request(config, %i[users], owner: child.new).perform }
       .to raise_error(ApiRecipes::CredentialOriginMismatch, /other\.example\.test/)
     expect(WebMock).not_to have_requested(:any, /example\.test/)

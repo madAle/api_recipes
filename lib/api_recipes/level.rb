@@ -26,34 +26,39 @@ module ApiRecipes
     def to_json(*) = '"[FILTERED]"'
   end
 
-  # Immutable map api_name => Level. It is stored in the instance variable
-  # @__api_recipes of its owner (an instance, a class or the ApiRecipes module)
-  # and is replaced, never changed. It never writes its content when serialized:
-  # a rebuilt LevelSet is sealed and answers "no credential" for every api.
+  # Immutable map key => Level. It is stored in the instance variable
+  # @__api_recipes of its owner (an instance, a class, a module or the
+  # ApiRecipes module) and is replaced, never changed. The key of a level
+  # written through a declaration is that Declaration, compared by identity;
+  # the key of the global level is the api name. It never writes its content
+  # when serialized: a rebuilt LevelSet is sealed and answers "no credential"
+  # for every key.
   class LevelSet
     IVAR = :@__api_recipes
     FILTERED = '[FILTERED]'.freeze
+    EMPTY = {}.compare_by_identity.freeze
 
     @generation = 0
 
     class << self
-      def read(owner, api_name)
+      # key: a Declaration, or an api name for the global level.
+      def read(owner, key)
         set = live_set(owner)
         return nil unless set
 
-        set.fetch(api_name.to_sym)
+        set.fetch(key.is_a?(String) ? key.to_sym : key)
       end
 
-      def write(owner, api_name)
+      def write(owner, key)
         if owner.frozen?
           raise Error, 'cannot assign credentials or variables on a frozen object. ' \
                        'Use with(...) to get a modified copy instead'
         end
 
         set = live_set(owner)
-        key = api_name.to_sym
+        key = key.to_sym if key.is_a?(String)
         current = set && !set.sealed? ? set.entries[key] : nil
-        entries = set && !set.sealed? ? set.entries : {}
+        entries = set && !set.sealed? ? set.entries : EMPTY
         level = yield(current || Level.new(credential: nil, variables: nil))
         owner.instance_variable_set(IVAR, new(entries.merge(key => level), generation))
         level
@@ -84,10 +89,10 @@ module ApiRecipes
 
     def sealed? = @sealed
 
-    def fetch(api_name)
+    def fetch(key)
       return Level.new(credential: Credential::NONE, variables: nil) if @sealed
 
-      @entries[api_name]
+      @entries[key]
     end
 
     def inspect = "#<ApiRecipes::LevelSet #{FILTERED}>"
@@ -99,7 +104,7 @@ module ApiRecipes
     def marshal_dump = nil
 
     def marshal_load(_data)
-      @entries = {}.freeze
+      @entries = EMPTY
       @generation = self.class.generation
       @sealed = true
       freeze
@@ -110,7 +115,7 @@ module ApiRecipes
     end
 
     def init_with(_coder)
-      @entries = {}.freeze
+      @entries = EMPTY
       @generation = self.class.generation
       @sealed = true
       freeze
@@ -122,34 +127,30 @@ module ApiRecipes
   end
 
   module Levels
-    # Levels that hold a value for api_name, nearest first: the object, the
-    # modules it was extended with, every ancestor of its class (classes and
-    # modules, in order; the owner itself for a class or module), then the
-    # global level. ApiRecipes among the ancestors is the global level.
-    def self.chain(owner, api_name)
+    # Levels that hold a value for one api, nearest first. Those of an object,
+    # a class or a module are the ones written through declaration: the
+    # object, every ancestor of its class (the owner itself for a class or a
+    # module), then the class or module that declared the api when it is not
+    # among them (an object or a class extended with it). A level written
+    # through another declaration is never returned. Last the global level,
+    # by api name. Without a declaration (a global api) only the global level.
+    def self.chain(owner, api_name, declaration)
       chain = []
-      if owner.is_a?(Module)
-        klass = owner
-      else
-        klass = owner.class
-        level = LevelSet.read(owner, api_name)
-        chain << [:instance, level] if level
-        # Only an object with singleton methods has a singleton class, so
-        # asking for it here never creates one.
-        unless owner.singleton_methods.empty?
-          owner.singleton_class.ancestors.each do |mod|
-            break if klass <= mod
-
-            level = LevelSet.read(mod, api_name)
-            chain << [:class, level] if level
-          end
+      if declaration
+        if owner.is_a?(Module)
+          klass = owner
+        else
+          klass = owner.class
+          level = LevelSet.read(owner, declaration)
+          chain << [:instance, level] if level
         end
-      end
-      unless owner.equal?(ApiRecipes)
         klass.ancestors.each do |mod|
-          next if mod.equal?(ApiRecipes)
-
-          level = LevelSet.read(mod, api_name)
+          level = LevelSet.read(mod, declaration)
+          chain << [:class, level] if level
+        end
+        declared_in = declaration.declared_in
+        unless klass <= declared_in
+          level = LevelSet.read(declared_in, declaration)
           chain << [:class, level] if level
         end
       end

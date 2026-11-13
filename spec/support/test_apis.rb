@@ -52,11 +52,14 @@ module TestApis
   end
 
   # Builds a context and a request on the new core, without the DSL. Each node
-  # of endpoint_path takes from values as many values as its path params.
-  def new_request(config, endpoint_path, values = [], owner: ApiRecipes, overrides: nil, options: {}, global: :same)
+  # of endpoint_path takes from values as many values as its path params. The
+  # levels of owner are read through declaration (nil: the global level only).
+  def new_request(config, endpoint_path, values = [], owner: ApiRecipes, overrides: nil, options: {}, global: :same,
+                  declaration: nil)
     definition = ApiRecipes::Compiler.compile(:svc, config)
     context = ApiRecipes::Context.new(definition: definition, owner: owner,
-                                      global_definition: global == :same ? definition : global)
+                                      global_definition: global == :same ? definition : global,
+                                      declaration: declaration)
     context = context.with(overrides) if overrides
     remaining = values.dup
     node = definition

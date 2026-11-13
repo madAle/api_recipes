@@ -7,9 +7,19 @@ describe ApiRecipes::Context do
   end
   let(:definition) { ApiRecipes::Compiler.compile(:svc, config) }
   let(:klass) { Class.new }
+  # The levels of klass and of its instances belong to its declaration.
+  let(:declaration) { ApiRecipes::Declaration.new(klass, :svc, {}, nil) }
 
-  def context(owner = ApiRecipes) = described_class.new(definition: definition, owner: owner, global_definition: definition)
-  def assign(owner, **changes) = ApiRecipes::LevelSet.write(owner, :svc) { |level| level.with(**changes) }
+  def declaration_for(owner) = owner.equal?(ApiRecipes) ? nil : declaration
+
+  def context(owner = ApiRecipes)
+    described_class.new(definition: definition, owner: owner, global_definition: definition,
+                        declaration: declaration_for(owner))
+  end
+
+  def assign(owner, **changes)
+    ApiRecipes::LevelSet.write(owner, declaration_for(owner) || :svc) { |level| level.with(**changes) }
+  end
 
   it 'takes each option from the nearest place' do
     slow = definition.endpoints[:slow]

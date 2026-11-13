@@ -39,7 +39,7 @@ module ApiRecipes
       end
 
       credential = Credential.from(:authorization, value)
-      LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(credential: credential) }
+      LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
     end
 
     def basic_auth
@@ -53,12 +53,12 @@ module ApiRecipes
       end
 
       credential = Credential.from(:basic_auth, value)
-      LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(credential: credential) }
+      LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
     end
 
     # The variable values of the caller's level.
     def variables
-      level = LevelSet.read(@context.owner, @context.definition.name)
+      level = LevelSet.read(@context.owner, @context.level_key)
       (level && level.variables) || {}
     end
 
@@ -69,7 +69,7 @@ module ApiRecipes
       end
 
       values = Registry.variable_values(values)
-      LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(variables: values) }
+      LevelSet.write(@context.owner, @context.level_key) { |level| level.with(variables: values) }
     end
 
     def inspect
