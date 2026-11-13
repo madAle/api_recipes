@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe ApiRecipes::Core::Compiler do
+describe ApiRecipes::Internals::Compiler do
   def compile(config) = described_class.compile(:svc, config)
 
   def problems(config)

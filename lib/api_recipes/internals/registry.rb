@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  module Core
+  module Internals
     # What configure produced: the compiled trees, their handles and one global
     # Api per tree. Immutable: configure builds a new registry and swaps it in
     # with one assignment, so a reader sees the old one or the new one, never a

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  module Core
+  module Internals
     # The immutable result of compiling a configuration: one node per api and one
-    # per endpoint. Nodes are built by ApiRecipes::Core::Compiler, never by hand.
+    # per endpoint. Nodes are built by ApiRecipes::Internals::Compiler, never by hand.
     module Definition
       Route = Struct.new(:call, :verb, :url)
 

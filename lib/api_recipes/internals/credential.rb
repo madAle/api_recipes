@@ -1,5 +1,5 @@
 module ApiRecipes
-  module Core
+  module Internals
     # A secret sent with requests. It never shows its value: not in inspect, not
     # in to_s, not in error messages.
     class Credential
@@ -50,7 +50,7 @@ module ApiRecipes
 
       def none? = @kind == :none
 
-      def inspect = "#<ApiRecipes::Core::Credential #{@kind} [FILTERED]>"
+      def inspect = "#<ApiRecipes::Internals::Credential #{@kind} [FILTERED]>"
 
       def to_s = inspect
 

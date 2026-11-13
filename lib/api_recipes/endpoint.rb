@@ -10,7 +10,7 @@ module ApiRecipes
   class Endpoint
     # One Proc for all the endpoints: a block written in initialize costs an
     # object per endpoint, in a chain that is built again at every call.
-    UPGRADE_WARNING = proc { |param, kind, endpoint| Core::Registry.warn_upgrade(endpoint, param, kind) }
+    UPGRADE_WARNING = proc { |param, kind, endpoint| Internals::Registry.warn_upgrade(endpoint, param, kind) }
 
     # args: the path values, then optionally a Hash of options for http.rb.
     # overrides: the options given to with, for this request only.
@@ -45,7 +45,7 @@ module ApiRecipes
 
     # Sends the request. With a block, passes it the response.
     def run
-      response = Core::Request.new(context: @context, definition: @definition, path: @path, options: @options,
+      response = Internals::Request.new(context: @context, definition: @definition, path: @path, options: @options,
                                    overrides: @overrides).perform
       yield response if block_given?
       response
@@ -53,14 +53,14 @@ module ApiRecipes
 
     # The URL without the query string, or nil without a route. Sends nothing.
     def url
-      Core::Request.new(context: @context, definition: @definition, path: @path, options: @options,
+      Internals::Request.new(context: @context, definition: @definition, path: @path, options: @options,
                         overrides: @overrides).url
     end
 
     # A copy with options for this request only, not for the children. An
     # option given as nil drops the one given before.
     def with(options)
-      overrides = Core::Compiler.resolve_options(options, :with_endpoint)
+      overrides = Internals::Compiler.resolve_options(options, :with_endpoint)
       if @overrides
         merged = @overrides.merge(overrides)
         options.each { |key, value| merged.delete(key.to_sym) if value.nil? }

@@ -1,5 +1,5 @@
 module ApiRecipes
-  module Core
+  module Internals
     # A string with {name} variables, used for the host, the base_url and the
     # header values of an api. How a value is checked depends on the position.
     class Template

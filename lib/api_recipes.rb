@@ -3,21 +3,21 @@
 require 'http'
 
 require 'api_recipes/errors'
-require 'api_recipes/core/credential'
-require 'api_recipes/core/level'
-require 'api_recipes/core/path_template'
-require 'api_recipes/core/template'
-require 'api_recipes/core/definition'
-require 'api_recipes/core/compiler'
-require 'api_recipes/core/context'
-require 'api_recipes/core/request'
+require 'api_recipes/internals/credential'
+require 'api_recipes/internals/level'
+require 'api_recipes/internals/path_template'
+require 'api_recipes/internals/template'
+require 'api_recipes/internals/definition'
+require 'api_recipes/internals/compiler'
+require 'api_recipes/internals/context'
+require 'api_recipes/internals/request'
 require 'api_recipes/response'
 require 'api_recipes/configuration'
 require 'api_recipes/api'
 require 'api_recipes/endpoint'
-require 'api_recipes/core/handles'
-require 'api_recipes/core/registry'
-require 'api_recipes/core/declaration'
+require 'api_recipes/internals/handles'
+require 'api_recipes/internals/registry'
+require 'api_recipes/internals/declaration'
 
 module ApiRecipes
   # `include ApiRecipes` adds the class macro `api`. options is a positional
@@ -26,7 +26,7 @@ module ApiRecipes
   # of the class).
   def self.included(receiver)
     def receiver.api(name, options = {})
-      Core::Declaration.declare(self, name, options)
+      Internals::Declaration.declare(self, name, options)
     end
   end
 
@@ -39,7 +39,7 @@ module ApiRecipes
 
     draft = configuration.dup
     yield draft
-    Core::Registry.install(draft) { @configuration = draft }
+    Internals::Registry.install(draft) { @configuration = draft }
     nil
   end
 
@@ -50,15 +50,15 @@ module ApiRecipes
   # The global api called name, for any name.
   def self.[](name)
     key = name.is_a?(String) && name.valid_encoding? ? name.to_sym : name
-    Core::Registry.current.global(key) || raise(UnknownEndpoint.new('ApiRecipes', name, apis))
+    Internals::Registry.current.global(key) || raise(UnknownEndpoint.new('ApiRecipes', name, apis))
   end
 
-  def self.apis = Core::Registry.current.apis
+  def self.apis = Internals::Registry.current.apis
 
   # Removes the global apis and their methods, the configuration and every
   # credential and variable value.
   def self.reset!
-    Core::Registry.reset! { @configuration = nil }
+    Internals::Registry.reset! { @configuration = nil }
     nil
   end
 

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  module Core
+  module Internals
     # The classes of one compiled tree: a subclass of Api for the api and a
     # subclass of Endpoint for every node, each with a public method per child
     # that calls []. They are generated once, when the tree is compiled, and

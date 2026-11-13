@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe ApiRecipes::Core::Template do
+describe ApiRecipes::Internals::Template do
   def expand(string, position, values)
     described_class.new(string, position).expand(values, api: :shopify)
   end
@@ -61,10 +61,10 @@ describe ApiRecipes::Core::Template do
 
   describe 'what is shown' do
     it 'inspects the position and the variable names, never the string' do
-      expect(described_class.new('{shop}.s3cret.test', :header).inspect).to eq('#<ApiRecipes::Core::Template header variables: shop>')
-      expect(described_class.new('Bearer s3cret', :header).inspect).to eq('#<ApiRecipes::Core::Template header variables: none>')
-      expect(described_class.new('{a}{b}/s3cret', :base_url).inspect).to eq('#<ApiRecipes::Core::Template base_url variables: a, b>')
-      expect(described_class.new('h.test', :host).inspect).to eq('#<ApiRecipes::Core::Template host variables: none>')
+      expect(described_class.new('{shop}.s3cret.test', :header).inspect).to eq('#<ApiRecipes::Internals::Template header variables: shop>')
+      expect(described_class.new('Bearer s3cret', :header).inspect).to eq('#<ApiRecipes::Internals::Template header variables: none>')
+      expect(described_class.new('{a}{b}/s3cret', :base_url).inspect).to eq('#<ApiRecipes::Internals::Template base_url variables: a, b>')
+      expect(described_class.new('h.test', :host).inspect).to eq('#<ApiRecipes::Internals::Template host variables: none>')
     end
 
     it 'pretty prints like inspect and keeps to_s' do

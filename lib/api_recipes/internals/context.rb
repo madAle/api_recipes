@@ -1,5 +1,5 @@
 module ApiRecipes
-  module Core
+  module Internals
     # Who uses which api: the compiled tree, the owner whose levels hold
     # credentials and variables, the declaration in use (nil for a global api)
     # and the options given to with. Immutable: with returns a new context.
@@ -142,9 +142,9 @@ module ApiRecipes
       def pretty_print(queue) = queue.text(inspect)
 
       # The options of with can hold header values: a Context is never serialized.
-      def marshal_dump = raise(TypeError, 'an ApiRecipes::Core::Context cannot be serialized')
+      def marshal_dump = raise(TypeError, 'an ApiRecipes::Internals::Context cannot be serialized')
 
-      def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Core::Context cannot be serialized')
+      def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Internals::Context cannot be serialized')
 
       private
 

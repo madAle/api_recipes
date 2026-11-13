@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  module Core
+  module Internals
     # Turns configuration Hashes into trees of Definition::Api and
     # Definition::Endpoint. Every rule of the configuration is checked here, once;
     # all the problems found are reported together in one ConfigurationError.

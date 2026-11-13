@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  module Core
+  module Internals
     # One `api :name` in a class or a module: its options and the tree they
     # make with the global configuration, compiled at the first use after every
     # configure. Only the class or module that declared it refers to it (an

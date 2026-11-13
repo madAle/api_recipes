@@ -270,7 +270,7 @@ describe 'Credentials, variables and class trees through the DSL' do
     end
     klass.shopify.authorization = 'token-class'
     endpoint = klass.new.shopify.orders
-    expect(ApiRecipes::Core::Levels).to receive(:chain).once.and_call_original
+    expect(ApiRecipes::Internals::Levels).to receive(:chain).once.and_call_original
     endpoint.run
     expect(WebMock).to have_requested(:get, 'https://acme.example.test/orders')
       .with(headers: { 'X-Token' => 'token-class', 'X-Shop' => 'acme' })

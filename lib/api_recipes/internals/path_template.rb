@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  module Core
+  module Internals
     # The `path` of one endpoint, parsed once. Fixed text is percent-encoded at
     # parse time; placeholder values are encoded at expand time.
     class PathTemplate

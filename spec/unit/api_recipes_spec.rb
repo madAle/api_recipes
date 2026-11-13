@@ -150,7 +150,7 @@ end
     def interleave(registry_method, call, other)
       stopped = Queue.new
       resume = Queue.new
-      allow(ApiRecipes::Core::Registry).to receive(registry_method).and_wrap_original do |original, *args, &block|
+      allow(ApiRecipes::Internals::Registry).to receive(registry_method).and_wrap_original do |original, *args, &block|
         result = original.call(*args, &block)
         if Thread.current[:api_recipes_spec_stop]
           stopped << true
@@ -193,7 +193,7 @@ end
     def reset_while_configure_holds_the_lock
       stopped = Queue.new
       resume = Queue.new
-      allow(ApiRecipes::Core::Compiler).to receive(:compile_all).and_wrap_original do |original, *args|
+      allow(ApiRecipes::Internals::Compiler).to receive(:compile_all).and_wrap_original do |original, *args|
         result = original.call(*args)
         if Thread.current[:api_recipes_spec_stop]
           stopped << true

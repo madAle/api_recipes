@@ -5,7 +5,7 @@ describe 'Redirects' do
   let(:to_evil) { { status: 302, headers: { 'Location' => 'https://evil.test/steal' } } }
 
   before do
-    ApiRecipes::Core::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Core::Credential.authorization('Bearer SECRET')) }
+    ApiRecipes::Internals::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('Bearer SECRET')) }
     stub_request(:get, 'https://evil.test/steal').to_return(status: 200, body: '')
     stub_request(:get, 'https://api.example.test/moved').to_return(status: 200, body: '')
   end

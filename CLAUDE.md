@@ -30,15 +30,15 @@ fails under 90% line coverage.
 | `lib/api_recipes/endpoint.rb` | `Endpoint`: one step of the chain; builds the path, `run`, `url`, `with` |
 | `lib/api_recipes/response.rb` | wraps the http.rb response and adds `data`, `success?`, `fill` |
 | `lib/api_recipes/errors.rb` | error classes, all under `ApiRecipes::Error` |
-| `lib/api_recipes/core/definition.rb` | the immutable tree that `definition` returns |
-| `lib/api_recipes/core/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once |
-| `lib/api_recipes/core/path_template.rb`, `template.rb` | the `path` of an endpoint, and `{variable}` strings, with their encoding rules |
-| `lib/api_recipes/core/handles.rb` | generates the subclasses of `Api` and `Endpoint` with one method per child |
-| `lib/api_recipes/core/context.rb` | which tree, which owner and which `with` options a chain uses; resolves values |
-| `lib/api_recipes/core/level.rb`, `credential.rb` | credentials and variables assigned to the module, a class or an object |
-| `lib/api_recipes/core/registry.rb` | what `configure` produced, swapped in at once; the global apis |
-| `lib/api_recipes/core/declaration.rb` | one `api :name` in a class or a module |
-| `lib/api_recipes/core/request.rb` | builds the URL and the http.rb client, sends the request, checks the outcome |
+| `lib/api_recipes/internals/definition.rb` | the immutable tree that `definition` returns |
+| `lib/api_recipes/internals/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once |
+| `lib/api_recipes/internals/path_template.rb`, `template.rb` | the `path` of an endpoint, and `{variable}` strings, with their encoding rules |
+| `lib/api_recipes/internals/handles.rb` | generates the subclasses of `Api` and `Endpoint` with one method per child |
+| `lib/api_recipes/internals/context.rb` | which tree, which owner and which `with` options a chain uses; resolves values |
+| `lib/api_recipes/internals/level.rb`, `credential.rb` | credentials and variables assigned to the module, a class or an object |
+| `lib/api_recipes/internals/registry.rb` | what `configure` produced, swapped in at once; the global apis |
+| `lib/api_recipes/internals/declaration.rb` | one `api :name` in a class or a module |
+| `lib/api_recipes/internals/request.rb` | builds the URL and the http.rb client, sends the request, checks the outcome |
 | `lib/api_recipes/cli.rb`, `cli/upgrade.rb`, `exe/api_recipes` | the `api_recipes` command and its `upgrade` checks |
 | `spec/unit`, `spec/integration` | specs; integration specs stub HTTP with WebMock |
 | `spec/security` | one example per protection, and `README.md` that maps them |
@@ -62,7 +62,7 @@ fails under 90% line coverage.
 3. Credentials and variables are not kept on these objects. They live in levels
    attached to the owner of the call (the module, a class, an instance) and are
    read, nearest first, when the request is built. `with` adds a level for one chain.
-4. `run`, or a block, creates a `Core::Request`, which builds the URL and the http.rb
+4. `run`, or a block, creates a `Internals::Request`, which builds the URL and the http.rb
    client, sends the request, checks the outcome (`ok_code`, `on_bad_code`,
    `verify_with`) and returns a `Response`.
 
@@ -74,7 +74,7 @@ classes are built once, by `configure`.
 - Specs never use the network: `WebMock.disable_net_connect!` stays on.
 - A spec for existing behaviour must pass without touching `lib/`.
 - A behaviour change comes with its spec, written first.
-- Internal classes live under `ApiRecipes::Core`, so that `include ApiRecipes` does not shadow an application's own constants. Only `Api`, `Endpoint`, `Response`, `Configuration`, the errors and `VERSION` stay directly under `ApiRecipes`.
+- Internal classes live under `ApiRecipes::Internals`, so that `include ApiRecipes` does not shadow an application's own constants. Only `Api`, `Endpoint`, `Response`, `Configuration`, the errors and `VERSION` stay directly under `ApiRecipes`.
 - Ruby 3.3 syntax; the block parameter `it` is not allowed (Ruby 3.4).
 - `Api` and `Endpoint` have only these public methods. `Api`: `[]`, `with`,
   `definition`, `authorization`, `authorization=`, `basic_auth`, `basic_auth=`,

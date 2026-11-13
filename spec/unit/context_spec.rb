@@ -1,15 +1,15 @@
 require 'spec_helper'
 require 'yaml'
 
-describe ApiRecipes::Core::Context do
+describe ApiRecipes::Internals::Context do
   let(:config) do
     { host: '{shop}.h.test', timeout: 3, variables: { shop: { default: 'main' }, zone: {} },
       endpoints: { slow: { timeout: 30 }, fast: {} } }
   end
-  let(:definition) { ApiRecipes::Core::Compiler.compile(:svc, config) }
+  let(:definition) { ApiRecipes::Internals::Compiler.compile(:svc, config) }
   let(:klass) { Class.new }
   # The levels of klass and of its instances belong to its declaration.
-  let(:declaration) { ApiRecipes::Core::Declaration.new(klass, :svc, {}, nil) }
+  let(:declaration) { ApiRecipes::Internals::Declaration.new(klass, :svc, {}, nil) }
 
   def declaration_for(owner) = owner.equal?(ApiRecipes) ? nil : declaration
 
@@ -19,7 +19,7 @@ describe ApiRecipes::Core::Context do
   end
 
   def assign(owner, **changes)
-    ApiRecipes::Core::LevelSet.write(owner, declaration_for(owner) || :svc) { |level| level.with(**changes) }
+    ApiRecipes::Internals::LevelSet.write(owner, declaration_for(owner) || :svc) { |level| level.with(**changes) }
   end
 
   it 'refuses serialization, because the options of with can hold header values' do
@@ -58,7 +58,7 @@ describe ApiRecipes::Core::Context do
   end
 
   it 'keeps the values given to with as the compiler would' do
-    api = ApiRecipes::Core::Compiler.compile(:svc, host: 'h.test', base_url: 'v1', variables: { v: { default: 'a b' } })
+    api = ApiRecipes::Internals::Compiler.compile(:svc, host: 'h.test', base_url: 'v1', variables: { v: { default: 'a b' } })
     ctx = described_class.new(definition: api, owner: ApiRecipes)
     expect(ctx.base_path).to eq('/v1')
     expect(ctx.with(base_url: 'x y/{v}').base_path).to eq('/x%20y/a%20b')
@@ -68,7 +68,7 @@ describe ApiRecipes::Core::Context do
   end
 
   it 'merges headers given to with' do
-    api = ApiRecipes::Core::Compiler.compile(:svc, host: 'h.test', default_headers: { 'Accept' => 'a' })
+    api = ApiRecipes::Internals::Compiler.compile(:svc, host: 'h.test', default_headers: { 'Accept' => 'a' })
     ctx = described_class.new(definition: api, owner: ApiRecipes).with(default_headers: { 'X-One' => '1' })
     expect(ctx.headers).to eq('Accept' => 'a', 'X-One' => '1')
   end
@@ -77,17 +77,17 @@ describe ApiRecipes::Core::Context do
     options = { mime_type: (+"caf\xE9").force_encoding('ISO-8859-1'), host: 'h.test'.encode('ISO-8859-1'),
                 variables: { shop: ['a'] }, base_url: 'x y', verify_with: 'check', 'x-note' => 1 }
     overrides = context.with(options).overrides
-    expect(overrides).to eq(ApiRecipes::Core::Compiler.resolve_options(options, :with_api))
+    expect(overrides).to eq(ApiRecipes::Internals::Compiler.resolve_options(options, :with_api))
     expect(overrides.values_at(:mime_type, :host).map(&:encoding)).to eq([Encoding::UTF_8, Encoding::UTF_8])
     expect(overrides[:variables][:shop]).to be_frozen
     expect { context.with(timeout: 1, 'timeout' => 2) }.to raise_error(ApiRecipes::ConfigurationError, /twice/)
   end
 
   it 'reads nil by the keys as given: no credential, or no override' do
-    api = ApiRecipes::Core::Compiler.compile(:svc, host: '{shop}.h.test', default_headers: { 'Accept' => 'a' },
+    api = ApiRecipes::Internals::Compiler.compile(:svc, host: '{shop}.h.test', default_headers: { 'Accept' => 'a' },
                                              variables: { shop: { default: 'main' } })
     ctx = described_class.new(definition: api, owner: ApiRecipes, global_definition: api)
-    ApiRecipes::Core::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Core::Credential.authorization('T')) }
+    ApiRecipes::Internals::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('T')) }
     expect(ctx.with(default_headers: { 'X' => '1' }).with(default_headers: nil).headers).to eq('Accept' => 'a')
     expect(ctx.with(variables: { shop: 'other' }).with('variables' => nil).origin).to eq('https://main.h.test')
     expect(ctx.with(timeout: 9).with('timeout' => nil).setting(:timeout)).to eq(3)
@@ -98,7 +98,7 @@ describe ApiRecipes::Core::Context do
   end
 
   it 'reads the names of the options as the compiler does, whatever their encoding' do
-    ApiRecipes::Core::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Core::Credential.authorization('T')) }
+    ApiRecipes::Internals::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('T')) }
     expect(context.with('timeout'.encode('UTF-16LE') => 1).setting(:timeout)).to eq(1)
     expect(context.credential).not_to be_nil
     expect(context.with('authorization'.encode('UTF-16LE') => nil).credential).to be_nil
@@ -121,7 +121,7 @@ describe ApiRecipes::Core::Context do
   end
 
   it 'takes the declared defaults of the global level from the global definition' do
-    global = ApiRecipes::Core::Compiler.compile(:svc, host: '{shop}.h.test', variables: { shop: { default: 'global' } })
+    global = ApiRecipes::Internals::Compiler.compile(:svc, host: '{shop}.h.test', variables: { shop: { default: 'global' } })
     ctx = described_class.new(definition: definition, owner: klass.new, global_definition: global)
     expect(ctx.variables(up_to: :global)).to eq(shop: 'global')
     expect(ctx.origin(up_to: :global)).to eq('https://global.h.test')

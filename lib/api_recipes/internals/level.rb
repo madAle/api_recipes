@@ -1,9 +1,9 @@
 module ApiRecipes
-  module Core
+  module Internals
     # What was assigned to one api at one level: a credential (nil when never
     # assigned, Credential::NONE when removed on purpose) and variable values.
     Level = Data.define(:credential, :variables) do
-      def inspect = "#<ApiRecipes::Core::Level credential=#{credential.inspect} variables=[FILTERED]>"
+      def inspect = "#<ApiRecipes::Internals::Level credential=#{credential.inspect} variables=[FILTERED]>"
 
       def to_s = inspect
 
@@ -114,7 +114,7 @@ module ApiRecipes
         @entries[key] || (@sealed ? Level.new(credential: Credential::NONE, variables: nil) : nil)
       end
 
-      def inspect = "#<ApiRecipes::Core::LevelSet #{FILTERED}>"
+      def inspect = "#<ApiRecipes::Internals::LevelSet #{FILTERED}>"
 
       def to_s = inspect
 

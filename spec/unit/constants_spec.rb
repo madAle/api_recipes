@@ -22,23 +22,28 @@ RSpec.describe 'constants of the ApiRecipes module' do
       require 'api_recipes'
       names = #{internal_names.inspect}
       names.each { |name| Object.const_set(name, Class.new) }
+      Object.const_set("Core", Class.new)
+      Object.const_set("Internals", Class.new)
       klass = Class.new { include ApiRecipes }
       names.each do |name|
         klass.class_eval("def self.bare = \#{name}")
         puts "\#{name} \#{klass.bare.equal?(Object.const_get(name))}"
       end
+      klass.class_eval("def self.core = Core; def self.internals = Internals")
+      puts "Core \#{klass.core.equal?(::Core)}"
+      puts "Internals \#{klass.internals.equal?(ApiRecipes::Internals) && !klass.internals.equal?(::Internals)}"
     RUBY
     lines = run_ruby(code).lines.map(&:split)
-    expect(lines.map(&:first)).to eq(internal_names)
+    expect(lines.map(&:first)).to eq(internal_names + %w[Core Internals])
     expect(lines.reject { |_, same| same == 'true' }).to eq([])
   end
 
-  it 'are only the public names and Core' do
+  it 'are only the public names and Internals' do
     out = run_ruby("require 'api_recipes'; require 'api_recipes/version'; puts ApiRecipes.constants.sort.join(' ')")
     errors = %w[ApiConfigIsNotAnHash ApiNameClashError ConfigurationError CredentialOriginMismatch Error
                 InvalidCredential InvalidPathParameter InvalidUrl InvalidVariable MissingVariable NoRouteExists
                 PathParamsMismatch RecipeFileError ResponseCodeNotAsExpected UnknownEndpoint]
-    expected = errors + %w[Api Endpoint Response Configuration Core VERSION]
+    expected = errors + %w[Api Endpoint Response Configuration Internals VERSION]
     expect(out.split).to eq(expected.sort)
   end
 end

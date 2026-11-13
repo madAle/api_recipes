@@ -4,9 +4,9 @@ require 'yaml'
 require 'pp'
 require 'stringio'
 
-describe ApiRecipes::Core::LevelSet do
+describe ApiRecipes::Internals::LevelSet do
   let(:klass) { Class.new }
-  let(:token) { ApiRecipes::Core::Credential.authorization('Bearer SECRET') }
+  let(:token) { ApiRecipes::Internals::Credential.authorization('Bearer SECRET') }
 
   def set(owner, credential) = described_class.write(owner, :svc) { |level| level.with(credential: credential) }
 
@@ -23,7 +23,7 @@ describe ApiRecipes::Core::LevelSet do
     a = klass.new
     set(a, token)
     copy = a.dup
-    set(copy, ApiRecipes::Core::Credential::NONE)
+    set(copy, ApiRecipes::Internals::Credential::NONE)
     expect(described_class.read(a, :svc).credential).to equal(token)
   end
 
@@ -42,8 +42,8 @@ describe ApiRecipes::Core::LevelSet do
     expect(a.instance_variable_get(:@__api_recipes).to_json).not_to include('SECRET')
     expect(YAML.dump(a)).not_to include('SECRET')
     restored = Marshal.load(dumped)
-    expect(described_class.read(restored, :svc).credential).to equal(ApiRecipes::Core::Credential::NONE)
-    expect(described_class.read(restored, :anything).credential).to equal(ApiRecipes::Core::Credential::NONE)
+    expect(described_class.read(restored, :svc).credential).to equal(ApiRecipes::Internals::Credential::NONE)
+    expect(described_class.read(restored, :anything).credential).to equal(ApiRecipes::Internals::Credential::NONE)
   end
 
   it 'explains what to do with a frozen owner' do
@@ -58,15 +58,15 @@ describe ApiRecipes::Core::LevelSet do
   end
 end
 
-describe ApiRecipes::Core::Level do
+describe ApiRecipes::Internals::Level do
   let(:level) do
-    described_class.new(credential: ApiRecipes::Core::Credential.authorization('Bearer SECRET'),
+    described_class.new(credential: ApiRecipes::Internals::Credential.authorization('Bearer SECRET'),
                         variables: { k: 'VARSECRET' }.freeze)
   end
 
   it 'prints no secret with pp, also for a credential and a level set' do
     owner = Object.new
-    ApiRecipes::Core::LevelSet.write(owner, :svc) { level }
+    ApiRecipes::Internals::LevelSet.write(owner, :svc) { level }
     [level, level.credential, owner.instance_variable_get(:@__api_recipes)].each do |object|
       io = StringIO.new
       PP.pp(object, io)
@@ -86,7 +86,7 @@ end
 
 describe 'restored objects' do
   let(:level) do
-    ApiRecipes::Core::Level.new(credential: ApiRecipes::Core::Credential.authorization('Bearer SECRET'),
+    ApiRecipes::Internals::Level.new(credential: ApiRecipes::Internals::Credential.authorization('Bearer SECRET'),
                           variables: { k: 'VARSECRET' }.freeze)
   end
   let(:restorers) do
@@ -95,7 +95,7 @@ describe 'restored objects' do
 
   it 'restores a level, a credential and a level set as "no credential, inherit nothing"' do
     owner = Object.new
-    ApiRecipes::Core::LevelSet.write(owner, :svc) { level }
+    ApiRecipes::Internals::LevelSet.write(owner, :svc) { level }
     set = owner.instance_variable_get(:@__api_recipes)
     restorers.each do |restore|
       restored = restore.call(level)
@@ -110,9 +110,9 @@ describe 'restored objects' do
   end
 end
 
-describe ApiRecipes::Core::Levels do
+describe ApiRecipes::Internals::Levels do
   def write(owner, key, value)
-    ApiRecipes::Core::LevelSet.write(owner, key) { |level| level.with(variables: { n: value }.freeze) }
+    ApiRecipes::Internals::LevelSet.write(owner, key) { |level| level.with(variables: { n: value }.freeze) }
   end
 
   def values(chain) = chain.map { |kind, level| [kind, level.variables[:n]] }
@@ -121,9 +121,9 @@ describe ApiRecipes::Core::Levels do
     parent = Class.new
     child = Class.new(parent)
     object = child.new
-    declaration = ApiRecipes::Core::Declaration.new(parent, :svc, {}, nil)
+    declaration = ApiRecipes::Internals::Declaration.new(parent, :svc, {}, nil)
     [object, child, parent, ApiRecipes].each_with_index do |owner, index|
-      ApiRecipes::Core::LevelSet.write(owner, owner.equal?(ApiRecipes) ? :svc : declaration) do |level|
+      ApiRecipes::Internals::LevelSet.write(owner, owner.equal?(ApiRecipes) ? :svc : declaration) do |level|
         level.with(variables: { n: index }.freeze)
       end
     end
@@ -136,8 +136,8 @@ describe ApiRecipes::Core::Levels do
 
   it 'returns only the levels written through the declaration, then the one of the module that declared it' do
     declarer = Module.new
-    declaration = ApiRecipes::Core::Declaration.new(declarer, :svc, {}, nil)
-    other = ApiRecipes::Core::Declaration.new(Module.new, :svc, {}, nil)
+    declaration = ApiRecipes::Internals::Declaration.new(declarer, :svc, {}, nil)
+    other = ApiRecipes::Internals::Declaration.new(Module.new, :svc, {}, nil)
     klass = Class.new
     object = klass.new
     [object, klass, declarer].each { |owner| write(owner, other, 'other') }
