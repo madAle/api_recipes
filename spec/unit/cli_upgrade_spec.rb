@@ -56,7 +56,9 @@ describe 'api_recipes upgrade' do
     expect(out).to include('a class with its own host, protocol or port that relied on the global credential',
                            'cookies set by a server during a redirect chain',
                            'api names that are methods of Kernel',
-                           'a base_url with a placeholder in a configuration given as a Hash')
+                           'a base_url with a placeholder in a configuration given as a Hash',
+                           'respond_to? on a response now tells the truth',
+                           'serializing an Api, an Endpoint or a Response raises TypeError')
   end
 
   it 'validates configuration files with the 3.0 rules' do

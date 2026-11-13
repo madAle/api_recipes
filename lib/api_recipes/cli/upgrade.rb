@@ -50,7 +50,9 @@ module ApiRecipes
         'an object restored from a serialized form (Marshal, YAML) has no credential: assign it again',
         'response.uri leaves out the credential query parameter when the api declares auth type query',
         'a redirect to a host with non-ASCII characters needs the addressable gem',
-        'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable'
+        'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable',
+        'respond_to? on a response now tells the truth: it answers true for the methods the response forwards and false for the others',
+        'serializing an Api, an Endpoint or a Response raises TypeError: serialize response.data or response.body.to_s'
       ].freeze
 
       # Problems met while reading, as "<file>: <reason>". They are not findings:
