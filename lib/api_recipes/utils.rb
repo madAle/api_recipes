@@ -1,28 +1,7 @@
 class Hash
-  # Returns a new hash with all keys converted using the block operation.
-  #
-  #  hash = { name: 'Rob', age: '28' }
-  #
-  #  hash.transform_keys{ |key| key.to_s.upcase }
-  #  # => {"NAME"=>"Rob", "AGE"=>"28"}
-  def transform_keys
-    return enum_for(:transform_keys) unless block_given?
-    result = self.class.new
-    each_key do |key|
-      result[yield(key)] = self[key]
-    end
-    result
-  end
-
-  # Destructively convert all keys using the block operations.
-  # Same as transform_keys but modifies +self+.
-  def transform_keys!
-    return enum_for(:transform_keys!) unless block_given?
-    keys.each do |key|
-      self[yield(key)] = delete(key)
-    end
-    self
-  end
+  # Hash#transform_keys and #transform_keys! are Ruby's own (since 2.5): the helpers
+  # below build on them. Redefining them here broke Hash subclasses whose constructor
+  # needs arguments and dropped the hash argument added in Ruby 3.0.
 
   # Returns a new hash with all keys converted to strings.
   #
