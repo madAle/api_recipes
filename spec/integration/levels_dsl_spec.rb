@@ -61,7 +61,8 @@ describe 'Credentials, variables and class trees through the DSL' do
     end
 
     # The rule: a name that configure set belongs to the configuration, so the
-    # next successful configure replaces it or removes it. A value assigned
+    # next successful configure applies it again or removes it: a value
+    # assigned directly under such a name lasts until then. A value assigned
     # directly to a name that configure never set is not touched.
     it 'stops using a global variable that the new configuration does not give' do
       configure_shopify(shopify: { shop: 'old' })
@@ -82,6 +83,14 @@ describe 'Credentials, variables and class trees through the DSL' do
       ApiRecipes.shopify.authorization = 'token'
       configure_shopify({})
       expect(ApiRecipes.shopify.authorization).to eq('token')
+    end
+
+    it 'replaces a value assigned directly to a name that configure set, at the next configure' do
+      configure_shopify(shopify: { shop: 'configured' })
+      ApiRecipes.shopify.variables = { shop: 'direct' }
+      expect(ApiRecipes.shopify.orders.url.to_s).to eq('https://direct.example.test/orders')
+      configure_shopify(shopify: { shop: 'configured' })
+      expect(ApiRecipes.shopify.orders.url.to_s).to eq('https://configured.example.test/orders')
     end
 
     it 'keeps a value assigned directly to a name that configure never set' do

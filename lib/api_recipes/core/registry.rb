@@ -38,8 +38,9 @@ module ApiRecipes
               warnings << "variables are given for '#{name}', which is not a configured api"
             end
             # A name that configure set belongs to the configuration: the next
-            # configure replaces its variables or removes them. A value assigned
-            # directly to a name that configure never set is not touched.
+            # successful configure applies its variables again or removes them,
+            # so a value assigned directly under such a name is replaced. A value
+            # assigned directly to a name that configure never set is not touched.
             LevelSet.replace_variables(ApiRecipes, variables, @variable_names - variables.keys)
             @variable_names = variables.keys.freeze
             warnings.each { |message| configuration.logger.warn(message) }
