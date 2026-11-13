@@ -59,9 +59,16 @@ module ApiRecipes
 
   class CredentialOriginMismatch < Error
     def initialize(api, credential_origin, request_origin)
-      super("api '#{api}': the credential is bound to #{credential_origin.inspect} but the request goes to " \
-            "#{request_origin.inspect}. Set the credential at the level that changes the destination, " \
-            'or set it to nil to send none')
+      if credential_origin
+        super("api '#{api}': the credential is bound to #{credential_origin.inspect} but the request goes to " \
+              "#{request_origin.inspect}. Set the credential at the level that changes the destination, " \
+              'or set it to nil to send none')
+      else
+        super("api '#{api}': the origin of the credential cannot be determined at the level that holds it " \
+              '(for example, a variable of the host has no value there), so it is not sent to ' \
+              "#{request_origin.inspect}. Set the credential at the level that sets the destination, " \
+              'or give the level that holds it the values its host needs')
+      end
     end
   end
 

@@ -57,6 +57,20 @@ describe 'Credentials' do
     expect(WebMock).not_to have_requested(:any, /example\.test/)
   end
 
+  it 'does not send a token over another scheme' do
+    assign(ApiRecipes, 'Bearer global')
+    expect { new_request(base, %i[users], overrides: { protocol: 'http' }).perform }
+      .to raise_error(ApiRecipes::CredentialOriginMismatch, %r{http://api\.example\.test})
+    expect(WebMock).not_to have_requested(:any, /example\.test/)
+  end
+
+  it 'says so when the origin of a token cannot be determined at its level' do
+    config = base.merge(host: '{shop}.example.test', variables: { shop: {} })
+    assign(ApiRecipes, 'Bearer global')
+    expect { new_request(config, %i[users], overrides: { variables: { shop: 'acme' } }).perform }
+      .to raise_error(ApiRecipes::CredentialOriginMismatch, /cannot be determined/)
+  end
+
   it 'sends it when the same level sets destination and token' do
     assign(klass, 'Bearer class')
     global = ApiRecipes::Compiler.compile(:svc, base)

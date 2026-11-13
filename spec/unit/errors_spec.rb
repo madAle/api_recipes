@@ -50,6 +50,12 @@ describe 'ApiRecipes errors' do
     expect(ApiRecipes::CredentialOriginMismatch.new('svc', nil, 'https://b.test').message).to include('https://b.test')
   end
 
+  it 'says when the origin of a credential cannot be determined, and what to do' do
+    message = ApiRecipes::CredentialOriginMismatch.new('svc', nil, 'https://b.test').message
+    expect(message).to include('cannot be determined at the level that holds it', 'https://b.test', 'Set the credential')
+    expect(message).not_to include('nil')
+  end
+
   it 'does not define the classes that were never raised' do
     %i[RouteAndResourceNamesClashError MissingRouteAttribute ProvidedObjectNotAsResponseData
        NoConfigurationGivenForEndpoint].each { |name| expect(ApiRecipes.const_defined?(name)).to eq(false) }
