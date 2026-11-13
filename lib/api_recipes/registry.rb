@@ -46,13 +46,14 @@ module ApiRecipes
       private
 
       # One method on ApiRecipes per api, unless the name is taken by another
-      # method of the module. Returns the warnings.
+      # method of the module, with the rule of Handles.taken?. Returns the
+      # warnings.
       def define_methods(names)
         warnings = []
         defined = names.select do |name|
           next true if @methods.include?(name)
 
-          if taken?(name)
+          if Handles.taken?(ApiRecipes.singleton_class, name)
             warnings << "api '#{name}' has the name of a method of ApiRecipes; reach it with ApiRecipes[#{name.inspect}]"
             next false
           end
@@ -64,17 +65,6 @@ module ApiRecipes
         end
         @methods = defined.freeze
         warnings
-      end
-
-      # Public methods and the reserved ones are taken; so are the private
-      # methods of the module that do not come from Kernel (Ruby calls some
-      # of them, such as singleton_method_added). The other private methods of
-      # Kernel are free, as for endpoints.
-      def taken?(name)
-        return true if Handles::RESERVED.include?(name) || ApiRecipes.respond_to?(name)
-        return false unless ApiRecipes.respond_to?(name, true)
-
-        ApiRecipes.method(name).owner != Kernel
       end
     end
 

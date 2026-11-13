@@ -65,6 +65,52 @@ describe 'Endpoint and api names' do
     end
   end
 
+  # Names that Ruby or common libraries call on any object without being asked.
+  %i[to_ary to_str to_hash to_proc to_a to_io to_path to_int to_regexp to_sym to_enum coerce marshal_dump
+     marshal_load _dump encode_with init_with to_yaml to_json as_json pretty_print pretty_print_cycle
+     pretty_print_inspect pretty_print_instance_variables singleton_method_added singleton_method_removed
+     singleton_method_undefined].each do |name|
+    it "keeps an endpoint called #{name} reachable with [] only, and its parent behaves as any endpoint" do
+      logger = Logger.new(IO::NULL)
+      expect(logger).to receive(:warn).with(/endpoint '#{name}' has the name of an existing method/).once
+      configure_with(logger, svc: { host: 'h.test', endpoints: { parent: { endpoints: { name => nil } } } })
+      parent = ApiRecipes.svc.parent
+      expect(parent[name].url.to_s).to eq("https://h.test/parent/#{name}")
+      out = StringIO.new
+      out.puts(parent)
+      expect(out.string.lines.size).to eq(1)
+      expect(Array(parent)).to eq([parent])
+      expect([*parent]).to eq([parent])
+      expect("#{parent}").to start_with('#<')
+      expect(parent.pretty_inspect).to eq("#{parent.inspect}\n")
+      expect { YAML.dump(parent) }.to raise_error(TypeError)
+      parent.define_singleton_method(:extra) { :extra }
+      expect(parent.extra).to eq(:extra)
+    end
+  end
+
+  it 'gives no module method to an api named like a conversion method' do
+    logger = Logger.new(IO::NULL)
+    allow(logger).to receive(:warn)
+    configure_with(logger, to_ary: { host: 'h.test' }, to_str: { host: 'h.test' }, pretty_print: { host: 'h.test' })
+    %i[to_ary to_str pretty_print].each do |name|
+      expect(logger).to have_received(:warn).with(/api '#{name}' has the name of a method of ApiRecipes/)
+      expect(ApiRecipes[name]).to be_a(ApiRecipes::Api)
+    end
+    out = StringIO.new
+    out.puts(ApiRecipes)
+    expect(out.string).to eq("ApiRecipes\n")
+    expect(ApiRecipes.pretty_inspect).to eq("ApiRecipes\n")
+  end
+
+  it 'refuses an api method called like a conversion method in a class' do
+    klass = Class.new { include ApiRecipes }
+    %i[to_ary to_str encode_with].each do |name|
+      expect { klass.api(:svc, as: name) }.to raise_error(ApiRecipes::ApiNameClashError)
+      expect { klass.api(name) }.to raise_error(ApiRecipes::ApiNameClashError)
+    end
+  end
+
   it 'keeps an api called like a method of the module reachable with []' do
     logger = Logger.new(IO::NULL)
     expect(logger).to receive(:warn).with(/configure/)

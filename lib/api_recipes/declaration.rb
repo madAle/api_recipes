@@ -64,8 +64,8 @@ module ApiRecipes
         holder ||= descendants(klass).find { |mod| declares?(mod, api_name) }
         raise ApiNameClashError.new(klass, api_name, holder) if holder
 
-        taken = klass.respond_to?(method_name, true) || klass.method_defined?(method_name) ||
-                klass.private_method_defined?(method_name)
+        taken = Handles::RESERVED.include?(method_name) || klass.respond_to?(method_name, true) ||
+                klass.method_defined?(method_name) || klass.private_method_defined?(method_name)
         raise ApiNameClashError.new(klass, method_name) if taken
       end
 
