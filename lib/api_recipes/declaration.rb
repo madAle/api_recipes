@@ -1,10 +1,16 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  # One `api :name` in a class: its options and the tree they make with the
-  # global configuration, compiled at the first use after every configure.
-  # Only the class that declared it refers to it (an instance variable and
-  # the generated methods); its subclasses share it.
+  # One `api :name` in a class or a module: its options and the tree they
+  # make with the global configuration, compiled at the first use after every
+  # configure. Only the class or module that declared it refers to it (an
+  # instance variable and the generated methods); its subclasses and the
+  # classes that include the module share it.
+  #
+  # Every level of a credential chain is read with the tree of the
+  # declaration in use, so an api name is declared once per hierarchy. That is
+  # checked when `api` is called and again when a declaration serves an
+  # owner, since include and extend can bring a second declaration later.
   class Declaration
     IVAR = :@__api_recipes_declarations
     Tree = Data.define(:generation, :definition, :handles, :global, :api_class)
@@ -48,10 +54,12 @@ module ApiRecipes
         raise ConfigurationError.new(['as: must be a valid method name'])
       end
 
-      # One declaration of an api name per class hierarchy, so that every
-      # class level of a credential chain reads the same tree; and no
-      # method of the class or of its instances is replaced.
+      # One declaration of an api name per class hierarchy, never on a
+      # singleton class; and no method of the class or of its instances is
+      # replaced.
       def check_clash(klass, api_name, method_name)
+        raise ApiNameClashError.new(klass, api_name) if klass.singleton_class?
+
         holder = klass.ancestors.find { |mod| declares?(mod, api_name) }
         holder ||= descendants(klass).find { |mod| declares?(mod, api_name) }
         raise ApiNameClashError.new(klass, api_name, holder) if holder
@@ -88,11 +96,14 @@ module ApiRecipes
       @variables_generation = nil
       @tree = nil
       @lock = Mutex.new
+      @checked = ObjectSpace::WeakMap.new
     end
 
-    # The api for owner (the class, a subclass or an instance).
+    # The api for owner: the class or module, a subclass, an includer, or an
+    # instance of one of them.
     def api(owner)
       tree = current_tree
+      check_owner(owner, tree.generation)
       tree.api_class.new(Context.new(definition: tree.definition, owner: owner, global_definition: tree.global,
                                      handles: tree.handles))
     end
@@ -113,6 +124,32 @@ module ApiRecipes
     def pretty_print(queue) = queue.text(inspect)
 
     private
+
+    # Refuses an owner whose hierarchy holds another declaration of this api.
+    # The ancestors of its class (the owner itself for a class or module) are
+    # checked once per class and registry generation, without creating a
+    # singleton class. An owner that reaches a module's declaration through
+    # extend has a singleton class already: its ancestors are checked too.
+    def check_owner(owner, generation)
+      klass = owner.is_a?(Module) ? owner : owner.class
+      unless @checked[klass] == generation
+        holder = other_declarer(klass.ancestors)
+        raise ApiNameClashError.new(klass, @name, holder) if holder
+
+        @checked[klass] = generation
+      end
+      return if @klass.is_a?(Class) || klass <= @klass
+
+      holder = other_declarer(owner.singleton_class.ancestors)
+      raise ApiNameClashError.new(klass, @name, holder) if holder
+    end
+
+    def other_declarer(modules)
+      modules.find do |mod|
+        declared = mod.instance_variable_get(IVAR)
+        declared.is_a?(Hash) && declared.key?(@name) && !declared[@name].equal?(self)
+      end
+    end
 
     def current_tree
       tree = @tree

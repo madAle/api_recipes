@@ -122,19 +122,35 @@ module ApiRecipes
   end
 
   module Levels
-    # Levels that hold a value for api_name, nearest first.
+    # Levels that hold a value for api_name, nearest first: the object, the
+    # modules it was extended with, every ancestor of its class (classes and
+    # modules, in order; the owner itself for a class or module), then the
+    # global level. ApiRecipes among the ancestors is the global level.
     def self.chain(owner, api_name)
       chain = []
-      unless owner.is_a?(Module)
+      if owner.is_a?(Module)
+        klass = owner
+      else
+        klass = owner.class
         level = LevelSet.read(owner, api_name)
         chain << [:instance, level] if level
+        # Only an object with singleton methods has a singleton class, so
+        # asking for it here never creates one.
+        unless owner.singleton_methods.empty?
+          owner.singleton_class.ancestors.each do |mod|
+            break if klass <= mod
+
+            level = LevelSet.read(mod, api_name)
+            chain << [:class, level] if level
+          end
+        end
       end
       unless owner.equal?(ApiRecipes)
-        klass = owner.is_a?(Module) ? owner : owner.class
-        while klass
-          level = LevelSet.read(klass, api_name)
+        klass.ancestors.each do |mod|
+          next if mod.equal?(ApiRecipes)
+
+          level = LevelSet.read(mod, api_name)
           chain << [:class, level] if level
-          klass = klass.respond_to?(:superclass) ? klass.superclass : nil
         end
       end
       level = LevelSet.read(ApiRecipes, api_name)

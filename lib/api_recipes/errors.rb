@@ -81,7 +81,10 @@ module ApiRecipes
   class ApiNameClashError < Error
     # declared_in: the class or module of the hierarchy that already declares the api.
     def initialize(owner, name, declared_in = nil)
-      if declared_in
+      if owner.is_a?(Module) && owner.singleton_class?
+        super("api '#{name}' cannot be declared on a singleton class: declare it in a module and extend the " \
+              'object with it')
+      elsif declared_in
         super("api '#{name}' is already declared by #{declared_in}: an api can be declared once per class " \
               'hierarchy. Use with(...) for other options')
       else
