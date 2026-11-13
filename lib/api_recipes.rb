@@ -2,6 +2,8 @@ require 'http'
 
 require 'api_recipes/utils'
 require 'api_recipes/errors'
+require 'api_recipes/credential'
+require 'api_recipes/level'
 require 'api_recipes/path_template'
 require 'api_recipes/template'
 require 'api_recipes/configuration'
