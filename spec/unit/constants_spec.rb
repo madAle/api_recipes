@@ -38,6 +38,15 @@ RSpec.describe 'constants of the ApiRecipes module' do
     expect(lines.reject { |_, same| same == 'true' }).to eq([])
   end
 
+  it 'defines VERSION with the library, without Bundler loading the gemspec' do
+    lib = File.expand_path('../../lib', __dir__)
+    out, err, status = Bundler.with_unbundled_env do
+      Open3.capture3(RbConfig.ruby, '-I', lib, '-e', 'require "api_recipes"; print ApiRecipes::VERSION')
+    end
+    expect([err, status.success?]).to eq(['', true])
+    expect(out).to eq(File.read(File.join(lib, 'api_recipes/version.rb'))[/'([^']+)'/, 1])
+  end
+
   it 'are only the public names and Internals' do
     out = run_ruby("require 'api_recipes'; require 'api_recipes/version'; puts ApiRecipes.constants.sort.join(' ')")
     errors = %w[ApiConfigIsNotAnHash ApiNameClashError ConfigurationError CredentialOriginMismatch Error

@@ -2,6 +2,7 @@
 
 require 'http'
 
+require 'api_recipes/version'
 require 'api_recipes/errors'
 require 'api_recipes/internals/credential'
 require 'api_recipes/internals/level'
