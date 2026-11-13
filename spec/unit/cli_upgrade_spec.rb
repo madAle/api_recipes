@@ -58,7 +58,8 @@ describe 'api_recipes upgrade' do
                            'api names that are methods of Kernel',
                            'a base_url with a placeholder in a configuration given as a Hash',
                            'respond_to? on a response now tells the truth',
-                           'serializing an Api, an Endpoint or a Response raises TypeError')
+                           'serializing an Api, an Endpoint or a Response raises TypeError',
+                           'a class that includes ApiRecipes and uses a top-level constant named Error, Internals, VERSION')
   end
 
   it 'validates configuration files with the 3.0 rules' do

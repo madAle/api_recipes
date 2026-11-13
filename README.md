@@ -1194,6 +1194,18 @@ the endpoint that contains it.
 - **Internationalized hosts.** A redirect to a host with non-ASCII characters
   needs the [addressable](https://github.com/sporkmonger/addressable) gem; without
   it http.rb raises `LoadError`.
+- **Constants seen by a class that includes `ApiRecipes`.** Ruby looks a constant
+  up in the ancestors of a class before the top level, so inside a class that
+  includes `ApiRecipes` the constants of the gem win over the constants of your
+  application with the same name: `Api`, `Endpoint`, `Response`, `Configuration`,
+  `Internals`, `VERSION`, `Error` and the error classes (`ApiConfigIsNotAnHash`,
+  `ApiNameClashError`, `ConfigurationError`, `CredentialOriginMismatch`,
+  `InvalidCredential`, `InvalidPathParameter`, `InvalidUrl`, `InvalidVariable`,
+  `MissingVariable`, `NoRouteExists`, `PathParamsMismatch`, `RecipeFileError`,
+  `ResponseCodeNotAsExpected` and `UnknownEndpoint`). If your application has a
+  class with one of these names, write it with a leading `::` inside the classes
+  that include `ApiRecipes`, for example `::Response`. The internal classes of
+  the gem are all under `ApiRecipes::Internals`, so they hide nothing else.
 - **No changes to Ruby.** The gem adds no method to `Hash`, `Array` or any other
   class of Ruby, and does not touch `URI`.
 

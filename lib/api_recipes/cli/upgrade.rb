@@ -52,7 +52,8 @@ module ApiRecipes
         'a redirect to a host with non-ASCII characters needs the addressable gem',
         'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable',
         'respond_to? on a response now tells the truth: it answers true for the methods the response forwards and false for the others',
-        'serializing an Api, an Endpoint or a Response raises TypeError: serialize response.data or response.body.to_s'
+        'serializing an Api, an Endpoint or a Response raises TypeError: serialize response.data or response.body.to_s',
+        'a class that includes ApiRecipes and uses a top-level constant named Error, Internals, VERSION or like a new error class of the gem (such as ConfigurationError or InvalidUrl): it now finds the gem\'s constant first, write ::Name in that class; Route and Settings no longer exist, so a top-level Route or Settings is found again'
       ].freeze
 
       # Problems met while reading, as "<file>: <reason>". They are not findings:

@@ -301,6 +301,20 @@ cookie and redirects to itself now ends in the redirect-loop error of http.rb.
 every error raised by a writer. Make the setters public, and handle the errors you
 expect. Keys that are not plain attribute names are skipped.
 
+### Constants seen by a class that includes `ApiRecipes`
+
+A class that includes `ApiRecipes` finds the constants of the gem before the
+top-level constants of your application. In 2.x those names were `Api`,
+`Endpoint`, `Route`, `Response`, `Settings`, `Configuration` and the error
+classes. In 3.0 `Route` and `Settings` are gone, so a top-level `Route` or
+`Settings` of yours is found again. `Error`, `Internals`, `VERSION` and the new
+error classes (`ConfigurationError`, `CredentialOriginMismatch`,
+`InvalidCredential`, `InvalidPathParameter`, `InvalidUrl`, `InvalidVariable`,
+`MissingVariable`, `RecipeFileError`, `UnknownEndpoint`) are new, and hide a
+top-level constant of yours with the same name. Inside the classes that include
+`ApiRecipes`, write it with a leading `::`, for example `::Error`. The
+[README](README.md#good-to-know) lists all the names.
+
 ### Other changes in results
 
 - The `Response` answers `respond_to?` for the methods it forwards.
