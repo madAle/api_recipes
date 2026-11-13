@@ -5,6 +5,7 @@ module ApiRecipes
     ORIGIN = %r{\A(https?)://([^:/]+)(?::(\d+))?\z}
     DEFAULT_EXPECTED = '200 <= CODE < 300'.freeze
     FOLLOW_PROBLEM = 'follow: must be true, false or a Hash'.freeze
+    FOLLOW_OPTIONS = %i[strict max_hops on_redirect].freeze
 
     def initialize(context:, definition:, path:, options:, overrides: nil)
       @context = context
@@ -56,16 +57,32 @@ module ApiRecipes
     end
 
     # The url as http.rb reads it must point to the origin that was validated.
-    # http.rb parses with Addressable, an optional gem, what Ruby's URI cannot
-    # parse: without that gem, such a url cannot be parsed either.
+    # http.rb hands to Addressable, an optional gem, what Ruby's URI cannot
+    # parse, and its failures there are not ours to predict. So the address is
+    # first read with Ruby's URI alone: anything that is not ASCII or that Ruby
+    # refuses is refused, and http.rb then never reaches Addressable.
     def checked(url, origin)
       address = url.to_s
+      scheme, host, port = parts(origin)
+      raise InvalidUrl, "the url of api '#{@context.definition.name}' cannot be parsed" unless plain_uri?(address)
+
+      stdlib = ::URI.parse(address)
+      same = stdlib.scheme.to_s.casecmp?(scheme) && stdlib.host.to_s.casecmp?(host) &&
+             stdlib.port == (port || Context::DEFAULT_PORTS.fetch(scheme))
+      raise InvalidUrl, "the url does not point to the origin of api '#{@context.definition.name}'" unless same
+
       uri = HTTP::URI.parse(address)
       raise InvalidUrl, "the url does not point to the origin of api '#{@context.definition.name}'" unless same_origin?(uri, origin)
 
       address
-    rescue HTTP::URI::InvalidError, LoadError
+    rescue HTTP::URI::InvalidError
       raise InvalidUrl, "the url of api '#{@context.definition.name}' cannot be parsed"
+    end
+
+    def plain_uri?(address)
+      address.ascii_only? && ::URI.parse(address) && true
+    rescue ::URI::InvalidURIError
+      false
     end
 
     def same_origin?(uri, origin)
@@ -113,12 +130,25 @@ module ApiRecipes
     end
 
     # http.rb follows any value that responds to fetch, so only the values the
-    # protection can wrap are accepted. Checked before anything is sent.
+    # protection can wrap are accepted. http.rb reads the options of a Hash
+    # only once the first response is in: they are checked here, before
+    # anything is sent.
     def check_follow
-      case @options[:follow]
-      when nil, true, false, Hash then nil
+      follow = @options[:follow]
+      case follow
+      when nil, true, false then nil
+      when Hash then check_follow_options(symbol_keys(follow))
       else raise ConfigurationError.new([FOLLOW_PROBLEM])
       end
+    end
+
+    def check_follow_options(settings)
+      unknown = settings.keys.find { |key| !FOLLOW_OPTIONS.include?(key) }
+      raise ConfigurationError.new(["follow: unknown option '#{unknown.to_s.scrub('?')}'"]) if unknown
+
+      return if !settings.key?(:max_hops) || settings[:max_hops].is_a?(Integer)
+
+      raise ConfigurationError.new(['follow.max_hops: must be an integer'])
     end
 
     # true or a Hash: follows redirects, but a request that leaves the origin

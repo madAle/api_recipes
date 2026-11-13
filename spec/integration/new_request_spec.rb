@@ -91,14 +91,16 @@ describe ApiRecipes::Request do
     expect(WebMock).not_to have_requested(:any, /example\.test|evil\.test/)
   end
 
-  # http.rb parses with Addressable what Ruby's URI cannot parse, and loads it
-  # only then: the gem is optional and may be missing.
-  it 'refuses a url that only Addressable can parse when that gem is missing' do
-    expect(HTTP::URI).to receive(:require_addressable).and_raise(LoadError, 'cannot load such file -- addressable/uri')
-    request = new_request(base, %i[users])
-    allow(request).to receive(:url)
-      .and_return(URI::HTTPS.new('https', nil, 'api example.test', nil, nil, '/users', nil, nil, nil, nil, false))
-    expect { request.perform }.to raise_error(ApiRecipes::InvalidUrl, /cannot be parsed/)
+  # http.rb hands to Addressable, an optional gem, what Ruby's URI cannot parse:
+  # such an address is refused before http.rb reads it.
+  it 'refuses an address that Ruby cannot parse, without letting http.rb parse it' do
+    ['https://api example.test/users', "https://api.example.t\u00e9st/users", '[::1', ':-1', '%',
+     'https://api%C3.example.test/'].each do |address|
+      expect(HTTP::URI).not_to receive(:parse)
+      request = new_request(base, %i[users])
+      allow(request).to receive(:url).and_return(address)
+      expect { request.perform }.to raise_error(ApiRecipes::InvalidUrl)
+    end
     expect(WebMock).not_to have_requested(:any, /example\.test/)
   end
 end

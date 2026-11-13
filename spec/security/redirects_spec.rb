@@ -123,13 +123,18 @@ describe 'Redirects' do
     expect(WebMock).not_to have_requested(:any, /example\.test|evil\.test/)
   end
 
-  # http.rb reads the follow options when the first response is in.
-  it 'lets http.rb refuse a follow option it does not know, without following' do
+  it 'refuses follow options that http.rb would refuse, before sending anything' do
     stub_request(:get, 'https://api.example.test/users').to_return(to_evil)
-    expect { new_request(base, %i[users], options: { follow: { unknown: 1 } }).perform }
-      .to raise_error(ArgumentError, 'unknown keyword: :unknown')
-    expect(WebMock).to have_requested(:get, 'https://api.example.test/users').once
-    expect(WebMock).not_to have_requested(:get, 'https://evil.test/steal')
+    {
+      { unknown: 1 } => "follow: unknown option 'unknown'",
+      { 'max_hop' => 2 } => "follow: unknown option 'max_hop'",
+      { max_hops: nil } => 'follow.max_hops: must be an integer',
+      { 'max_hops' => '2' } => 'follow.max_hops: must be an integer'
+    }.each do |follow, message|
+      expect { new_request(base, %i[users], options: { follow: follow }).perform }
+        .to raise_error(ApiRecipes::ConfigurationError) { |error| expect(error.errors).to eq([message]) }
+    end
+    expect(WebMock).not_to have_requested(:any, /example\.test|evil\.test/)
   end
 
   it 'follows with true or a Hash, and not with false or nil' do
