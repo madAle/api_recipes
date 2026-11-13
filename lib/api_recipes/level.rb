@@ -5,6 +5,21 @@ module ApiRecipes
     def inspect = "#<ApiRecipes::Level credential=#{credential.inspect} variables=[FILTERED]>"
 
     def to_s = inspect
+
+    def pretty_print(queue) = queue.text(inspect)
+
+    # Serialized forms never carry values: a rebuilt level is empty and has no credential.
+    def _dump(_depth) = ''
+
+    def self._load(_data) = new(credential: Credential::NONE, variables: nil)
+
+    def encode_with(coder)
+      coder['sealed'] = true
+    end
+
+    def as_json(*) = '[FILTERED]'
+
+    def to_json(*) = '"[FILTERED]"'
   end
 
   # Immutable map api_name => Level. It is stored in the instance variable
@@ -74,6 +89,8 @@ module ApiRecipes
     def inspect = "#<ApiRecipes::LevelSet #{FILTERED}>"
 
     def to_s = inspect
+
+    def pretty_print(queue) = queue.text(inspect)
 
     def marshal_dump = nil
 

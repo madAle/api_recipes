@@ -8,7 +8,7 @@ module ApiRecipes
     class << self
       def authorization(value)
         check_text(value, 'the authorization value')
-        new(:authorization, value)
+        new(:authorization, value.dup.freeze)
       end
 
       def basic_auth(value)
@@ -18,7 +18,7 @@ module ApiRecipes
 
         check_text(value[:user], 'the basic_auth user')
         check_text(value[:pass], 'the basic_auth pass')
-        new(:basic_auth, { user: value[:user], pass: value[:pass] }.freeze)
+        new(:basic_auth, { user: value[:user].dup.freeze, pass: value[:pass].dup.freeze }.freeze)
       end
 
       def from(kind, value)
@@ -52,6 +52,29 @@ module ApiRecipes
     def inspect = "#<ApiRecipes::Credential #{@kind} [FILTERED]>"
 
     def to_s = inspect
+
+    def pretty_print(queue) = queue.text(inspect)
+
+    # Serialized forms never carry the value: a rebuilt credential is NONE-like.
+    def marshal_dump = nil
+
+    def marshal_load(_data)
+      @kind = :none
+      @value = nil
+      freeze
+    end
+
+    def encode_with(coder)
+      coder['kind'] = 'none'
+    end
+
+    def init_with(_coder)
+      marshal_load(nil)
+    end
+
+    def as_json(*) = '[FILTERED]'
+
+    def to_json(*) = '"[FILTERED]"'
 
     NONE = new(:none, nil)
   end

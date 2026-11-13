@@ -1,6 +1,8 @@
 require 'spec_helper'
 require 'json'
 require 'yaml'
+require 'pp'
+require 'stringio'
 
 describe ApiRecipes::LevelSet do
   let(:klass) { Class.new }
@@ -53,6 +55,32 @@ describe ApiRecipes::LevelSet do
     set(a, token)
     described_class.reset!
     expect(described_class.read(a, :svc)).to be_nil
+  end
+end
+
+describe ApiRecipes::Level do
+  let(:level) do
+    described_class.new(credential: ApiRecipes::Credential.authorization('Bearer SECRET'),
+                        variables: { k: 'VARSECRET' }.freeze)
+  end
+
+  it 'prints no secret with pp, also for a credential and a level set' do
+    owner = Object.new
+    ApiRecipes::LevelSet.write(owner, :svc) { level }
+    [level, level.credential, owner.instance_variable_get(:@__api_recipes)].each do |object|
+      io = StringIO.new
+      PP.pp(object, io)
+      expect(io.string).not_to include('SECRET')
+    end
+  end
+
+  it 'writes no secret when serialized' do
+    [Marshal.dump(level), YAML.dump(level), level.to_json, level.as_json.to_s].each do |text|
+      expect(text).not_to include('SECRET')
+    end
+    restored = Marshal.load(Marshal.dump(level))
+    expect(restored.credential.none?).to eq(true)
+    expect(restored.variables).to be_nil
   end
 end
 
