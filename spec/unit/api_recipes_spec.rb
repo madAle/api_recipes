@@ -66,7 +66,8 @@ describe ApiRecipes do
       ApiRecipes.configure do |config|
         config.logger = logger
         config.apis_files_paths = [path.dup]
-        config.apis_configs = { svc: { host: 'api.example.test', endpoints: { users: { path: '/people' } } } }
+        config.apis_configs = { svc: { host: 'api.example.test', variables: { region: {} },
+                                       endpoints: { users: { path: '/people' } } } }
         config.variables = { svc: { region: 'eu' } }
       end
       before = ApiRecipes.configuration
@@ -85,7 +86,8 @@ describe ApiRecipes do
       failures.each do |change|
         expect { ApiRecipes.configure { |config| change.call(config) } }.to raise_error(ApiRecipes::ConfigurationError)
       end
-      expect(before.apis_configs).to eq(svc: { host: 'api.example.test', endpoints: { users: { path: '/people' } } })
+      expect(before.apis_configs).to eq(svc: { host: 'api.example.test', variables: { region: {} },
+                                               endpoints: { users: { path: '/people' } } })
       expect([before.apis_files_paths, before.variables]).to eq([[path], { svc: { region: 'eu' } }])
       shared = nil
       ApiRecipes.configure { |config| shared = config.logger }

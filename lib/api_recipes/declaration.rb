@@ -36,6 +36,7 @@ module ApiRecipes
         api_name = name.to_sym
         check_clash(klass, api_name, method_name)
         variables = Registry.variable_values(variables)
+        check_variables(api_name, variables)
         errors = Compiler.check_options(options, :api)
         raise ConfigurationError.new(errors) unless errors.empty?
 
@@ -49,6 +50,16 @@ module ApiRecipes
       end
 
       private
+
+      # The names of variables against the global api, when it is configured
+      # already; else refresh checks them at the first use.
+      def check_variables(api_name, variables)
+        definition = Registry.current.definitions[api_name]
+        return unless definition
+
+        problems = Compiler.unknown_variables(variables, definition, api_name.to_s)
+        raise ConfigurationError.new(problems) unless problems.empty?
+      end
 
       def method_for(as, name)
         return name.to_sym if as.nil?
@@ -186,6 +197,9 @@ module ApiRecipes
         warnings = handles.warnings - (global_handles ? global_handles.warnings : [])
         warnings.each { |message| ApiRecipes.logger.warn(message) }
       end
+      problems = Compiler.unknown_variables(@variables, definition, @name.to_s)
+      raise ConfigurationError.new(problems) unless problems.empty?
+
       write_variables if @variables_generation != LevelSet.generation
       @tree = Tree.new(generation: registry.generation, definition: definition, handles: handles, global: global,
                        api_class: handles.for(definition))

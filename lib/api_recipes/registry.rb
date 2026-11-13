@@ -25,7 +25,7 @@ module ApiRecipes
       def install(configuration)
         LOCK.synchronize do
           apis = configuration.load
-          definitions = Compiler.compile_all(apis)
+          definitions = Compiler.compile_all(apis, configuration.variables)
           handles = definitions.transform_values { |definition| Handles.new(definition) }
           variables = Compiler.normalize(configuration.variables).to_h { |name, values| [name, variable_values(values)] }
           WARNED_LOCK.synchronize { @warned = {} }
@@ -33,6 +33,9 @@ module ApiRecipes
                          generation: @current.generation + 1)
           yield if block_given?
           warnings = define_methods(@current.apis) + handles.values.flat_map(&:warnings)
+          (variables.keys - definitions.keys).each do |name|
+            warnings << "variables are given for '#{name}', which is not a configured api"
+          end
           # A name that configure set belongs to the configuration: the next
           # configure replaces its variables or removes them. A value assigned
           # directly to a name that configure never set is not touched.

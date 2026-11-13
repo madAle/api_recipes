@@ -2,7 +2,7 @@ require 'spec_helper'
 
 describe ApiRecipes::Context do
   let(:config) do
-    { host: '{shop}.h.test', timeout: 3, variables: { shop: { default: 'main' } },
+    { host: '{shop}.h.test', timeout: 3, variables: { shop: { default: 'main' }, zone: {} },
       endpoints: { slow: { timeout: 30 }, fast: {} } }
   end
   let(:definition) { ApiRecipes::Compiler.compile(:svc, config) }

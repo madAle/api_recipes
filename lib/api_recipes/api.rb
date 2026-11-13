@@ -69,6 +69,9 @@ module ApiRecipes
       end
 
       values = Registry.variable_values(values)
+      problems = Compiler.unknown_variables(values, @context.definition)
+      raise ConfigurationError.new(problems) unless problems.empty?
+
       LevelSet.write(@context.owner, @context.level_key) { |level| level.with(variables: values) }
     end
 

@@ -26,6 +26,9 @@ module ApiRecipes
     # and basic_auth, no override for the others.
     def with(options)
       resolved = Compiler.resolve_options(options, :with_api)
+      problems = Compiler.unknown_variables(resolved[:variables], @definition)
+      raise ConfigurationError.new(problems) unless problems.empty?
+
       # The names as the compiler reads them, in the order given, nil ones included.
       names = Compiler.normalize(options.to_h { |key, _value| [key, nil] }).keys
       merged = @overrides.dup

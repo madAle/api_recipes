@@ -27,14 +27,31 @@ module ApiRecipes
 
     class << self
       def compile(name, config)
-        compile_all(name => config).values.first
+        compile_all({ name => config }).values.first
       end
 
-      def compile_all(configs)
+      # given: the variable values of configure ({ api_name => { name => value } });
+      # a name that its api does not declare is reported with the other problems.
+      def compile_all(configs, given = nil)
         compiler = new
         apis = compiler.compile_all(configs)
+        compiler.check_given_variables(apis, given)
         compiler.finish!
         apis
+      end
+
+      # The problems of the names in values (Symbol keys, as the compiler
+      # resolves them) that definition does not declare. where is the
+      # location of the api, or empty.
+      def unknown_variables(values, definition, where = '')
+        return [] if values.nil? || values.empty?
+
+        declared = definition.variables.keys.sort
+        shown = declared.empty? ? 'none declared' : "declared: #{declared.join(', ')}"
+        prefix = where.empty? ? 'variables' : "#{where}.variables"
+        values.keys.reject { |name| definition.variables.key?(name) }.map do |name|
+          "#{prefix}: unknown variable '#{name}' (#{shown})"
+        end
       end
 
       # scope: :api, :with_api or :with_endpoint. Returns the problems, never raises.
@@ -134,6 +151,19 @@ module ApiRecipes
       when Hash, Array then guard_cycle(value, location) { normalize_container(value, location, kind) }
       when String then clean_string(value, location)
       else value
+      end
+    end
+
+    # The unknown names in given, which can still be raw: what is not a Hash
+    # is left to the caller, which reports it.
+    def check_given_variables(apis, given)
+      return unless given.is_a?(Hash)
+
+      normalize(given, 'variables', :free).each do |name, values|
+        definition = apis[name]
+        next unless definition && values.is_a?(Hash)
+
+        @errors.concat(self.class.unknown_variables(values, definition, name.to_s))
       end
     end
 
