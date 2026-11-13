@@ -29,14 +29,19 @@ describe ApiRecipes do
     end
 
     it 'keeps the previous configuration, unchanged, when a new one fails' do
-      configure_test_apis
+      ApiRecipes.configure do |config|
+        config.logger = Logger.new(IO::NULL)
+        config.apis_configs = { svc: { host: 'hash.example.test', endpoints: { users: nil } } }
+        config.apis_files_paths = [File.expand_path('../fixtures/svc_override.yml', __dir__)]
+      end
       before = ApiRecipes.configuration
       logger = before.logger
       other_logger = Logger.new(IO::NULL)
+      # The last one would also reorder the sources of the previous configuration if they were shared.
       failures = [
-        ->(config) { config.apis_configs = { svc: { bogus: 1 } } },
         ->(config) { config.apis_files_paths = [File.expand_path('../fixtures/missing.yml', __dir__)] },
-        ->(config) { config.variables[:svc] = 'not a Hash' }
+        ->(config) { config.variables[:svc] = 'not a Hash' },
+        ->(config) { config.apis_configs = { svc: { bogus: 1 } } }
       ]
       failures.each do |change|
         expect do
@@ -52,7 +57,7 @@ describe ApiRecipes do
       end
       ApiRecipes.configure { |config| config.logger = other_logger }
       expect(ApiRecipes.logger).to equal(other_logger)
-      expect(ApiRecipes.svc.users.url.to_s).to eq("#{base_url}/users")
+      expect(ApiRecipes.svc.ping.url.to_s).to eq('https://other.example.test/ping')
     end
   end
 
