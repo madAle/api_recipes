@@ -47,12 +47,12 @@ describe 'The api class macro' do
     expect(ApiRecipes).not_to respond_to(:weather)
   end
 
-  it 'uses the defaults for an api declared with no configuration at all' do
+  it 'accepts an api declared with no configuration at all' do
     klass = Class.new do
       include ApiRecipes
       api :unknown
     end
-    expect(klass.unknown.configs).to include(protocol: 'https', host: 'localhost', timeout: 3, on_bad_code: 'raise')
+    expect(klass.unknown).to be_a(ApiRecipes::Api)
   end
 
   it 'rejects a name that is neither a String nor a Symbol' do

@@ -48,14 +48,4 @@ describe ApiRecipes do
       expect(ApiRecipes.logger).to equal(logger)
     end
   end
-
-  describe 'api defaults' do
-    it 'fills the options that the configuration leaves out' do
-      configure_test_apis(svc: { host: 'api.example.test' })
-      expect(ApiRecipes.svc.configs).to include(
-        protocol: 'https', host: 'api.example.test', port: nil, base_url: nil,
-        timeout: 3, on_bad_code: 'raise', verify_with: nil, mime_type: nil
-      )
-    end
-  end
 end

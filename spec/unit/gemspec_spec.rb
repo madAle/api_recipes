@@ -1,7 +1,7 @@
 require 'spec_helper'
 
 describe 'api_recipes.gemspec' do
-  let(:gemspec) { Gem::Specification.load('api_recipes.gemspec') }
+  let(:gemspec) { Gem::Specification.load(File.expand_path('../../api_recipes.gemspec', __dir__)) }
 
   it 'declares its runtime dependencies' do
     expect(gemspec.runtime_dependencies.map(&:name)).to contain_exactly('http', 'logger')

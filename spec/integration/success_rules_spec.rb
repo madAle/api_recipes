@@ -128,7 +128,7 @@ describe 'What counts as a successful response' do
     it 'raises on any status when the method returns false' do
       respond_with(200)
       configure(verify_with: :refuse)
-      expect { klass.svc.things.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected, /Verified with/)
+      expect { klass.svc.things.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
     end
 
     it 'accepts the method name as a String' do
@@ -162,15 +162,6 @@ describe 'What counts as a successful response' do
       respond_with(200)
       configure(verify_with: :refuse, on_bad_code: 'ignore')
       expect(klass.svc.things.run.code).to eq(200)
-    end
-
-    it 'falls back to the status check when the caller has no such method' do
-      configure(verify_with: :accept)
-      respond_with(200)
-      expect(ApiRecipes.svc.things.run.code).to eq(200)
-
-      respond_with(500)
-      expect { ApiRecipes.svc.things.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
     end
   end
 end

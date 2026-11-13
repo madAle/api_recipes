@@ -65,7 +65,7 @@ describe 'URL building' do
       expect(svc.repos('rails', 'rails').show.url.to_s).to eq('https://h.test/repos/rails/rails')
     end
 
-    it 'fills several parameters of one segment in order' do
+    it 'fills several parameters in order' do
       expect(svc.repos('owner', 'name').show.url.to_s).to eq('https://h.test/repos/owner/name')
     end
 

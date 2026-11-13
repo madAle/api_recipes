@@ -67,10 +67,11 @@ describe 'Request options' do
       expect(WebMock).to have_requested(:get, "#{base_url}/users/7").with(query: { 'full' => 'true' })
     end
 
-    it 'works with the block form too' do
+    it 'works with the block form too, which returns the endpoint' do
       code = nil
-      configure.things(params: { page: 3 }) { |response| code = response.code }
+      result = configure.things(params: { page: 3 }) { |response| code = response.code }
       expect(code).to eq(200)
+      expect(result).to be_a(ApiRecipes::Endpoint)
       expect(WebMock).to have_requested(:get, url).with(query: { 'page' => '3' })
     end
   end
@@ -133,20 +134,37 @@ describe 'Request options' do
   end
 
   describe 'timeout' do
-    def timeout_of(endpoint)
-      endpoint.route.request.default_options.timeout_options
+    # The value reaches http.rb through HTTP::Client#timeout.
+    def expect_timeout(seconds)
+      expect_any_instance_of(HTTP::Client).to receive(:timeout).with(seconds).and_call_original
     end
 
     it 'is 3 seconds by default' do
-      expect(timeout_of(configure.things)).to eq(global_timeout: 3)
+      svc = configure
+      expect_timeout(3)
+      svc.things
     end
 
     it 'takes the value of the api' do
-      expect(timeout_of(configure({}, timeout: 10).things)).to eq(global_timeout: 10)
+      svc = configure({}, timeout: 10)
+      expect_timeout(10)
+      svc.things
     end
 
     it 'takes the value of the endpoint over that of the api' do
-      expect(timeout_of(configure({ timeout: 1 }, timeout: 10).things)).to eq(global_timeout: 1)
+      svc = configure({ timeout: 1 }, timeout: 10)
+      expect_timeout(1)
+      svc.things
+    end
+
+    it 'takes the value a class gives to api' do
+      configure
+      klass = Class.new do
+        include ApiRecipes
+        api :svc, timeout: 10
+      end
+      expect_timeout(10)
+      klass.svc.things
     end
 
     it 'raises HTTP::TimeoutError when the request times out' do

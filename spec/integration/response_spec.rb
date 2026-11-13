@@ -63,6 +63,13 @@ describe ApiRecipes::Response do
     end
   end
 
+  it 'cannot parse data when the body is empty' do
+    stub_request(:get, url).to_return(status: 204, body: '')
+    response = configure.things.run
+    expect { response.data }.to raise_error(HTTP::Error)
+    expect(response.body.to_s).to eq('')
+  end
+
   describe 'Route#fill' do
     let(:user_class) { Struct.new(:login, :id) }
 

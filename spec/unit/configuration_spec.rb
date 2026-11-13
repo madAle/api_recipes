@@ -1,10 +1,15 @@
 require 'spec_helper'
+require 'tmpdir'
 
 describe ApiRecipes::Configuration do
+  def fixture(name)
+    File.expand_path("../fixtures/#{name}", __dir__)
+  end
+
   def configure_files(*names)
     ApiRecipes.configure do |config|
       config.logger = Logger.new(IO::NULL)
-      config.apis_files_paths = names.map { |name| "spec/fixtures/#{name}" }
+      config.apis_files_paths = names.map { |name| fixture(name) }
     end
   end
 
@@ -35,12 +40,12 @@ describe ApiRecipes::Configuration do
     expect(logger).to receive(:debug).with(/svc_override\.yml overrides config for 'svc'/)
     ApiRecipes.configure do |config|
       config.logger = logger
-      config.apis_files_paths = ['spec/fixtures/svc.yml.erb', 'spec/fixtures/svc_override.yml']
+      config.apis_files_paths = [fixture('svc.yml.erb'), fixture('svc_override.yml')]
     end
   end
 
   it 'rejects apis_files_paths that are not an Array' do
-    expect { ApiRecipes.configuration.apis_files_paths = 'spec/fixtures/svc.yml.erb' }.to raise_error(ArgumentError)
+    expect { ApiRecipes.configuration.apis_files_paths = fixture('svc.yml.erb') }.to raise_error(ArgumentError)
   end
 
   it 'has no files and no apis until configured' do
@@ -75,11 +80,25 @@ describe ApiRecipes::Configuration do
       expect(configuration.logger.progname).to eq('ApiRecipes')
     end
 
-    it 'writes to log_to' do
+    it 'writes to log_to when it is an IO' do
       io = StringIO.new
       configuration.log_to = io
       configuration.logger.warn('hello')
       expect(io.string).to include('hello')
+    end
+
+    it 'writes to log_to when it is a path' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'api_recipes.log')
+        configuration.log_to = path
+        configuration.logger.warn('hello')
+        configuration.logger.close
+        expect(File.read(path)).to include('hello')
+      end
+    end
+
+    it 'writes to STDOUT by default' do
+      expect { configuration.logger.warn('hello') }.to output(/hello/).to_stdout_from_any_process
     end
 
     {
