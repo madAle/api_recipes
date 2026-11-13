@@ -1,3 +1,3 @@
 module ApiRecipes
-  VERSION = '2.10.3'.freeze
+  VERSION = '2.10.4'.freeze
 end

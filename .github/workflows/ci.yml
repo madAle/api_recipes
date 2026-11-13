@@ -1,0 +1,26 @@
+name: CI
+on:
+  push:
+    branches: [develop, master, 'feature/**', 'release/**', 'hotfix/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The Ruby versions still maintained: https://www.ruby-lang.org/en/downloads/branches/
+        ruby: ['3.3', '3.4', '4.0']
+        # '' leaves Ruby's own default uri gem in place
+        uri: ['', '< 1.0', '~> 1.0']
+    env:
+      URI_VERSION: ${{ matrix.uri }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - run: bundle exec rspec

@@ -1,7 +1,7 @@
 require 'api_recipes'
 
 # Configure ApiRecipes through multiple yaml files.
-# Take a look at examples/config/apis.yml  for details
+# Take a look at the files in examples/config for details
 
 ApiRecipes.configure do |config|
   config.apis_files_paths = ['examples/config/github.yml.erb', 'examples/config/jsonplaceholder.yml.erb']

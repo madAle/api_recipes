@@ -1,0 +1,11 @@
+svc:
+  host: api.example.test
+  endpoints:
+    users:
+
+billing:
+  protocol: http
+  host: billing_service
+  port: 3000
+  endpoints:
+    invoices:
