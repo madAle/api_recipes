@@ -1,4 +1,5 @@
 require 'spec_helper'
+require 'json'
 require 'pp'
 require 'yaml'
 
@@ -152,6 +153,28 @@ describe 'Endpoint and api names' do
       expect { Marshal.dump(object) }.to raise_error(TypeError)
       expect { YAML.dump(object) }.to raise_error(TypeError)
     end
+  end
+
+  it 'refuses every serialization explicitly, without request options in the message' do
+    configure_test_apis(svc: { host: 'h.test', default_headers: { 'X-Key' => 'HEADER' }, endpoints: { users: nil } })
+    api = ApiRecipes.svc.with(authorization: 'Bearer TOKEN')
+    endpoint = api.users(params: { token: 'QUERY' })
+    [[api, 'an ApiRecipes::Api cannot be serialized'], [endpoint, 'an ApiRecipes::Endpoint cannot be serialized']]
+      .each do |object, message|
+        expect { Marshal.dump(object) }.to raise_error(TypeError, message)
+        expect { YAML.dump(object) }.to raise_error(TypeError, message)
+        expect { object.to_json }.to raise_error(TypeError, message)
+        expect { JSON.generate([object]) }.to raise_error(TypeError, message)
+        expect { object.as_json }.to raise_error(TypeError, message)
+        expect([object.inspect, object.pretty_inspect, "#{object}"].join).not_to match(/HEADER|TOKEN|QUERY/)
+      end
+  end
+
+  it 'names the generated classes in error messages' do
+    svc = api(users: { endpoints: { show: { path: '/:id' } } })
+    expect { svc.usres }.to raise_error(NoMethodError, /for an instance of ApiRecipes::Api<svc>/)
+    expect { svc.users.shwo }.to raise_error(NoMethodError, /for an instance of ApiRecipes::Endpoint<svc\.users>/)
+    expect(svc.users.show(1).class.inspect).to eq('ApiRecipes::Endpoint<svc.users.show>')
   end
 
   it 'shows a host whose variables have no valid value as written' do

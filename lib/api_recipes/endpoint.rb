@@ -71,5 +71,14 @@ module ApiRecipes
       "#<ApiRecipes::Endpoint #{@definition.full_name} #{@definition.verb.to_s.upcase} " \
         "#{@context.shown_origin}#{@path}>"
     end
+
+    # An Endpoint holds options that can contain secrets: it is never serialized.
+    def marshal_dump = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
+
+    def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
+
+    def as_json(*) = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
+
+    def to_json(*) = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
   end
 end

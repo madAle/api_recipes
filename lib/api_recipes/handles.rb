@@ -4,7 +4,8 @@ module ApiRecipes
   # The classes of one compiled tree: a subclass of Api for the api and a
   # subclass of Endpoint for every node, each with a public method per child
   # that calls []. They are generated once, when the tree is compiled, and
-  # left anonymous.
+  # named for error messages: ApiRecipes::Api<svc>,
+  # ApiRecipes::Endpoint<svc.users.show>.
   class Handles
     # Names that Api and Endpoint, Ruby or common libraries (pp, psych, json)
     # call on an object without being asked, whether or not they are loaded.
@@ -61,6 +62,7 @@ module ApiRecipes
 
     def generate(node, base, label)
       klass = Class.new(base)
+      klass.set_temporary_name("#{base.name}<#{label}>")
       node.endpoints.each_key do |name|
         if Handles.taken?(base, name)
           @warnings << "#{label}: endpoint '#{name}' has the name of an existing method; reach it with [#{name.inspect}]"

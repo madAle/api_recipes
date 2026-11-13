@@ -64,5 +64,14 @@ module ApiRecipes
       list = definition.endpoints.empty? ? '' : " endpoints: #{definition.endpoints.keys.join(', ')}"
       "#<ApiRecipes::Api #{definition.name} #{@context.shown_origin}#{list}>"
     end
+
+    # An Api holds options that can contain secrets: it is never serialized.
+    def marshal_dump = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
+
+    def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
+
+    def as_json(*) = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
+
+    def to_json(*) = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
   end
 end
