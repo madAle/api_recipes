@@ -152,11 +152,17 @@ module ApiRecipes
   end
 end
 
-# Monkey-patch URI so it can accept dashed hostnames like "web-service-1"
-module URI
-  # Undef DEFAULT_PARSER
-  URI.send(:remove_const, :DEFAULT_PARSER)
+# Monkey-patch URI so it can accept hostnames with underscores like "web_service_1"
+# (e.g. docker-compose service names), which Route#build_uri validates through
+# URI::DEFAULT_PARSER. Only the uri gem's RFC 2396 parser (uri < 1.0) rejects them.
+# From uri 1.0 the default parser follows RFC 3986, which accepts them, and
+# URI::Parser is that parser, whose constructor takes no arguments.
+if defined?(URI::RFC2396_Parser) && URI::DEFAULT_PARSER.instance_of?(URI::RFC2396_Parser)
+  module URI
+    # Undef DEFAULT_PARSER
+    URI.send(:remove_const, :DEFAULT_PARSER)
 
-  # Redefine DEFAULT_PARSER
-  DEFAULT_PARSER = Parser.new(HOSTNAME: "(?:(?:[a-zA-Z\\d](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.)*(?:[a-zA-Z](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.?")
+    # Redefine DEFAULT_PARSER
+    DEFAULT_PARSER = RFC2396_Parser.new(HOSTNAME: "(?:(?:[a-zA-Z\\d](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.)*(?:[a-zA-Z](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.?")
+  end
 end
