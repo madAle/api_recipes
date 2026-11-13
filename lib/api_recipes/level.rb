@@ -17,6 +17,10 @@ module ApiRecipes
       coder['sealed'] = true
     end
 
+    def init_with(_coder)
+      initialize(credential: Credential::NONE, variables: nil)
+    end
+
     def as_json(*) = '[FILTERED]'
 
     def to_json(*) = '"[FILTERED]"'

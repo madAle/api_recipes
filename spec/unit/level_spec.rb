@@ -84,6 +84,32 @@ describe ApiRecipes::Level do
   end
 end
 
+describe 'restored objects' do
+  let(:level) do
+    ApiRecipes::Level.new(credential: ApiRecipes::Credential.authorization('Bearer SECRET'),
+                          variables: { k: 'VARSECRET' }.freeze)
+  end
+  let(:restorers) do
+    [->(x) { Marshal.load(Marshal.dump(x)) }, ->(x) { YAML.unsafe_load(YAML.dump(x)) }]
+  end
+
+  it 'restores a level, a credential and a level set as "no credential, inherit nothing"' do
+    owner = Object.new
+    ApiRecipes::LevelSet.write(owner, :svc) { level }
+    set = owner.instance_variable_get(:@__api_recipes)
+    restorers.each do |restore|
+      restored = restore.call(level)
+      expect(restored.credential.none?).to eq(true)
+      expect(restored.variables).to be_nil
+      expect(restore.call(level.credential).none?).to eq(true)
+      expect(restore.call(level.credential).value).to be_nil
+      again = restore.call(set)
+      expect(again.fetch(:anything).credential.none?).to eq(true)
+      expect(again.fetch(:anything).variables).to be_nil
+    end
+  end
+end
+
 describe ApiRecipes::Levels do
   it 'walks from the instance to the global api' do
     parent = Class.new
