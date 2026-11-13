@@ -126,6 +126,61 @@ describe 'Configuration files and secrets' do
     end
   end
 
+  describe 'a later configure with a structure that contains itself under an x- key' do
+    let(:note) { {}.tap { |hash| hash[:self] = hash } }
+    let(:cyclic) { { host: 'h.test', endpoints: { users: nil }, 'x-note' => note } }
+
+    def silent
+      ->(c) { c.logger = Logger.new(IO::NULL) }
+    end
+
+    it 'works when the cycle was given as a Hash' do
+      ApiRecipes.configure { |c| silent.call(c); c.apis_configs = { svc: cyclic } }
+      expect { ApiRecipes.configure { |c| c.print_urls = false } }.not_to raise_error
+      expect { ApiRecipes.configure { |c| c.print_urls = true } }.not_to raise_error
+      expect(ApiRecipes.svc.users.url.to_s).to eq('https://h.test/users')
+    end
+
+    it 'works when the cycle was given in a YAML file' do
+      yaml = "svc:\n  host: h.test\n  x-note: &n\n    self: *n\n  endpoints:\n    users:\n"
+      file('cycle.yml', yaml) do |path|
+        ApiRecipes.configure { |c| silent.call(c); c.apis_files_paths = [path] }
+        expect { ApiRecipes.configure { |c| c.print_urls = false } }.not_to raise_error
+        expect(ApiRecipes.svc.users.url.to_s).to eq('https://h.test/users')
+      end
+    end
+
+    it 'yields a copy that shares no mutable object and keeps the cycle and the sharing' do
+      shared = { 'a' => [+'text'] }
+      source = ApiRecipes::Configuration.new
+      source.apis_configs = { svc: cyclic.merge('x-one' => shared, 'x-two' => shared) }
+      copy = source.dup
+      before = source.apis_configs[:svc]
+      after = copy.apis_configs[:svc]
+      expect(after).not_to equal(before)
+      expect(after[:'x-note']).not_to equal(before[:'x-note'])
+      expect(after[:'x-note'][:self]).to equal(after[:'x-note'])
+      expect(after[:'x-one']).not_to equal(before[:'x-one'])
+      expect(after[:'x-one']).to equal(after[:'x-two'])
+      expect(after[:'x-one']['a'].first).not_to equal(before[:'x-one']['a'].first)
+      after[:'x-one']['a'].first << ' changed'
+      expect(before[:'x-one']['a'].first).to eq('text')
+    end
+
+    it 'leaves the previous configuration untouched when a configure that edits it fails' do
+      ApiRecipes.configure { |c| silent.call(c); c.apis_configs = { svc: cyclic } }
+      expect do
+        ApiRecipes.configure do |c|
+          c.apis_configs[:svc][:'x-note'][:added] = 1
+          c.apis_configs[:svc][:host] = 'other.test'
+          raise 'stop'
+        end
+      end.to raise_error('stop')
+      expect(ApiRecipes.configuration.apis_configs[:svc][:'x-note'].keys).to eq([:self])
+      expect(ApiRecipes.configuration.apis_configs[:svc][:host]).to eq('h.test')
+    end
+  end
+
   describe 'a configuration that is refused before anything is built' do
     def refused(apis)
       expect { configure_test_apis(apis) }.to raise_error(ApiRecipes::ConfigurationError)

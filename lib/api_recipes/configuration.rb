@@ -164,10 +164,21 @@ module ApiRecipes
     # @private
     # A copy of value whose Hashes, Arrays and unfrozen Strings are new
     # objects; any other object is the same.
-    def deep_copy(value)
+    # A Hash or Array met twice, or that contains itself, is copied once.
+    def deep_copy(value, memo = {}.compare_by_identity)
       case value
-      when Hash then value.to_h { |key, item| [deep_copy(key), deep_copy(item)] }
-      when Array then value.map { |item| deep_copy(item) }
+      when Hash
+        return memo[value] if memo.key?(value)
+
+        copy = memo[value] = {}
+        value.each { |key, item| copy[deep_copy(key, memo)] = deep_copy(item, memo) }
+        copy
+      when Array
+        return memo[value] if memo.key?(value)
+
+        copy = memo[value] = []
+        value.each { |item| copy << deep_copy(item, memo) }
+        copy
       when String then value.frozen? ? value : value.dup
       else value
       end
