@@ -58,7 +58,6 @@ module ApiRecipes
   # Removes the global apis and their methods, the configuration and every
   # credential and variable value.
   def self.reset!
-    LevelSet.reset!
     Registry.reset! { @configuration = nil }
     nil
   end

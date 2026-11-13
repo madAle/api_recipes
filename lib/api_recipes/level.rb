@@ -64,6 +64,21 @@ module ApiRecipes
         level
       end
 
+      # Sets the variables of the levels in values (name => variables) and
+      # removes those of the levels named in cleared, in one replacement of
+      # the set. The credentials are not touched.
+      def replace_variables(owner, values, cleared)
+        set = live_set(owner)
+        changes = cleared.to_h do |name|
+          level = set&.fetch(name)
+          [name, level && level.variables ? level.with(variables: nil) : level]
+        end.compact
+        values.each do |name, variables|
+          changes[name] = (set&.fetch(name) || Level.new(credential: nil, variables: nil)).with(variables: variables)
+        end
+        store(owner, set, changes) unless changes.empty?
+      end
+
       def reset!
         @generation += 1
       end

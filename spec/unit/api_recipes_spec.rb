@@ -141,6 +141,52 @@ describe ApiRecipes do
     end
   end
 
+  describe 'reset! and configure with global variables' do
+    let(:shopify) { { host: '{shop}.example.test', variables: { shop: {} }, endpoints: { orders: nil } } }
+
+    # Starts configure with a global variable in a thread that stops after the
+    # registry is compiled (the lock is held, the variables are not written
+    # yet), runs reset! in another thread, lets it reach the lock, then lets
+    # configure finish.
+    def reset_while_configure_holds_the_lock
+      stopped = Queue.new
+      resume = Queue.new
+      allow(ApiRecipes::Compiler).to receive(:compile_all).and_wrap_original do |original, *args|
+        result = original.call(*args)
+        if Thread.current[:api_recipes_spec_stop]
+          stopped << true
+          resume.pop
+        end
+        result
+      end
+      apis = { shopify: shopify }
+      configurer = Thread.new do
+        Thread.current[:api_recipes_spec_stop] = true
+        ApiRecipes.configure do |config|
+          config.logger = Logger.new(IO::NULL)
+          config.apis_configs = apis
+          config.variables = { shopify: { shop: 'old' } }
+        end
+      end
+      stopped.pop
+      resetter = Thread.new { ApiRecipes.reset! }
+      Thread.pass until resetter.stop?
+      resume << true
+      [configurer, resetter].each(&:join)
+    end
+
+    it 'empties the global variables when reset! runs while configure holds the lock' do
+      reset_while_configure_holds_the_lock
+      expect(ApiRecipes.apis).to eq([])
+      apis = { shopify: shopify }
+      ApiRecipes.configure do |config|
+        config.logger = Logger.new(IO::NULL)
+        config.apis_configs = apis
+      end
+      expect { ApiRecipes.shopify.orders.url }.to raise_error(ApiRecipes::MissingVariable, /shop/)
+    end
+  end
+
   describe '.configuration' do
     it 'is created once' do
       expect(ApiRecipes.configuration).to be_a(ApiRecipes::Configuration)

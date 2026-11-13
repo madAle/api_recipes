@@ -12,6 +12,7 @@ module ApiRecipes
     @warned = {}
 
     @methods = [].freeze
+    @variable_names = [].freeze
 
     class << self
       attr_reader :current
@@ -32,7 +33,11 @@ module ApiRecipes
                          generation: @current.generation + 1)
           yield if block_given?
           warnings = define_methods(@current.apis) + handles.values.flat_map(&:warnings)
-          variables.each { |name, values| LevelSet.write(ApiRecipes, name) { |level| level.with(variables: values) } }
+          # A name that configure set belongs to the configuration: the next
+          # configure replaces its variables or removes them. A value assigned
+          # directly to a name that configure never set is not touched.
+          LevelSet.replace_variables(ApiRecipes, variables, @variable_names - variables.keys)
+          @variable_names = variables.keys.freeze
           warnings.each { |message| configuration.logger.warn(message) }
         end
       end
@@ -60,10 +65,12 @@ module ApiRecipes
         warn_once([endpoint, param, kind], message)
       end
 
-      # Removes the methods generated on ApiRecipes and empties the registry,
-      # then calls the block under the same lock.
+      # Removes the methods generated on ApiRecipes, empties the registry and
+      # the levels, then calls the block, all under the same lock.
       def reset!
         LOCK.synchronize do
+          LevelSet.reset!
+          @variable_names = [].freeze
           define_methods([])
           WARNED_LOCK.synchronize { @warned = {} }
           @current = new(generation: @current.generation + 1)

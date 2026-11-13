@@ -50,6 +50,54 @@ describe 'Credentials, variables and class trees through the DSL' do
     expect(klass.shopify.orders.url.to_s).to eq('https://class.example.test/orders')
   end
 
+  describe 'global variables and a later configure' do
+    def configure_shopify(variables)
+      shopify_config = shopify
+      ApiRecipes.configure do |config|
+        config.logger = Logger.new(IO::NULL)
+        config.apis_configs = { shopify: shopify_config }
+        config.variables = variables
+      end
+    end
+
+    # The rule: a name that configure set belongs to the configuration, so the
+    # next successful configure replaces it or removes it. A value assigned
+    # directly to a name that configure never set is not touched.
+    it 'stops using a global variable that the new configuration does not give' do
+      configure_shopify(shopify: { shop: 'old' })
+      expect(ApiRecipes.shopify.orders.url.to_s).to eq('https://old.example.test/orders')
+      configure_shopify({})
+      expect { ApiRecipes.shopify.orders.url }.to raise_error(ApiRecipes::MissingVariable, /shop/)
+      expect(ApiRecipes.shopify.variables).to eq({})
+    end
+
+    it 'replaces the global variables with the ones of the new configuration' do
+      configure_shopify(shopify: { shop: 'old' })
+      configure_shopify(shopify: { shop: 'new' })
+      expect(ApiRecipes.shopify.orders.url.to_s).to eq('https://new.example.test/orders')
+    end
+
+    it 'keeps the global credential when the variables are removed' do
+      configure_shopify(shopify: { shop: 'old' })
+      ApiRecipes.shopify.authorization = 'token'
+      configure_shopify({})
+      expect(ApiRecipes.shopify.authorization).to eq('token')
+    end
+
+    it 'keeps a value assigned directly to a name that configure never set' do
+      configure_shopify({})
+      ApiRecipes.shopify.variables = { shop: 'direct' }
+      configure_shopify({})
+      expect(ApiRecipes.shopify.orders.url.to_s).to eq('https://direct.example.test/orders')
+    end
+
+    it 'changes nothing when the new configuration is refused' do
+      configure_shopify(shopify: { shop: 'old' })
+      expect { configure_shopify(shopify: 'acme') }.to raise_error(ApiRecipes::ConfigurationError)
+      expect(ApiRecipes.shopify.orders.url.to_s).to eq('https://old.example.test/orders')
+    end
+  end
+
   it 'works when the class is declared before configure, and follows a new configuration' do
     klass = Class.new do
       include ApiRecipes
