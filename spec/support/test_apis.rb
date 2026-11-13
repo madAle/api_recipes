@@ -21,7 +21,10 @@ module TestApis
     }
   }.freeze
 
-  BASE = 'https://api.example.test'.freeze
+  # Base url of the svc test api.
+  def base_url
+    'https://api.example.test'
+  end
 
   def configure_test_apis(apis = TEST_APIS)
     ApiRecipes.configure do |config|
