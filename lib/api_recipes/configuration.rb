@@ -32,7 +32,7 @@ module ApiRecipes
     def apis_configs=(configs = {})
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
 
-      @apis_configs = symbolize_keys(configs)
+      @apis_configs = Compiler.normalize(configs)
       record_source(:hash)
     end
 
@@ -57,7 +57,7 @@ module ApiRecipes
       apis = {}
       @sources.each do |kind|
         if kind == :hash
-          apis.merge!(deep_symbolize(@apis_configs))
+          apis.merge!(@apis_configs)
         else
           @apis_files_paths.each { |path| merge_file(apis, path) }
         end
@@ -137,7 +137,7 @@ module ApiRecipes
       raise RecipeFileError.new(path, 'file is empty') if data.nil?
       raise RecipeFileError.new(path, 'must contain a mapping of api names') unless data.is_a?(Hash)
 
-      deep_symbolize(data)
+      Compiler.normalize(data)
     end
 
     # @private
@@ -160,36 +160,6 @@ module ApiRecipes
     end
 
     # @private
-    # path holds the Hashes and Arrays being read: a structure that contains
-    # itself (a YAML alias can build one) is refused, not followed for ever.
-    def deep_symbolize(value, path = {}.compare_by_identity)
-      return value unless value.is_a?(Hash) || value.is_a?(Array)
-      raise ConfigurationError.new(['the configuration contains itself']) if path.key?(value)
-
-      path[value] = true
-      result = if value.is_a?(Hash)
-                 symbolize_keys(value) { |item| deep_symbolize(item, path) }
-               else
-                 value.map { |item| deep_symbolize(item, path) }
-               end
-      path.delete(value)
-      result
-    end
-
-    # The Hash with Symbol keys. A key that cannot be read as UTF-8 text, or two
-    # keys that become the same Symbol (a String and a Symbol), are refused:
-    # the later would silently replace the earlier.
-    def symbolize_keys(hash)
-      hash.each_with_object({}) do |(key, item), out|
-        key = key.to_sym if key.respond_to?(:to_sym)
-        raise ConfigurationError.new(["'#{key}' is given twice, as a String and as a Symbol"]) if out.key?(key)
-
-        out[key] = block_given? ? yield(item) : item
-      end
-    rescue EncodingError
-      raise ConfigurationError.new(['a name has an encoding that is not valid UTF-8'])
-    end
-
     # @private
     def default_logger
       log = ::Logger.new(log_to || $stderr)

@@ -102,6 +102,13 @@ describe 'Objects of the DSL' do
       expect { YAML.dump([response]) }.to raise_error(TypeError)
     end
 
+    # Marshal.dump already fails on a Proc inside the http.rb response and an
+    # ActiveSupport to_json goes through as_json, so the methods are called directly.
+    it 'refuses marshal_dump and as_json on their own, and points to data' do
+      expect { response.marshal_dump }.to raise_error(TypeError)
+      expect { response.as_json }.to raise_error(TypeError, /response\.data/)
+    end
+
     it 'does not expose the request and does not show it in inspect' do
       expect(response).not_to respond_to(:request)
       expect(response).not_to respond_to(:deconstruct_keys)

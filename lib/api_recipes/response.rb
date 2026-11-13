@@ -71,6 +71,8 @@ module ApiRecipes
 
     def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Response cannot be serialized')
 
+    def as_json(*) = raise(TypeError, 'an ApiRecipes::Response cannot be serialized: use response.data')
+
     private
 
     def hidden_pair?(pair)
