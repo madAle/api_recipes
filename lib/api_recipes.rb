@@ -59,8 +59,7 @@ module ApiRecipes
   # credential and variable value.
   def self.reset!
     LevelSet.reset!
-    Registry.reset!
-    @configuration = nil
+    Registry.reset! { @configuration = nil }
     nil
   end
 

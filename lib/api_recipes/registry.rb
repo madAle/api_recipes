@@ -60,12 +60,14 @@ module ApiRecipes
         warn_once([endpoint, param, kind], message)
       end
 
-      # Removes the methods generated on ApiRecipes and empties the registry.
+      # Removes the methods generated on ApiRecipes and empties the registry,
+      # then calls the block under the same lock.
       def reset!
         LOCK.synchronize do
           define_methods([])
           WARNED_LOCK.synchronize { @warned = {} }
           @current = new(generation: @current.generation + 1)
+          yield if block_given?
         end
       end
 

@@ -132,6 +132,13 @@ describe ApiRecipes do
       expect(ApiRecipes.svc.users.url.to_s).to eq('https://two.example.test/users')
       expect(ApiRecipes.configuration.apis_configs[:svc][:host]).to eq('two.example.test')
     end
+
+    it 'pairs the configuration with the registry when reset! and configure overlap' do
+      configure_host('one.example.test')
+      interleave(:reset!, -> { ApiRecipes.reset! }, -> { configure_host('two.example.test') })
+      expect(ApiRecipes.apis).to eq([:svc])
+      expect(ApiRecipes.configuration.apis_configs.keys).to eq([:svc])
+    end
   end
 
   describe '.configuration' do
