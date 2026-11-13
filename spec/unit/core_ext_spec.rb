@@ -1,5 +1,4 @@
 require 'spec_helper'
-require 'support/constants'
 
 # A Hash subclass whose constructor needs an argument, like Dotenv::Environment
 class HashRequiringAnArgument < Hash
