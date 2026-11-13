@@ -524,9 +524,10 @@ ApiRecipes.github.with(host: 'github.example.com').users.show('octocat').url.to_
 # => "https://github.example.com/users/octocat"
 ```
 
-On an API, `with` takes any option of the API except `endpoints`, plus
-`variables`, `authorization` and `basic_auth`. The values are checked like the
-ones in a file.
+On an API, `with` takes `protocol`, `host`, `port`, `base_url`, `timeout`,
+`on_bad_code`, `mime_type`, `verify_with`, `default_headers`, `variables`,
+`authorization` and `basic_auth`. The values are checked like the ones in a file,
+and an option that is not in this list raises `ApiRecipes::ConfigurationError`.
 
 On an endpoint, `with` takes `timeout`, `on_bad_code`, `ok_code`, `mime_type` and
 `verify_with`, for that request only:
