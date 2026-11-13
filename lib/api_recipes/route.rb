@@ -15,21 +15,9 @@ module ApiRecipes
       prepare_request
     end
 
-    def fill(object)
-      data = @response.parse @attributes[:mime_type]
-      if block_given?
-        tap do
-          try_to_fill object, data
-          yield object, data, @response.status
-        end
-      else
-        try_to_fill object, data
-      end
-    end
-
     def start_request(&block)
       original_response = @request.send http_verb, @url, request_params
-      @response = Response.new original_response, attributes
+      @response = Response.new original_response, mime_type: attributes[:mime_type]
       check_response_code
 
       if block_given?
@@ -131,31 +119,6 @@ module ApiRecipes
 
     def settings
       @api.configs
-    end
-
-    def try_to_fill(object, data)
-      case data
-      when Hash
-        res = fill_object_with object, data
-      when Array
-        res = []
-        data.each do |element|
-          res << fill_object_with(object.new, element)
-        end
-      end
-
-      res
-    end
-
-    def fill_object_with(object, data)
-      data.each do |key, value|
-        begin
-          object.send "#{key}=", value
-        rescue
-        end
-      end
-
-      object
     end
 
     def http_verb
