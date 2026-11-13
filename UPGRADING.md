@@ -12,7 +12,7 @@ This guide has six parts:
 2. [What stops at once, with a message](#2-what-stops-at-once-with-a-message)
 3. [What changes without a message](#3-what-changes-without-a-message)
 4. [What was removed, and what to use instead](#4-what-was-removed-and-what-to-use-instead)
-5. [What is new](#5-whats-new)
+5. [What is new](#5-what-is-new)
 6. [Security](#6-security)
 
 Then it explains [the `api_recipes upgrade` command](#the-api_recipes-upgrade-command),
@@ -50,8 +50,11 @@ github:
 - **http.rb 6.** The gem needs `http` 6.0.4 or higher, below 7. http.rb 5 is no
   longer supported.
 - **Run `api_recipes upgrade`** on your code and your configuration files (see
-  [below](#the-api_recipes-upgrade-command)). It finds what stops and gives
-  hints about what changes silently.
+  [below](#the-api_recipes-upgrade-command)). It finds the removed
+  `route`, `base_configs`, `ApiRecipes.print_urls`, the removed error classes and
+  `Hash` and `Array` methods, and a few lines that deserve a look (manual
+  encoding of path parameters, a bare `rescue`, `follow:`). It then lists what it
+  cannot find, such as the removed accessors of `Endpoint` and `Api`.
 - **Read your logs after the first run.** The gem now logs warnings, to STDERR, when
   a path parameter value changes meaning and when an endpoint name cannot become
   a method.
@@ -133,11 +136,14 @@ These raise `NoMethodError` or `NameError`. Part 4 gives the replacement of each
 - `ApiRecipes.print_urls` and `ApiRecipes.print_urls = ...`
 - `ApiRecipes::RouteNameClashWithExistentMethod`, `ApiRecipes::Route` and
   `ApiRecipes::Settings`
+- the error classes `RouteAndResourceNamesClashError`, `MissingRouteAttribute`,
+  `ProvidedObjectNotAsResponseData` and `NoConfigurationGivenForEndpoint`, which
+  nothing ever raised: a `rescue` clause that names one raises `NameError`
 - the methods the gem added to `Hash` and `Array`
 
-Beware of one case: an endpoint that is itself called `name`, `params`, `route`,
-`children` or `api` now answers to that name, and returns the endpoint instead of
-raising.
+Beware of one case. A name such as `name` or `params`, which used to be an
+accessor, now reaches the endpoint of that name if your configuration has one.
+Otherwise it raises `NoMethodError`.
 
 ### The name of an API in a class
 
@@ -225,8 +231,9 @@ class and ancestors, then `ApiRecipes.github`. Assigning `nil` means "send none"
 
 - The default logger writes to STDERR at warn level. In 2.x it wrote to STDOUT at
   debug level. If you read those lines from STDOUT, set `log_to` and `log_level`.
-- `print_urls` no longer prints with `puts`: it logs each URL at info level, and
-  lowers the level of the default logger to info.
+- `print_urls` no longer prints with `puts`: it logs each URL at info level. The
+  level of the default logger is `log_level`, then `LOG_LEVEL`, then info when
+  `print_urls` is on, otherwise warn: a level you chose is never lowered.
 - A debug line per request shows the verb, the URL, the status and the time. It
   never shows a query string, a header, a body or a credential.
 
@@ -269,8 +276,8 @@ get rid of the files, do not assign the files.
 
 ### Endpoints named like a method
 
-An endpoint called `with`, `definition`, `variables` or `authorization` (on an API),
-or `with`, `definition`, `run` or `url` (on an endpoint), used to be skipped or to
+An endpoint called `with`, `definition`, `authorization`, `basic_auth` or `variables`
+(on an API), or `run`, `url`, `with` or `definition` (on an endpoint), used to be skipped or to
 replace the method. Now no method is generated for it, a warning is logged when the
 configuration is loaded, and the endpoint is reached with `[]`:
 
@@ -304,7 +311,8 @@ expect. Keys that are not plain attribute names are skipped.
   YAML) has no credential and inherits none.
 - `response.uri` leaves out the credential query parameter when the API declares
   `auth: { type: 'query' }`.
-- A redirect to a host with non-ASCII characters needs the `addressable` gem.
+- A redirect to a host with non-ASCII characters needs the `addressable` gem;
+  without it http.rb raises `LoadError`.
 
 ## 4. What was removed, and what to use instead
 
@@ -313,6 +321,7 @@ expect. Keys that are not plain attribute names are skipped.
 | `endpoint.route`, `endpoint.route.fill(object)` | `response.fill(object)` |
 | `Endpoint#name`, `#params`, `#children`, `#api` | `endpoint.definition` (`name`, `full_name`, `path_params`, `endpoints`, `parent`) |
 | `Api#name`, `#configs`, `#base_configs`, `#object` | `api.definition` (`name`, `host`, `timeout`, `endpoints`...) |
+| the error classes `RouteAndResourceNamesClashError`, `MissingRouteAttribute`, `ProvidedObjectNotAsResponseData`, `NoConfigurationGivenForEndpoint` | nothing: nothing raised them, so remove the `rescue` clause that names one |
 | `ApiRecipes::Route` | nothing: a request is sent with `run` |
 | `ApiRecipes::RouteNameClashWithExistentMethod` | nothing: a name clash is a warning, and the endpoint is reached with `[]` |
 | `ApiRecipes.print_urls` | `config.print_urls = true` inside `ApiRecipes.configure` |
@@ -399,12 +408,22 @@ changes a file.
 app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
 app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
 config/apis/github.yml: [config] github: unknown option 'hots'
+
+(the list of what the command cannot find)
+
+3 findings
 ```
 
-It then prints the list of changes that a search in the text cannot find, which
-you check by hand: this guide has the details of each. The exit code is 0 when it
-finds nothing, 1 when it finds something and 2 when it could not read a file or a
-directory, so it can run in a CI.
+A directory is searched for `*.rb` files only; a file you name is read whatever
+its name. The command then prints the list of changes that a search in the text
+cannot find, which you check by hand (this guide has the details of each), and a
+summary line: `Nothing to change`, `1 finding` or `N findings`.
+
+A file or a directory that could not be read (missing, binary, not valid UTF-8)
+is reported on the error stream, as `<file>: <reason>`, and is not a finding. The
+exit code is 1 when there is at least one finding, even if something could not be
+read; otherwise it is 2 when something could not be read, and 0 when there is
+nothing to change. It can run in a CI.
 
 The command does not rewrite code. What matters most depends on values that exist
 only when the program runs, and an automatic rewrite would give a false sense of

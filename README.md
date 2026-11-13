@@ -303,7 +303,9 @@ only letters, digits, dots, hyphens and underscores. In a `base_url` it is
 encoded like a path parameter. In a header it cannot contain a line break or
 another control character. Anything else raises `ApiRecipes::InvalidVariable`.
 `variables` without an assignment returns the values set at the level you call
-it on.
+it on. Assigning `nil` clears them. At the global level (`ApiRecipes.shopify`)
+that includes the values given with `config.variables`, which are the same level;
+a default declared in the file applies again.
 
 ## Loading the configuration
 
@@ -405,7 +407,16 @@ end
 `api :github, as: :gh` gives the method another name. An API is declared once in
 a class and its ancestors, modules included: declaring it twice raises
 `ApiRecipes::ApiNameClashError`. If a subclass needs other options, use
-[`with`](#options-for-one-chain-with).
+[`with`](#options-for-one-chain-with). A singleton class cannot declare an API
+(`ApiRecipes::ApiNameClashError`): declare it in a module and `extend` the object
+with it.
+
+An API declared in a module is available as an instance method of every class
+that includes the module, and as `Module.name_of_api` on the module itself. The
+including class gets no class-level method.
+
+A credential or a variable set through one declaration is never seen by another
+declaration of the same API name.
 
 ### With settings of its own
 
@@ -537,6 +548,12 @@ ApiRecipes.github.users.show('octocat').with(timeout: 10, ok_code: [200, 304]).r
 ```
 
 Giving an option as `nil` drops the value given before it in the same chain.
+`default_headers` given to `with` are added to the ones already configured:
+
+```ruby
+ApiRecipes.github.with(default_headers: { 'X-Request-Id' => 'abc123' }).users.run
+```
+
 The other way of changing an API for a while is `api :name, options` in a class.
 
 ## Reaching an endpoint by name: `[]`
@@ -602,6 +619,16 @@ Given an Array, `fill` takes a class and returns one new object per element. Key
 that the object has no writer for, or that are not plain attribute names, are
 skipped. `only:` and `except:` take one name or a list, as Symbols or Strings.
 An error raised by a writer is not hidden.
+
+With a block, `fill` calls it with the filled object (or the list of objects),
+the parsed data and the status of the response, and still returns the filled
+object:
+
+```ruby
+ApiRecipes.github.users.show('octocat').run.fill(Profile.new) do |profile, data, status|
+  puts "#{status}: #{profile.login}"
+end
+```
 
 ## Deciding what counts as success
 
@@ -830,7 +857,7 @@ ApiRecipes does not check its origin, so prefer the levels above.
 
 ```ruby
 ApiRecipes.configure do |config|
-  config.logger = Rails.logger          # any Logger; set it before the files
+  config.logger = Rails.logger          # any Logger
   config.print_urls = true              # log the URL of every request
   config.apis_files_paths = ['config/apis/github.yml']
 end
@@ -842,15 +869,25 @@ nothing and a problem shows up. `config.log_to` (a path or an IO) and
 without building a Logger. Without `log_level`, the `LOG_LEVEL` environment
 variable is used, in any letter case; a value that is not a level is ignored.
 
-- `print_urls = true` logs the URL of each request at info level, and lowers the
-  level of the default logger to info. A logger you provide keeps its own level.
+- The level of the default logger is, in this order: `log_level`; the `LOG_LEVEL`
+  variable; info when `print_urls` is on; otherwise warn. A level you chose is
+  never lowered by `print_urls`. A logger you provide keeps its own level.
+- `print_urls = true` logs the URL of each request at info level.
 - At debug level, every request logs one line: the verb, the URL, the status and
-  the time it took. Nothing is logged when the request raises.
+  the time it took. A response with a bad status that raises is logged too. A
+  request whose connection fails or times out logs nothing.
 - A log line never contains a query string, a header, a body or a credential.
+- `ApiRecipes.logger` is the logger in use, and `ApiRecipes.configuration` is the
+  current configuration. Change the configuration only inside `configure`.
 
 At the start, ApiRecipes logs one warning for each endpoint whose name cannot
 become a method, when the configuration is loaded (see
 [Good to know](#good-to-know)).
+
+It also warns, once for each endpoint, when the value of a path parameter
+contains a `/` (it is sent as `%2F`) or looks already percent-encoded (it is
+encoded again). The warning names the endpoint and never the value.
+`config.upgrade_warnings = false` turns these two warnings off.
 
 ## Inspecting an API
 
@@ -880,8 +917,10 @@ For an API: `name`, `protocol`, `host`, `port`, `base_url`, `timeout`,
 `variables`, `endpoints`, `routes` and `to_h`. For an endpoint: `name`,
 `full_name`, `path`, `full_path`, `path_params`, `verb`, `route?`, `ok_code`,
 `timeout`, `on_bad_code`, `mime_type`, `verify_with`, `parent`, `endpoints` and
-`to_h`. `to_h` hides the values of the headers. A definition never holds a
-credential or the value of a variable.
+`to_h`. A definition never holds a credential assigned with `authorization=`,
+`basic_auth=` or `with`, nor the value of a variable. It does return the
+`default_headers` as they are configured, so do not write a credential there if
+you pass definitions around; `to_h` and `inspect` hide the values of the headers.
 
 `routes` lists every endpoint that can be called, with the call that reaches it:
 
@@ -1042,7 +1081,8 @@ What ApiRecipes does:
 - **Before sending**, the address that http.rb will contact is checked against
   the origin that was validated.
 - **Logs, errors and `inspect`** never contain a credential, a header, a body or
-  a query string. `definition` never holds a credential.
+  a query string. `definition` never holds a credential that was assigned with
+  `authorization=`, `basic_auth=` or `with`.
 - **Serialization.** An API, an endpoint and a response refuse `Marshal.dump`,
   `YAML.dump` and `as_json`, and raise `TypeError`: serialize `response.data` or
   `response.body.to_s` instead.
@@ -1080,7 +1120,7 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `log_to` | path or IO for the default logger (default: STDERR) |
 | `log_level` | level of the default logger (default: the `LOG_LEVEL` variable, or warn) |
 | `print_urls` | log the URL of each request at info level (default: false) |
-| `upgrade_warnings` | warn about path parameter values that 2.x sent differently (default: true) |
+| `upgrade_warnings` | warn when a path parameter value contains `/` or looks already percent-encoded (default: true) |
 
 ### API
 
@@ -1125,7 +1165,7 @@ the endpoint that contains it.
   configuration is loaded. The only free keys start with `x-`.
 - **Sharing a name.** An endpoint can have any name, and it is always reachable
   with `[]`. When the name is also a method of the object (`with`, `definition`,
-  `authorization` or `variables` on an API; `run`, `url`, `with` or `definition`
+  `authorization`, `basic_auth` or `variables` on an API; `run`, `url`, `with` or `definition`
   on an endpoint) or one of the names that Ruby and common libraries call on any
   object by themselves (`to_ary`, `to_str`, `to_json`...), no method is generated
   for it and ApiRecipes logs a warning when the configuration is loaded. Reach

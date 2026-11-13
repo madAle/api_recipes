@@ -26,6 +26,8 @@ looks for them in your code.
   `ApiNameClashError`; use `as:`. An api can be declared once in a class hierarchy.
 - A credential with a line break or a control character raises
   `ApiRecipes::InvalidCredential`.
+- Empty names and names with control characters are refused for apis and
+  endpoints.
 - `follow` accepts only `true`, `false`, `nil` or a Hash with `strict`,
   `max_hops` and `on_redirect`.
 - Files are read with `YAML.safe_load`. A missing, empty or invalid file raises
@@ -53,6 +55,8 @@ looks for them in your code.
   credential query parameter. Cookies set during a redirect chain are not carried
   to the next hop.
 - `Response#fill` calls only public writers and no longer swallows their errors.
+- `Response#uri` leaves out the credential query parameter when the api declares
+  `auth: { type: 'query' }`.
 - `Api`, `Endpoint` and `Response` refuse serialization.
 
 #### Removed
@@ -61,6 +65,9 @@ looks for them in your code.
 - `Endpoint#name`, `#params`, `#children`, `#api` and `Api#name`, `#configs`,
   `#base_configs`, `#object`: use `definition`.
 - `ApiRecipes.print_urls`: use `config.print_urls`.
+- The error classes `RouteAndResourceNamesClashError`, `MissingRouteAttribute`,
+  `ProvidedObjectNotAsResponseData` and `NoConfigurationGivenForEndpoint`, which
+  nothing raised.
 - `RouteNameClashWithExistentMethod`, `ApiRecipes::Route`, `ApiRecipes::Settings`,
   `Configuration#setup` and the internal methods of the 2.x core.
 - The methods the gem added to `Hash` and `Array`, and the patch of `URI`.
