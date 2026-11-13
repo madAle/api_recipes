@@ -21,6 +21,9 @@ There are no client classes to write. Hosts, paths, verbs, timeouts and expected
 status codes live in a configuration file, and ApiRecipes turns them into a chain
 of methods. Requests are made with [http.rb](https://github.com/httprb/http).
 
+This page describes version 3.0, which is in pre-release. The documentation of
+version 2 is the
+[README of the `v2.10.4` tag](https://github.com/madAle/api_recipes/blob/v2.10.4/README.md).
 Coming from version 2? Read [UPGRADING.md](UPGRADING.md) first.
 
 ## Contents
@@ -51,15 +54,16 @@ Coming from version 2? Read [UPGRADING.md](UPGRADING.md) first.
 
 ## Installation
 
-Add the gem to your Gemfile and run `bundle install`:
+Add the gem to your Gemfile and run `bundle install`. While 3.0 is in
+pre-release, Bundler installs it only when you ask for a pre-release version:
 
 ```ruby
-gem 'api_recipes'
+gem 'api_recipes', '>= 3.0.0.beta1'
 ```
 
 Or install it directly:
 
-    $ gem install api_recipes
+    $ gem install api_recipes --pre
 
 ## Quick start
 
@@ -576,6 +580,10 @@ Giving an option as `nil` drops the value given before it in the same chain.
 ```ruby
 ApiRecipes.github.with(default_headers: { 'X-Request-Id' => 'abc123' }).users.run
 ```
+
+The options of a chain are one set. A credential given to `with` is sent
+wherever that chain goes, also to a `host` given by another `with` of the same
+chain: give them together only when the credential is meant for that host.
 
 The other way of changing an API for a while is `api :name, options` in a class.
 
@@ -1267,7 +1275,8 @@ configuration file with every option commented.
 
 [UPGRADING.md](UPGRADING.md) lists what stops with a message, what changes
 silently and what is new, and explains the `api_recipes upgrade` command, which
-looks for the changes in your code. Valid YAML files keep working.
+looks for the changes in your code. A YAML file that is valid for 2.x keeps
+working, with the two exceptions listed there.
 
 ## Development
 
