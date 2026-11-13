@@ -96,6 +96,44 @@ describe ApiRecipes do
     end
   end
 
+  describe 'concurrent calls' do
+    def configure_host(host)
+      ApiRecipes.configure do |config|
+        config.logger = Logger.new(IO::NULL)
+        config.apis_configs = { svc: { host: host, endpoints: { users: nil } } }
+      end
+    end
+
+    # Runs call in a thread that stops right after the registry method
+    # returns, runs other meanwhile, then lets the thread finish.
+    def interleave(registry_method, call, other)
+      stopped = Queue.new
+      resume = Queue.new
+      allow(ApiRecipes::Registry).to receive(registry_method).and_wrap_original do |original, *args, &block|
+        result = original.call(*args, &block)
+        if Thread.current[:api_recipes_spec_stop]
+          stopped << true
+          resume.pop
+        end
+        result
+      end
+      thread = Thread.new do
+        Thread.current[:api_recipes_spec_stop] = true
+        call.call
+      end
+      stopped.pop
+      other.call
+      resume << true
+      thread.join
+    end
+
+    it 'pairs the configuration with the registry built from it when two configure calls overlap' do
+      interleave(:install, -> { configure_host('one.example.test') }, -> { configure_host('two.example.test') })
+      expect(ApiRecipes.svc.users.url.to_s).to eq('https://two.example.test/users')
+      expect(ApiRecipes.configuration.apis_configs[:svc][:host]).to eq('two.example.test')
+    end
+  end
+
   describe '.configuration' do
     it 'is created once' do
       expect(ApiRecipes.configuration).to be_a(ApiRecipes::Configuration)

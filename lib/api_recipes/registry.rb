@@ -16,8 +16,11 @@ module ApiRecipes
     class << self
       attr_reader :current
 
-      # Loads and compiles the configuration, then swaps the registry in. If
-      # anything raises before the swap, the current registry stays.
+      # Loads and compiles the configuration, then swaps the registry in and
+      # calls the block, which keeps the configuration: both under one lock,
+      # so that two calls never pair the configuration of one with the
+      # registry of the other. If anything raises before the swap, the
+      # current registry stays and the block is not called.
       def install(configuration)
         LOCK.synchronize do
           apis = configuration.load
@@ -27,6 +30,7 @@ module ApiRecipes
           WARNED_LOCK.synchronize { @warned = {} }
           @current = new(configs: Compiler.frozen_copy(apis), definitions: definitions, handles: handles,
                          generation: @current.generation + 1)
+          yield if block_given?
           warnings = define_methods(@current.apis) + handles.values.flat_map(&:warnings)
           variables.each { |name, values| LevelSet.write(ApiRecipes, name) { |level| level.with(variables: values) } }
           warnings.each { |message| configuration.logger.warn(message) }
