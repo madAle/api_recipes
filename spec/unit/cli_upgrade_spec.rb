@@ -24,6 +24,14 @@ describe 'api_recipes upgrade' do
     expect(out).to include('What this command cannot find', '4 findings')
   end
 
+  it 'lists the changes that a search in the text cannot find' do
+    _, out, = run('upgrade', File.join(root, 'app'))
+    expect(out).to include('a class with its own host, protocol or port that relied on the global credential',
+                           'cookies set by a server during a redirect chain',
+                           'api names that are methods of Kernel',
+                           'a base_url with a placeholder in a configuration given as a Hash')
+  end
+
   it 'validates configuration files with the 3.0 rules' do
     code, out, = run('upgrade', '--config', File.join(root, 'config/bad.yml'))
     expect(code).to eq(1)

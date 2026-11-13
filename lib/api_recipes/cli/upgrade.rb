@@ -40,7 +40,11 @@ module ApiRecipes
         'a nested endpoint without options under a parent with verify_with: it now inherits the verification',
         'an endpoint called with, definition or variables: reach it with []; the warning at configuration reports it',
         'fill with private setters, or code that relies on swallowed errors: make the setters public, handle the errors',
-        'follow: true together with a credential: the credential no longer follows to another host'
+        'follow: true together with a credential: the credential no longer follows to another host',
+        'a class with its own host, protocol or port that relied on the global credential: set the credential on the class',
+        'cookies set by a server during a redirect chain: they are no longer carried to the next hop',
+        'api names that are methods of Kernel, such as :open or :format: they raise ApiNameClashError, use as:',
+        'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable'
       ].freeze
 
       # Problems met while reading, as "<file>: <reason>". They are not findings:
