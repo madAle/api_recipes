@@ -1,4 +1,4 @@
-## Unreleased - uri 1.x and Ruby 3.4
+## Version 2.10.3 - uri 1.x and Ruby 3.4
 
 - `Hash#transform_keys` and `#transform_keys!` are no longer redefined: Ruby's own are
   used. The replacements broke Hash subclasses whose constructor needs arguments (e.g.
@@ -9,6 +9,11 @@
   `ArgumentError`.
 - Allows http up to 5.x (was `<= 5.1`). http 5.1.0 requires base64 without declaring
   it, so api_recipes failed to load on Ruby 3.4.
+
+## Version 2.10.2
+
+- The default message of `ResponseCodeNotAsExpected` no longer includes the response
+  body.
 
 ## Version 2.10.1
 
