@@ -30,13 +30,17 @@ module ApiRecipes
     end
   end
 
-  # Yields the configuration, then loads and compiles it. Without a block,
-  # returns the configuration.
+  # Yields a copy of the configuration, then loads and compiles it. The copy
+  # becomes the configuration only if that succeeds: otherwise the previous
+  # configuration and apis stay as they were. Without a block, returns the
+  # configuration.
   def self.configure
     return configuration unless block_given?
 
-    yield configuration
-    Registry.install(configuration)
+    draft = configuration.dup
+    yield draft
+    Registry.install(draft)
+    @configuration = draft
     nil
   end
 

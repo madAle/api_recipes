@@ -17,6 +17,16 @@ module ApiRecipes
       @upgrade_warnings = true
     end
 
+    # configure works on a copy: the lists and Hashes that a setter or the
+    # caller can change in place are copied, so the original stays as it was.
+    def initialize_copy(source)
+      super
+      @sources = @sources.dup
+      @apis_configs = @apis_configs.dup
+      @apis_files_paths = @apis_files_paths.dup
+      @variables = @variables.dup
+    end
+
     def apis_configs=(configs = {})
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
 

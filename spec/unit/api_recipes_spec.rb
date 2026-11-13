@@ -27,6 +27,33 @@ describe ApiRecipes do
       configure_test_apis
       expect(ApiRecipes.svc).to equal(ApiRecipes.svc)
     end
+
+    it 'keeps the previous configuration, unchanged, when a new one fails' do
+      configure_test_apis
+      before = ApiRecipes.configuration
+      logger = before.logger
+      other_logger = Logger.new(IO::NULL)
+      failures = [
+        ->(config) { config.apis_configs = { svc: { bogus: 1 } } },
+        ->(config) { config.apis_files_paths = [File.expand_path('../fixtures/missing.yml', __dir__)] },
+        ->(config) { config.variables[:svc] = 'not a Hash' }
+      ]
+      failures.each do |change|
+        expect do
+          ApiRecipes.configure do |config|
+            config.logger = other_logger
+            config.print_urls = true
+            change.call(config)
+          end
+        end.to raise_error(ApiRecipes::ConfigurationError)
+        expect(ApiRecipes.configuration).to equal(before)
+        expect([before.logger, before.print_urls, before.variables]).to eq([logger, false, {}])
+        expect(before.apis_configs.keys).to eq(ApiRecipes.apis)
+      end
+      ApiRecipes.configure { |config| config.logger = other_logger }
+      expect(ApiRecipes.logger).to equal(other_logger)
+      expect(ApiRecipes.svc.users.url.to_s).to eq("#{base_url}/users")
+    end
   end
 
   describe '.configuration' do
