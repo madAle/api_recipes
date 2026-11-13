@@ -163,8 +163,8 @@ module ApiRecipes
 
     # @private
     # A copy of value whose Hashes, Arrays and unfrozen Strings are new
-    # objects; any other object is the same.
-    # A Hash or Array met twice, or that contains itself, is copied once.
+    # objects; any other object is the same. A Hash or Array met twice, or
+    # that contains itself, is copied once.
     def deep_copy(value, memo = {}.compare_by_identity)
       case value
       when Hash
