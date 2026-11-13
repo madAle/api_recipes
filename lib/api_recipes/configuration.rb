@@ -86,7 +86,7 @@ module ApiRecipes
     # @private
     def read_file(path)
       full_path = File.expand_path(path)
-      if full_path.end_with?('.recipe.yml')
+      if shared_recipe?(full_path)
         raise RecipeFileError.new(path, 'shared recipes are loaded with recipes_paths, not with apis_files_paths')
       end
 
@@ -104,6 +104,13 @@ module ApiRecipes
       raise RecipeFileError.new(path, 'must contain a mapping of api names') unless data.is_a?(Hash)
 
       deep_symbolize(data)
+    end
+
+    # @private
+    def shared_recipe?(full_path)
+      names = [full_path]
+      names << File.realpath(full_path) if File.exist?(full_path)
+      names.any? { |name| name.downcase.end_with?('.recipe.yml') }
     end
 
     # @private

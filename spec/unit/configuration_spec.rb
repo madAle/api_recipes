@@ -101,13 +101,39 @@ describe ApiRecipes::Configuration do
     end
   end
 
-  it 'refuses a shared recipe among the files evaluated with ERB' do
-    Dir.mktmpdir do |dir|
-      path = File.join(dir, 'x.recipe.yml')
-      File.write(path, "svc:\n  host: <%= 'evil.test' %>\n")
+  describe 'shared recipes among the files' do
+    let(:body) { "<% raise 'evaluated' %>\nsvc:\n  host: evil.test\n" }
+
+    def expect_refused(path)
       expect do
         ApiRecipes.configure { |config| config.apis_files_paths = [path] }
       end.to raise_error(ApiRecipes::RecipeFileError, /recipes_paths/)
+    end
+
+    it 'refuses a shared recipe without evaluating its ERB' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'x.recipe.yml')
+        File.write(path, body)
+        expect_refused(path)
+      end
+    end
+
+    it 'refuses a shared recipe whatever the letter case of the name' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'x.RECIPE.YML')
+        File.write(path, body)
+        expect_refused(path)
+      end
+    end
+
+    it 'refuses a link that points to a shared recipe' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'x.recipe.yml')
+        link = File.join(dir, 'plain.yml')
+        File.write(target, body)
+        File.symlink(target, link)
+        expect_refused(link)
+      end
     end
   end
 
