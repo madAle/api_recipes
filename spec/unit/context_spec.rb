@@ -78,6 +78,13 @@ describe ApiRecipes::Context do
     expect(ctx.with(authorization: 'C').with(authorization: nil).credential).to be_nil
   end
 
+  it 'reads the names of the options as the compiler does, whatever their encoding' do
+    ApiRecipes::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Credential.authorization('T')) }
+    expect(context.with('timeout'.encode('UTF-16LE') => 1).setting(:timeout)).to eq(1)
+    expect(context.credential).not_to be_nil
+    expect(context.with('authorization'.encode('UTF-16LE') => nil).credential).to be_nil
+  end
+
   it 'is not changed by the caller after with' do
     host = +'a.h.test'
     shop = +'acme'

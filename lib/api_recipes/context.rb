@@ -24,9 +24,10 @@ module ApiRecipes
     # and basic_auth, no override for the others.
     def with(options)
       resolved = Compiler.resolve_options(options, :with_api)
+      # The names as the compiler reads them, in the order given, nil ones included.
+      names = Compiler.normalize(options.to_h { |key, _value| [key, nil] }).keys
       merged = @overrides.dup
-      options.each_key do |key|
-        name = key.to_sym
+      names.each do |name|
         merge_option(merged, name, resolved[name]) if Compiler::WITH_API_KEYS.include?(name)
       end
       self.class.new(definition: @definition, owner: @owner, global_definition: @global_definition,
