@@ -169,4 +169,40 @@ describe 'Credentials through the DSL' do
       expect(WebMock).not_to have_requested(:any, /.*/)
     end
   end
+
+  describe 'a credential that is not valid UTF-8' do
+    it 'is refused as an invalid credential, without showing it' do
+      value = "Bearer SECRET\xFF"
+      expect { ApiRecipes.svc.authorization = value }
+        .to raise_error(ApiRecipes::InvalidCredential, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      expect { ApiRecipes.svc.with(authorization: value).users.run }
+        .to raise_error(ApiRecipes::ConfigurationError, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      expect { ApiRecipes.svc.basic_auth = { user: 'u', pass: "SECRET\xFF" } }
+        .to raise_error(ApiRecipes::InvalidCredential, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      expect(WebMock).not_to have_requested(:any, /.*/)
+    end
+  end
+
+  describe 'a credential sent in the query' do
+    before do
+      configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'query', name: 'key' }, endpoints: { users: nil } })
+      ApiRecipes.svc.authorization = 'SECRET'
+    end
+
+    it 'needs params given as a Hash, and says so without sending anything' do
+      ['a=1', 42, :sym].each do |params|
+        expect { ApiRecipes.svc.users(params: params).run }.to raise_error(ApiRecipes::ConfigurationError) { |error|
+          expect(error.errors).to eq(['params: must be a Hash when the credential is sent in the query'])
+        }
+      end
+      expect(WebMock).not_to have_requested(:any, /.*/)
+    end
+
+    it 'is added to params given as a Hash or not given' do
+      ApiRecipes.svc.users(params: { a: 1 }).run
+      ApiRecipes.svc.users.run
+      expect(WebMock).to have_requested(:get, users_url).with(query: { 'a' => '1', 'key' => 'SECRET' })
+      expect(WebMock).to have_requested(:get, users_url).with(query: { 'key' => 'SECRET' })
+    end
+  end
 end

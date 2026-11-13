@@ -146,6 +146,10 @@ module ApiRecipes
       def send_options(credential, origin)
         options = @options
         if credential && credential.kind == :authorization && auth[:type] == :query
+          unless options[:params].nil? || options[:params].is_a?(Hash)
+            raise ConfigurationError.new(['params: must be a Hash when the credential is sent in the query'])
+          end
+
           params = options[:params].to_a.reject { |key, _| key.to_s == auth[:name] }
           options = options.merge(params: params << [auth[:name], credential.value])
         end

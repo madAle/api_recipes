@@ -62,7 +62,7 @@ describe 'Configuration files and secrets' do
       File.symlink(shared, link)
       [shared, upper, link].each do |path|
         expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }
-          .to raise_error(ApiRecipes::RecipeFileError, /recipes_paths/)
+          .to raise_error(ApiRecipes::RecipeFileError, /not supported by this version/)
       end
     end
   end

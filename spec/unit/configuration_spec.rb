@@ -1,4 +1,5 @@
 require 'spec_helper'
+require 'pathname'
 require 'tmpdir'
 
 describe ApiRecipes::Configuration do
@@ -84,6 +85,18 @@ describe ApiRecipes::Configuration do
     expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
   end
 
+  it 'refuses a path that is not a String or a Pathname, or that has a null byte, as a configuration error' do
+    [[nil], [42], [fixture('svc.yml.erb'), :sym], ["a\0b.yml"]].each do |paths|
+      expect { ApiRecipes.configure { |config| config.apis_files_paths = paths } }
+        .to raise_error(ApiRecipes::ConfigurationError, /apis_files_paths/)
+    end
+  end
+
+  it 'accepts a Pathname' do
+    ApiRecipes.configure { |config| config.apis_files_paths = [Pathname.new(fixture('svc.yml.erb'))] }
+    expect(ApiRecipes.apis).to include(:svc)
+  end
+
   it 'reads no file before load' do
     configuration = ApiRecipes::Configuration.new
     configuration.apis_files_paths = [fixture('missing.yml')]
@@ -150,7 +163,7 @@ describe ApiRecipes::Configuration do
     def expect_refused(path)
       expect do
         ApiRecipes.configure { |config| config.apis_files_paths = [path] }
-      end.to raise_error(ApiRecipes::RecipeFileError, /recipes_paths/)
+      end.to raise_error(ApiRecipes::RecipeFileError, /shared recipe files \(\.recipe\.yml\) are not supported by this version/)
     end
 
     it 'refuses a shared recipe without evaluating its ERB' do

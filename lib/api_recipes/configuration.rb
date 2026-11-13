@@ -1,6 +1,7 @@
 require 'yaml'
 require 'erb'
 require 'logger'
+require 'pathname'
 
 module ApiRecipes
   class Configuration
@@ -130,9 +131,13 @@ module ApiRecipes
 
     # @private
     def read_file(path, erb: true)
+      unless (path.is_a?(String) || path.is_a?(Pathname)) && !path.to_s.include?("\0")
+        raise ConfigurationError.new(['apis_files_paths: every path must be a String or a Pathname, without null bytes'])
+      end
+
       full_path = File.expand_path(path)
       if shared_recipe?(full_path)
-        raise RecipeFileError.new(path, 'shared recipes are loaded with recipes_paths, not with apis_files_paths')
+        raise RecipeFileError.new(path, 'shared recipe files (.recipe.yml) are not supported by this version')
       end
 
       text = read_text(path, full_path)

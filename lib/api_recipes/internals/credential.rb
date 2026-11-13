@@ -36,6 +36,7 @@ module ApiRecipes
 
         def check_text(value, what)
           raise InvalidCredential, "#{what} must be a String" unless value.is_a?(String)
+          raise InvalidCredential, "#{what} must be valid UTF-8" unless value.valid_encoding?
           raise InvalidCredential, "#{what} contains a control character" if value.match?(CONTROL_CHARACTERS)
         end
       end
