@@ -1,4 +1,5 @@
 require 'spec_helper'
+require 'yaml'
 
 describe ApiRecipes::Core::Context do
   let(:config) do
@@ -19,6 +20,14 @@ describe ApiRecipes::Core::Context do
 
   def assign(owner, **changes)
     ApiRecipes::Core::LevelSet.write(owner, declaration_for(owner) || :svc) { |level| level.with(**changes) }
+  end
+
+  it 'refuses serialization, because the options of with can hold header values' do
+    ctx = context.with(default_headers: { 'X-Token' => 's3cret' })
+    expect { YAML.dump(ctx) }.to raise_error(TypeError, /cannot be serialized/)
+    expect { Marshal.dump(ctx) }.to raise_error(TypeError, /cannot be serialized/)
+    expect { ctx.marshal_dump }.to raise_error(TypeError)
+    expect { ctx.encode_with(nil) }.to raise_error(TypeError)
   end
 
   it 'takes each option from the nearest place' do

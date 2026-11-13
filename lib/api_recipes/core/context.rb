@@ -141,6 +141,11 @@ module ApiRecipes
 
       def pretty_print(queue) = queue.text(inspect)
 
+      # The options of with can hold header values: a Context is never serialized.
+      def marshal_dump = raise(TypeError, 'an ApiRecipes::Core::Context cannot be serialized')
+
+      def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Core::Context cannot be serialized')
+
       private
 
       # The tree a level reads: the global one for the global level, else the owner's.
