@@ -57,10 +57,10 @@ module ApiRecipes
 
         set = live_set(owner)
         key = key.to_sym if key.is_a?(String)
-        current = set && !set.sealed? ? set.entries[key] : nil
-        entries = set && !set.sealed? ? set.entries : EMPTY
-        level = yield(current || Level.new(credential: nil, variables: nil))
-        owner.instance_variable_set(IVAR, new(entries.merge(key => level), generation))
+        # A write on a sealed set changes only its key: every other key keeps
+        # answering "no credential, do not inherit one".
+        level = yield(set&.fetch(key) || Level.new(credential: nil, variables: nil))
+        store(owner, set, key => level)
         level
       end
 
@@ -71,6 +71,11 @@ module ApiRecipes
       def generation = @generation
 
       private
+
+      def store(owner, set, changes)
+        entries = (set ? set.entries : EMPTY).merge(changes)
+        owner.instance_variable_set(IVAR, new(entries, generation, sealed: set ? set.sealed? : false))
+      end
 
       def live_set(owner)
         set = owner.instance_variable_get(IVAR)
@@ -90,9 +95,7 @@ module ApiRecipes
     def sealed? = @sealed
 
     def fetch(key)
-      return Level.new(credential: Credential::NONE, variables: nil) if @sealed
-
-      @entries[key]
+      @entries[key] || (@sealed ? Level.new(credential: Credential::NONE, variables: nil) : nil)
     end
 
     def inspect = "#<ApiRecipes::LevelSet #{FILTERED}>"

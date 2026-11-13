@@ -79,6 +79,17 @@ describe 'Levels written through one declaration of an api' do
       expect(outcome { held.run }).to eq([['evil.test', nil]])
     end
 
+    it 'does not send it from an endpoint built before the include, in the other direction' do
+      evil = evil_module
+      evil.svc.authorization = 'Bearer EVIL-MODULE'
+      good = good_module
+      client = Class.new { include good }
+      held = client.new.svc.users
+      good.include(evil)
+      expect(outcome { held.run }).to eq([['good.example.test', nil]])
+      expect(outcome { client.new.svc.users.run }).to eq([['good.example.test', nil]])
+    end
+
     it 'does not send the credential of a module included into a declaring class' do
       evil = evil_module
       evil.svc.authorization = 'Bearer EVIL-MODULE'
@@ -213,6 +224,29 @@ describe 'Levels written through one declaration of an api' do
         expect(restored.svc.authorization).to be_nil
       end
       expect(outcome { RestoredClient.new.svc.users.run }).to eq([['good.example.test', 'Bearer CLASS']])
+    end
+
+    it 'keeps every other api of a restored object without credential after a write on one of them' do
+      configure_test_apis(svc: { host: 'good.example.test', endpoints: { users: nil } },
+                          oth: { host: 'oth.example.test', endpoints: { users: nil } })
+      stub_const('RestoredTwo', Class.new { include ApiRecipes })
+      RestoredTwo.api :svc
+      RestoredTwo.api :oth
+      RestoredTwo.svc.authorization = 'Bearer CLASS-SVC'
+      RestoredTwo.oth.authorization = 'Bearer CLASS-OTH'
+      object = RestoredTwo.new
+      object.svc.authorization = 'Bearer INSTANCE-SVC'
+      [Marshal.load(Marshal.dump(object)), YAML.unsafe_load(YAML.dump(object))].each do |restored|
+        restored.svc.authorization = 'Bearer NEW-SVC'
+        expect(outcome { restored.svc.users.run }).to eq([['good.example.test', 'Bearer NEW-SVC']])
+        expect(outcome { restored.oth.users.run }).to eq([['oth.example.test', nil]])
+        restored.svc.variables = {}
+        expect(outcome { restored.svc.users.run }).to eq([['good.example.test', 'Bearer NEW-SVC']])
+        expect(outcome { restored.oth.users.run }).to eq([['oth.example.test', nil]])
+        restored.oth.variables = {}
+        expect(outcome { restored.oth.users.run }).to eq([['oth.example.test', nil]])
+        expect(restored.oth.authorization).to be_nil
+      end
     end
 
     it 'creates no singleton class for an object that reaches a module declaration through a copied method' do
