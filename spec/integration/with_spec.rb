@@ -40,6 +40,16 @@ describe 'with' do
     expect { lenient.child.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
   end
 
+  it 'refuses the writers on a copy made by with, and leaves the shared levels alone' do
+    copy = ApiRecipes.svc.with(timeout: 5)
+    expect { copy.authorization = 'Bearer copy' }.to raise_error(ApiRecipes::Error, /with\(authorization: \.\.\.\)/)
+    expect { copy.basic_auth = { user: 'u', pass: 'p' } }.to raise_error(ApiRecipes::Error, /with\(basic_auth: \.\.\.\)/)
+    expect { copy.variables = { region: 'eu' } }.to raise_error(ApiRecipes::Error, /with\(variables: \.\.\.\)/)
+    expect([ApiRecipes.svc.authorization, ApiRecipes.svc.basic_auth, ApiRecipes.svc.variables]).to eq([nil, nil, {}])
+    ApiRecipes.svc.authorization = 'Bearer shared'
+    expect(copy.authorization).to eq('Bearer shared')
+  end
+
   it 'refuses what it does not know' do
     expect { ApiRecipes.svc.with(endpoints: {}) }.to raise_error(ApiRecipes::ConfigurationError)
     expect { ApiRecipes.svc.other.with(path: '/x') }.to raise_error(ApiRecipes::ConfigurationError)

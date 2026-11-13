@@ -31,8 +31,13 @@ module ApiRecipes
       credential && credential.kind == :authorization ? credential.value : nil
     end
 
-    # Sets the credential of the caller's level; nil means "send none".
+    # Sets the credential of the caller's level; nil means "send none". The
+    # writers refuse an api returned by with: its options belong to its chain.
     def authorization=(value)
+      unless @context.overrides.empty?
+        raise Error, 'an api returned by with cannot set authorization for the caller: use with(authorization: ...)'
+      end
+
       credential = Credential.from(:authorization, value)
       LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(credential: credential) }
     end
@@ -43,6 +48,10 @@ module ApiRecipes
     end
 
     def basic_auth=(value)
+      unless @context.overrides.empty?
+        raise Error, 'an api returned by with cannot set basic_auth for the caller: use with(basic_auth: ...)'
+      end
+
       credential = Credential.from(:basic_auth, value)
       LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(credential: credential) }
     end
@@ -55,6 +64,10 @@ module ApiRecipes
 
     # Sets the variable values of the caller's level; nil removes them.
     def variables=(values)
+      unless @context.overrides.empty?
+        raise Error, 'an api returned by with cannot set variables for the caller: use with(variables: ...)'
+      end
+
       values = Registry.variable_values(values)
       LevelSet.write(@context.owner, @context.definition.name) { |level| level.with(variables: values) }
     end
