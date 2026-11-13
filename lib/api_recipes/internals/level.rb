@@ -38,6 +38,10 @@ module ApiRecipes
       IVAR = :@__api_recipes
       FILTERED = '[FILTERED]'.freeze
       EMPTY = {}.compare_by_identity.freeze
+      # A write reads the set of its owner, changes one key and stores a new
+      # set: two writes at once would lose one, an assignment of nil included.
+      # Reads take no lock. The block of write must not write a level.
+      WRITES = Mutex.new
 
       @generation = 0
 
@@ -56,28 +60,32 @@ module ApiRecipes
                          'Use with(...) to get a modified copy instead'
           end
 
-          set = live_set(owner)
           key = key.to_sym if key.is_a?(String)
-          # A write on a sealed set changes only its key: every other key keeps
-          # answering "no credential, do not inherit one".
-          level = yield(set&.fetch(key) || Level.new(credential: nil, variables: nil))
-          store(owner, set, key => level)
-          level
+          WRITES.synchronize do
+            set = live_set(owner)
+            # A write on a sealed set changes only its key: every other key keeps
+            # answering "no credential, do not inherit one".
+            level = yield(set&.fetch(key) || Level.new(credential: nil, variables: nil))
+            store(owner, set, key => level)
+            level
+          end
         end
 
         # Sets the variables of the levels in values (name => variables) and
         # removes those of the levels named in cleared, in one replacement of
         # the set. The credentials are not touched.
         def replace_variables(owner, values, cleared)
-          set = live_set(owner)
-          changes = cleared.to_h do |name|
-            level = set&.fetch(name)
-            [name, level && level.variables ? level.with(variables: nil) : level]
-          end.compact
-          values.each do |name, variables|
-            changes[name] = (set&.fetch(name) || Level.new(credential: nil, variables: nil)).with(variables: variables)
+          WRITES.synchronize do
+            set = live_set(owner)
+            changes = cleared.to_h do |name|
+              level = set&.fetch(name)
+              [name, level && level.variables ? level.with(variables: nil) : level]
+            end.compact
+            values.each do |name, variables|
+              changes[name] = (set&.fetch(name) || Level.new(credential: nil, variables: nil)).with(variables: variables)
+            end
+            store(owner, set, changes) unless changes.empty?
           end
-          store(owner, set, changes) unless changes.empty?
         end
 
         def reset!

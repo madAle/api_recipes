@@ -19,6 +19,26 @@ describe ApiRecipes::Internals::LevelSet do
     expect(described_class.read(b, :svc)).to be_nil
   end
 
+  it 'does not lose the write another thread makes between the read and the store of a write' do
+    owner = klass.new
+    entered = Queue.new
+    release = Queue.new
+    first = Thread.new do
+      described_class.write(owner, :a) do |level|
+        entered << true
+        release.pop(timeout: 5)
+        level.with(variables: { n: 1 })
+      end
+    end
+    expect(entered.pop(timeout: 5)).to be(true)
+    second = Thread.new { described_class.write(owner, :b) { |level| level.with(variables: { n: 2 }) } }
+    second.join(0.2)
+    release << true
+    expect([first.join(5), second.join(5)]).to eq([first, second])
+    expect(described_class.read(owner, :a).variables).to eq(n: 1)
+    expect(described_class.read(owner, :b).variables).to eq(n: 2)
+  end
+
   it 'is replaced, not mutated: a copy cannot change the original' do
     a = klass.new
     set(a, token)
