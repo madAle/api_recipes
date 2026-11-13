@@ -31,7 +31,7 @@ module ApiRecipes
       origin = @context.origin
       credential = @context.credential(origin)
       address = checked(url, origin)
-      http_response = client(credential).request(@definition.verb, address, send_options(credential, origin))
+      http_response = client(credential).request(@definition.verb, address, **send_options(credential, origin))
       respond(http_response)
     end
 
@@ -56,13 +56,15 @@ module ApiRecipes
     end
 
     # The url as http.rb reads it must point to the origin that was validated.
+    # http.rb parses with Addressable, an optional gem, what Ruby's URI cannot
+    # parse: without that gem, such a url cannot be parsed either.
     def checked(url, origin)
       address = url.to_s
       uri = HTTP::URI.parse(address)
       raise InvalidUrl, "the url does not point to the origin of api '#{@context.definition.name}'" unless same_origin?(uri, origin)
 
       address
-    rescue Addressable::URI::InvalidURIError
+    rescue HTTP::URI::InvalidError, LoadError
       raise InvalidUrl, "the url of api '#{@context.definition.name}' cannot be parsed"
     end
 
@@ -73,22 +75,29 @@ module ApiRecipes
         uri.normalized_host.to_s.casecmp?(host) && uri.port == port
     end
 
-    # default_headers, then the credential, then headers: of the request.
+    # An HTTP::Client, not the HTTP::Session the chainable methods of http.rb
+    # return: along redirects a session keeps a cookie jar and sets every
+    # cookie in it on each hop, after on_redirect and whatever the origin.
     def client(credential)
-      client = HTTP.headers(@context.headers).timeout(setting(:timeout))
-      return client unless credential
+      HTTP::Client.new(configured(credential).default_options)
+    end
+
+    # default_headers, then the credential, then headers: of the request.
+    def configured(credential)
+      session = HTTP.headers(@context.headers).timeout(setting(:timeout))
+      return session unless credential
 
       if credential.kind == :basic_auth
         if %i[header query].include?(auth[:type])
           raise InvalidCredential, "basic_auth cannot be sent with auth type '#{auth[:type]}': assign it with authorization"
         end
 
-        return client.basic_auth(credential.value)
+        return session.basic_auth(**credential.value)
       end
       case auth[:type]
-      when :header then client.headers(auth[:name] => credential.value)
-      when :query then client
-      else client.auth(credential.value)
+      when :header then session.headers(auth[:name] => credential.value)
+      when :query then session
+      else session.auth(credential.value)
       end
     end
 

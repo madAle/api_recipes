@@ -42,6 +42,15 @@ module TestApis
     end
   end
 
+  # Expects the request to reach http.rb with a global timeout of seconds: the
+  # options HTTP::Client#perform receives are those the connection builds its
+  # timeout from (timeout_class.new(**timeout_options)).
+  def expect_timeout(seconds)
+    expect_any_instance_of(HTTP::Client).to receive(:perform)
+      .with(anything, having_attributes(timeout_class: HTTP::Timeout::Global, timeout_options: { global_timeout: seconds }))
+      .and_call_original
+  end
+
   # Builds a context and a request on the new core, without the DSL. Each node
   # of endpoint_path takes from values as many values as its path params.
   def new_request(config, endpoint_path, values = [], owner: ApiRecipes, overrides: nil, options: {}, global: :same)

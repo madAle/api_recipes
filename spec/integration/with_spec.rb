@@ -20,7 +20,7 @@ describe 'with' do
   end
 
   it 'follows the precedence of options' do
-    expect_any_instance_of(HTTP::Client).to receive(:timeout).with(60).and_call_original
+    expect_timeout(60)
     ApiRecipes.svc.with(timeout: 10).things.with(timeout: 60).run
   end
 

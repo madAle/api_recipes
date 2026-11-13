@@ -48,6 +48,34 @@ describe 'Redirects' do
     expect(WebMock).to have_requested(:get, 'https://api.example.test/back').with { |r| !r.headers.key?('Authorization') }
   end
 
+  it 'does not give back the header named by auth after a redirect out of the origin and back' do
+    stub_request(:get, 'https://api.example.test/users').to_return(to_evil)
+    stub_request(:get, 'https://evil.test/steal').to_return(status: 302, headers: { 'Location' => 'https://api.example.test/back' })
+    stub_request(:get, 'https://api.example.test/back').to_return(status: 200, body: '')
+    new_request(base.merge(auth: { type: 'header', name: 'X-Api-Key' }), %i[users], options: { follow: true }).perform
+    expect(WebMock).to have_requested(:get, 'https://api.example.test/users').with(headers: { 'X-Api-Key' => 'Bearer SECRET' })
+    %w[https://evil.test/steal https://api.example.test/back].each do |url|
+      expect(WebMock).to have_requested(:get, url).with { |r| !r.headers.key?('X-Api-Key') }
+    end
+  end
+
+  # No cookie jar along the chain: the Cookie of the request goes on inside the
+  # origin and stops at the first other origin; a Set-Cookie of any server,
+  # the origin included, is never sent on a later hop.
+  it 'does not carry cookies along the chain, whoever set them' do
+    stub_request(:get, 'https://api.example.test/users')
+      .to_return(status: 302, headers: { 'Location' => '/moved', 'Set-Cookie' => 'origin=1' })
+    stub_request(:get, 'https://api.example.test/moved').to_return(to_evil)
+    stub_request(:get, 'https://evil.test/steal')
+      .to_return(status: 302, headers: { 'Location' => 'https://api.example.test/back', 'Set-Cookie' => 'evil=1' })
+    stub_request(:get, 'https://api.example.test/back').to_return(status: 200, body: '')
+    new_request(base, %i[users], options: { follow: true, headers: { 'Cookie' => 'session=1' } }).perform
+    expect(WebMock).to have_requested(:get, 'https://api.example.test/moved').with(headers: { 'Cookie' => 'session=1' })
+    %w[https://evil.test/steal https://api.example.test/back].each do |url|
+      expect(WebMock).to have_requested(:get, url).with { |r| !r.headers.key?('Cookie') }
+    end
+  end
+
   it 'calls the on_redirect of the caller after dropping, with Symbol or String keys' do
     stub_request(:get, 'https://api.example.test/users').to_return(to_evil)
     [{ on_redirect: nil, max_hops: 2 }, { 'on_redirect' => nil, 'max_hops' => 2 }].each do |follow|
@@ -93,6 +121,15 @@ describe 'Redirects' do
       end
     end
     expect(WebMock).not_to have_requested(:any, /example\.test|evil\.test/)
+  end
+
+  # http.rb reads the follow options when the first response is in.
+  it 'lets http.rb refuse a follow option it does not know, without following' do
+    stub_request(:get, 'https://api.example.test/users').to_return(to_evil)
+    expect { new_request(base, %i[users], options: { follow: { unknown: 1 } }).perform }
+      .to raise_error(ArgumentError, 'unknown keyword: :unknown')
+    expect(WebMock).to have_requested(:get, 'https://api.example.test/users').once
+    expect(WebMock).not_to have_requested(:get, 'https://evil.test/steal')
   end
 
   it 'follows with true or a Hash, and not with false or nil' do

@@ -121,6 +121,22 @@ describe ApiRecipes::Response do
     expect(response.inspect).to eq('#<ApiRecipes::Response 200 OK application/json>')
   end
 
+  it 'returns the cookies of the response as HTTP::Cookie objects' do
+    stub_request(:get, url).to_return(status: 200, body: '{}',
+                                      headers: { 'Content-Type' => 'application/json', 'Set-Cookie' => 'session=abc; Path=/' })
+    cookies = configure.things.run.cookies
+    expect(cookies).to all(be_a(HTTP::Cookie))
+    expect(cookies.map { |cookie| [cookie.name, cookie.value] }).to eq([%w[session abc]])
+  end
+
+  it 'reads headers only through headers, and matches as an Array but not by keys, which would show the request' do
+    respond_with('{"id":1}', 'application/json')
+    response = configure.things.run
+    expect(response).not_to respond_to(:[], :[]=, :deconstruct_keys)
+    matched = (response in [200, Hash, '{"id":1}'])
+    expect(matched).to eq(true)
+  end
+
   it 'says whether the response passed the rule of the endpoint' do
     respond_with('', 'text/plain', 500)
     expect(configure(on_bad_code: 'ignore').things.run.success?).to eq(false)

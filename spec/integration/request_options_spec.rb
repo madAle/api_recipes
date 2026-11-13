@@ -67,6 +67,16 @@ describe 'Request options' do
       expect(WebMock).to have_requested(:get, "#{base_url}/users/7").with(query: { 'full' => 'true' })
     end
 
+    it 'passes the options to http.rb as keywords, named by Symbols or Strings' do
+      configure(verb: :post).things('params' => { page: 2 }, json: { name: 'x' }).run
+      expect(WebMock).to have_requested(:post, url).with(query: { 'page' => '2' }, body: '{"name":"x"}')
+    end
+
+    it 'lets http.rb refuse an option it does not know, before anything is sent' do
+      expect { configure.things(unknown: 1).run }.to raise_error(ArgumentError, 'unknown keyword: :unknown')
+      expect(WebMock).not_to have_requested(:any, /example\.test/)
+    end
+
     it 'works with the block form too, which returns the endpoint' do
       code = nil
       result = configure.things(params: { page: 3 }) { |response| code = response.code }
@@ -136,11 +146,6 @@ describe 'Request options' do
   describe 'timeout' do
     # The client is built when the request is sent.
     before { stub_request(:get, url).to_return(status: 200, body: '{}', headers: json) }
-
-    # The value reaches http.rb through HTTP::Client#timeout.
-    def expect_timeout(seconds)
-      expect_any_instance_of(HTTP::Client).to receive(:timeout).with(seconds).and_call_original
-    end
 
     it 'is 3 seconds by default' do
       svc = configure

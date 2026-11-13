@@ -24,6 +24,12 @@ describe ApiRecipes::Request do
     expect(request.url.to_s).to eq('http://web_service_1:3000/ping')
   end
 
+  it 'sends to a host with an underscore with any uri gem' do
+    stub_request(:get, 'http://web_service_1:3000/ping').to_return(status: 200)
+    new_request({ protocol: 'http', host: 'web_service_1', port: 3000, endpoints: { ping: nil } }, %i[ping]).perform
+    expect(WebMock).to have_requested(:get, 'http://web_service_1:3000/ping')
+  end
+
   it 'accepts a list of ok codes' do
     config = base.merge(endpoints: { users: { ok_code: [200, 202] } })
     stub_request(:get, 'https://api.example.test/users').to_return(status: 202)
@@ -83,5 +89,16 @@ describe ApiRecipes::Request do
       expect { request.perform }.to raise_error(ApiRecipes::InvalidUrl)
     end
     expect(WebMock).not_to have_requested(:any, /example\.test|evil\.test/)
+  end
+
+  # http.rb parses with Addressable what Ruby's URI cannot parse, and loads it
+  # only then: the gem is optional and may be missing.
+  it 'refuses a url that only Addressable can parse when that gem is missing' do
+    expect(HTTP::URI).to receive(:require_addressable).and_raise(LoadError, 'cannot load such file -- addressable/uri')
+    request = new_request(base, %i[users])
+    allow(request).to receive(:url)
+      .and_return(URI::HTTPS.new('https', nil, 'api example.test', nil, nil, '/users', nil, nil, nil, nil, false))
+    expect { request.perform }.to raise_error(ApiRecipes::InvalidUrl, /cannot be parsed/)
+    expect(WebMock).not_to have_requested(:any, /example\.test/)
   end
 end

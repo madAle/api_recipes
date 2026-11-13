@@ -9,11 +9,12 @@ module ApiRecipes
 
     attr_reader :original_response
 
-    # Public instance methods of HTTP::Response (http.rb >= 4.4, < 6) except
-    # request, uri and inspect, which are defined here.
+    # Public instance methods of HTTP::Response (http.rb 6) except request and
+    # deconstruct_keys, which would show the request, and uri and inspect,
+    # which are defined here.
     def_delegators :@original_response,
-                   :[], :[]=, :body, :charset, :chunked?, :code, :connection, :content_length,
-                   :content_type, :cookies, :flush, :headers, :mime_type, :parse, :proxy_headers,
+                   :body, :charset, :chunked?, :code, :connection, :content_length, :content_type,
+                   :cookies, :deconstruct, :flush, :headers, :mime_type, :parse, :proxy_headers,
                    :readpartial, :reason, :status, :to_a, :to_s, :to_str, :version
 
     def initialize(http_response, mime_type: nil, success: nil, hidden_param: nil)

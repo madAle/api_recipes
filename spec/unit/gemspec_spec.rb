@@ -7,9 +7,9 @@ describe 'api_recipes.gemspec' do
     expect(gemspec.runtime_dependencies.map(&:name)).to contain_exactly('http', 'logger')
   end
 
-  it 'requires an http.rb with on_redirect that declares base64' do
+  it 'requires http.rb 6 from the release with the security fix' do
     http = gemspec.runtime_dependencies.find { |dependency| dependency.name == 'http' }
-    expect(http.requirement).to eq(Gem::Requirement.new('>= 5.2.0', '< 6'))
+    expect(http.requirement).to eq(Gem::Requirement.new('>= 6.0.4', '< 7'))
   end
 
   it 'links changelog and source' do
