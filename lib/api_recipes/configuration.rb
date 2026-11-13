@@ -32,7 +32,7 @@ module ApiRecipes
     def apis_configs=(configs = {})
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
 
-      @apis_configs = configs.transform_keys(&:to_sym)
+      @apis_configs = symbolize_keys(configs)
       record_source(:hash)
     end
 
@@ -160,12 +160,34 @@ module ApiRecipes
     end
 
     # @private
-    def deep_symbolize(value)
-      case value
-      when Hash then value.each_with_object({}) { |(k, v), h| h[k.respond_to?(:to_sym) ? k.to_sym : k] = deep_symbolize(v) }
-      when Array then value.map { |v| deep_symbolize(v) }
-      else value
+    # path holds the Hashes and Arrays being read: a structure that contains
+    # itself (a YAML alias can build one) is refused, not followed for ever.
+    def deep_symbolize(value, path = {}.compare_by_identity)
+      return value unless value.is_a?(Hash) || value.is_a?(Array)
+      raise ConfigurationError.new(['the configuration contains itself']) if path.key?(value)
+
+      path[value] = true
+      result = if value.is_a?(Hash)
+                 symbolize_keys(value) { |item| deep_symbolize(item, path) }
+               else
+                 value.map { |item| deep_symbolize(item, path) }
+               end
+      path.delete(value)
+      result
+    end
+
+    # The Hash with Symbol keys. A key that cannot be read as UTF-8 text, or two
+    # keys that become the same Symbol (a String and a Symbol), are refused:
+    # the later would silently replace the earlier.
+    def symbolize_keys(hash)
+      hash.each_with_object({}) do |(key, item), out|
+        key = key.to_sym if key.respond_to?(:to_sym)
+        raise ConfigurationError.new(["'#{key}' is given twice, as a String and as a Symbol"]) if out.key?(key)
+
+        out[key] = block_given? ? yield(item) : item
       end
+    rescue EncodingError
+      raise ConfigurationError.new(['a name has an encoding that is not valid UTF-8'])
     end
 
     # @private

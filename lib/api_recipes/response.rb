@@ -65,6 +65,12 @@ module ApiRecipes
       "#<#{self.class.name} #{status} #{mime_type}>"
     end
 
+    # The http.rb response holds the request, with its credential: a Response
+    # is never serialized.
+    def marshal_dump = raise(TypeError, 'an ApiRecipes::Response cannot be serialized')
+
+    def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Response cannot be serialized')
+
     private
 
     def hidden_pair?(pair)
