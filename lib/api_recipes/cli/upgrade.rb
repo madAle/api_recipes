@@ -17,6 +17,11 @@ module ApiRecipes
         Rule.new(:breaks, /RouteAndResourceNamesClashError|MissingRouteAttribute|ProvidedObjectNotAsResponseData|NoConfigurationGivenForEndpoint/,
                  'this error class was removed: nothing raised it, so the rescue clause can go'),
         Rule.new(:breaks, /\.base_configs\b/, 'Api#base_configs was removed: use api.definition'),
+        Rule.new(:breaks, /ApiRecipes::Route\b/, 'ApiRecipes::Route was removed: a request is sent with run'),
+        Rule.new(:breaks, /ApiRecipes::Settings\b/,
+                 'ApiRecipes::Settings was removed: the defaults are listed in the README'),
+        Rule.new(:breaks, /\bconfiguration\.setup\b/,
+                 'configuration.setup was removed: configure loads the configuration'),
         Rule.new(:breaks, /ApiRecipes\.print_urls/, 'use config.print_urls inside ApiRecipes.configure'),
         Rule.new(:breaks, /_aprcps_|set_authorization_for_api|set_basic_auth_for_api|copy_global_authorizations_to_api/,
                  'internal method removed'),
@@ -25,6 +30,9 @@ module ApiRecipes
         Rule.new(:check, /\brescue\s*(=>.*)?$|rescue StandardError/,
                  'a bare rescue now catches ApiRecipes errors too'),
         Rule.new(:check, /\bfollow:/, 'credentials are no longer sent to another origin after a redirect'),
+        Rule.new(:check, /\bresponse\.request\b/,
+                 'response.request was removed, because the request holds the credentials: ' \
+                 'read response.uri, or response.original_response'),
         Rule.new(:check, /\.(deep_merge|deep_symbolize_keys|deep_stringify_keys|symbolize_keys|stringify_keys|extract_options!|assert_valid_keys)\b/,
                  'this method came from api_recipes 2.x unless ActiveSupport is loaded: ' \
                  'define it or add ActiveSupport')
@@ -49,8 +57,12 @@ module ApiRecipes
         'Endpoint#name, #params, #children, #api and Api#name, #configs, #object were removed: use definition (a search cannot tell them from other methods called like that)',
         'an object restored from a serialized form (Marshal, YAML) has no credential: assign it again',
         'response.uri leaves out the credential query parameter when the api declares auth type query',
-        'a redirect to a host with non-ASCII characters needs the addressable gem',
+        'a redirect to a host with non-ASCII characters needs the addressable gem: without it the request raises InvalidUrl',
         'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable',
+        'response.request was removed, whatever the name of the variable that holds the response: the request holds the credentials, read response.uri or response.original_response',
+        'response.to_s returns the body, as the http.rb response does: it was the default text of the object',
+        'a credential that is not a String, such as a Symbol or a number: it raises InvalidCredential, convert it with to_s',
+        'a {word} in a value of default_headers in a configuration given as a Hash: it is now a variable and must be declared',
         'respond_to? on a response now tells the truth: it answers true for the methods the response forwards and false for the others',
         'serializing an Api, an Endpoint or a Response raises TypeError: serialize response.data or response.body.to_s',
         'a class that includes ApiRecipes and uses a top-level constant named Error, Internals, VERSION or like a new error class of the gem (such as ConfigurationError or InvalidUrl): it now finds the gem\'s constant first, write ::Name in that class; Route and Settings no longer exist, so a top-level Route or Settings is found again'

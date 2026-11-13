@@ -41,6 +41,35 @@ describe 'api_recipes upgrade' do
     end
   end
 
+  it 'finds the constants and the method of 2.x that no longer exist' do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'a.rb'), <<~RUBY)
+        timeout = ApiRecipes::Settings::DEFAULT[:timeout]
+        route = ApiRecipes::Route.new
+        ApiRecipes.configuration.setup
+        rescue ApiRecipes::RouteNameClashWithExistentMethod
+        request = response.request
+      RUBY
+      code, out, = run('upgrade', dir)
+      expect(code).to eq(1)
+      expect(out).to match(/a\.rb:1: \[breaks\] ApiRecipes::Settings was removed/)
+      expect(out).to match(/a\.rb:2: \[breaks\] ApiRecipes::Route was removed/)
+      expect(out).to match(/a\.rb:3: \[breaks\] configuration\.setup was removed/)
+      expect(out).to match(/a\.rb:4: \[breaks\] this error class was removed: a name clash/)
+      expect(out).to match(/a\.rb:5: \[check\] response\.request was removed/)
+      expect(out).to include('5 findings')
+    end
+  end
+
+  it 'lists the changes of the response, of the credentials and of the header values' do
+    _, out, = run('upgrade', File.join(root, 'app'))
+    expect(out).to include('response.request was removed',
+                           'response.to_s returns the body',
+                           'a credential that is not a String',
+                           'a {word} in a value of default_headers',
+                           'without it the request raises InvalidUrl')
+  end
+
   it 'lists the accessors and changes that a text search cannot tell apart' do
     _, out, = run('upgrade', File.join(root, 'app'))
     expect(out).to include('Endpoint#name, #params, #children, #api and Api#name, #configs, #object',

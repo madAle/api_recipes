@@ -2,9 +2,11 @@
 
 Version 3.0 keeps the way you use the gem: the YAML files, `ApiRecipes.configure`,
 `api :name` in a class and the chain
-`ApiRecipes.github.users.show('octocat').run` work as before. A valid YAML file
-needs no change. What changes is how the gem behaves around them: it checks more,
-it refuses more, and a few results are different.
+`ApiRecipes.github.users.show('octocat').run` work as before. A YAML file that
+is valid for 2.x needs no change, with two exceptions that part 2 describes: a
+placeholder in `base_url` and a `{word}` in a header value. What changes is how
+the gem behaves around them: it checks more, it refuses more, and a few results
+are different.
 
 This guide has six parts:
 
@@ -78,12 +80,18 @@ accepted without a word. Now `ApiRecipes.configure` raises
 ```
 
 Fix them all and run again. A failed `configure` leaves the previous
-configuration in place. Three things are worth knowing:
+configuration in place. Four things are worth knowing:
 
 - Keys that start with `x-` are free. Use them for your own notes.
 - A `base_url` with a path placeholder (`:name` or `*name`) is an error. In 2.x
   it silently became a required parameter of every root endpoint. For a value
   that changes, declare a [variable](README.md#variables) and write `{name}`.
+- A word in braces, such as `{id}`, in a value of `default_headers` is now a
+  variable, and one that is not declared is an error. To send that text as it
+  is, declare a variable whose default is the text and use the variable:
+  `variables: { template: { default: '{id}' } }` with the header value
+  `'{template}'`. Braces around anything else, such as a JSON value, are sent
+  as they are.
 - A file that is missing, empty, not valid YAML or not valid UTF-8 raises
   `ApiRecipes::RecipeFileError`, which names the file. Files are read with
   `YAML.safe_load`: plain values, symbols and aliases are accepted, and nothing
@@ -134,6 +142,7 @@ These raise `NoMethodError` or `NameError`. Part 4 gives the replacement of each
 - `Endpoint#name`, `#params`, `#children`, `#api`
 - `Api#name`, `#configs`, `#base_configs`, `#object`
 - `ApiRecipes.print_urls` and `ApiRecipes.print_urls = ...`
+- `configuration.setup` and `response.request`
 - `ApiRecipes::RouteNameClashWithExistentMethod`, `ApiRecipes::Route` and
   `ApiRecipes::Settings`
 - the error classes `RouteAndResourceNamesClashError`, `MissingRouteAttribute`,
@@ -163,7 +172,9 @@ included. A second declaration raises the same error. Declare it once and use
 ### Credentials with a line break
 
 A credential with a line break or another control character raises
-`ApiRecipes::InvalidCredential`. The message never contains the value.
+`ApiRecipes::InvalidCredential`. The message never contains the value. So does a
+credential that is not a String, such as a Symbol or a number, which 2.x passed
+on to http.rb: convert it with `to_s`.
 
 ### `follow` with something else than `true`, `false` or a Hash
 
@@ -325,8 +336,13 @@ top-level constant of yours with the same name. Inside the classes that include
   YAML) has no credential and inherits none.
 - `response.uri` leaves out the credential query parameter when the API declares
   `auth: { type: 'query' }`.
+- `response.request` was removed, because the request holds the credentials that
+  were sent. `response.uri` and the other readers stay, and the http.rb response
+  is still `response.original_response`.
+- `response.to_s` returns the body, as the http.rb response does. In 2.x it was
+  the default text of the object.
 - A redirect to a host with non-ASCII characters needs the `addressable` gem;
-  without it http.rb raises `LoadError`.
+  without it the request raises `ApiRecipes::InvalidUrl`.
 
 ## 4. What was removed, and what to use instead
 
@@ -337,6 +353,8 @@ top-level constant of yours with the same name. Inside the classes that include
 | `Api#name`, `#configs`, `#base_configs`, `#object` | `api.definition` (`name`, `host`, `timeout`, `endpoints`...) |
 | the error classes `RouteAndResourceNamesClashError`, `MissingRouteAttribute`, `ProvidedObjectNotAsResponseData`, `NoConfigurationGivenForEndpoint` | nothing: nothing raised them, so remove the `rescue` clause that names one |
 | `ApiRecipes::Route` | nothing: a request is sent with `run` |
+| `ApiRecipes::Settings` | nothing: the defaults are in the [options of the README](README.md#api) |
+| `response.request` | `response.uri`, or `response.original_response` for the http.rb response |
 | `ApiRecipes::RouteNameClashWithExistentMethod` | nothing: a name clash is a warning, and the endpoint is reached with `[]` |
 | `ApiRecipes.print_urls` | `config.print_urls = true` inside `ApiRecipes.configure` |
 | `configuration.setup` | nothing: `configure` loads the configuration |
@@ -412,7 +430,8 @@ changes a file.
 - Every directory or file you list is searched for Ruby code that stops working
   (marked `[breaks]`) and for lines that deserve a look because their result
   changes (marked `[check]`): a manual encoding of a path parameter, a bare
-  `rescue`, `follow:`, the removed `Hash` and `Array` methods.
+  `rescue`, `follow:`, `response.request`, the removed `Hash` and `Array`
+  methods.
 - With `--config FILE`, each configuration file is checked with the rules of
   3.0 (marked `[config]`). Use the option once for each file.
 - A file that contains ERB is evaluated only with `--erb`, because that runs the
