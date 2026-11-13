@@ -7,6 +7,7 @@ module ApiRecipes
       DEFAULT_EXPECTED = '200 <= CODE < 300'.freeze
       FOLLOW_PROBLEM = 'follow: must be true, false or a Hash'.freeze
       FOLLOW_OPTIONS = %i[strict max_hops on_redirect].freeze
+      CONTROL_BYTE = /[\x00-\x1f\x7f]/n
 
       def initialize(context:, definition:, path:, options:, overrides: nil)
         @context = context
@@ -33,6 +34,7 @@ module ApiRecipes
         raise NoRouteExists.new(@definition.name) unless @definition.route?
 
         check_follow
+        check_headers
         chain = @context.levels
         origin = @context.origin(chain: chain)
         credential = @context.credential(origin, chain: chain)
@@ -151,6 +153,23 @@ module ApiRecipes
         options = options.merge(follow: protected_follow(follow, origin)) if follow.equal?(true) || follow.is_a?(Hash)
         options
       end
+
+      # http.rb refuses a header with a line break and puts the value in its
+      # error. The headers of the request are checked here, and named without
+      # their value.
+      def check_headers
+        headers = @options[:headers]
+        return unless headers.respond_to?(:each)
+
+        headers.each do |name, value|
+          next unless control?(name) || Array(value).any? { |item| control?(item) }
+
+          shown = name.to_s.scrub('?').gsub(/[^[:print:]]/, '?')[0, 40]
+          raise ConfigurationError.new(["headers: the name and the value of '#{shown}' must not contain control characters"])
+        end
+      end
+
+      def control?(text) = text.to_s.b.match?(CONTROL_BYTE)
 
       # http.rb follows any value that responds to fetch, so only the values the
       # protection can wrap are accepted. http.rb reads the options of a Hash

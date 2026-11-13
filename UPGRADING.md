@@ -384,9 +384,11 @@ You can adopt these when you are ready. The [README](README.md) describes each o
 - A credential is sent only to the origin it was set for, and a value with a
   control character is refused.
 - Redirects to another origin drop the credentials and cookies.
-- Logs, error messages, `inspect` and `definition` never show a credential, a
-  header, a body or a query string.
-- Objects that can hold a secret refuse to be serialized.
+- Logs, error messages of the gem and `inspect` never show a credential, a
+  header value, a body or a query string. The `to_h` and the JSON of a
+  `definition` hide the values of `default_headers`.
+- An API, an endpoint, a response and a definition refuse `Marshal.dump` and
+  `YAML.dump`; the first three refuse JSON too.
 - Configuration files are read with `YAML.safe_load`.
 
 What stays with your application:

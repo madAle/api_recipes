@@ -58,6 +58,43 @@ describe 'Objects of the DSL' do
     expect(ApiRecipes.svc.users.show(1, **options).url.to_s).to eq('https://api.example.test/users/1')
   end
 
+  it 'does not write the header values of a definition when it is serialized' do
+    [ApiRecipes.svc.definition, ApiRecipes.svc.users.definition, ApiRecipes.svc.users.show(1).definition].each do |definition|
+      expect { Marshal.dump(definition) }.to raise_error(TypeError)
+      expect { YAML.dump(definition) }.to raise_error(TypeError)
+      expect(definition.as_json).to eq(definition.to_h)
+      written = [definition.to_json, JSON.generate(definition), JSON.generate([definition])]
+      expect(written.join).not_to include('SECRET')
+      expect(JSON.parse(definition.to_json)['name']).to eq(definition.name.to_s)
+    end
+    expect(ApiRecipes.svc.definition.to_json).to include('"X-Default":"[FILTERED]"')
+  end
+
+  it 'shows no header and no variable value when the configuration is printed' do
+    ApiRecipes.configure do |config|
+      config.logger = Logger.new(IO::NULL)
+      config.apis_configs = { svc: { host: '{shop}.example.test', variables: { shop: { default: 'SECRET-DEFAULT' } },
+                                     default_headers: { 'X-Default' => 'SECRET-HEADER' } } }
+      config.variables = { svc: { shop: 'SECRET-SHOP' } }
+      shown = [config.inspect, config.to_s, "#{config}", PP.pp(config, +'')]
+      expect(shown.join("\n")).not_to include('SECRET')
+    end
+    configuration = ApiRecipes.configuration
+    shown = [configuration.inspect, configuration.to_s, "#{configuration}", PP.pp(configuration, +'')]
+    expect(shown.join("\n")).not_to include('SECRET')
+    expect(configuration.inspect).to include('ApiRecipes::Configuration', 'svc')
+  end
+
+  it 'refuses a header of the request with a control character before sending, without showing its value' do
+    [{ 'X-Private' => "SECRET\nInjected: 1" }, { 'X-Private' => "SECRET\0" }, { "X-Bad\nName" => 'SECRET' },
+     { 'Authorization' => "Bearer SECRET\r\n" }].each do |headers|
+      expect { ApiRecipes.svc.users.show(1, headers: headers).run }
+        .to raise_error(ApiRecipes::ConfigurationError) { |e| expect(e.message).not_to match(/SECRET|Injected/) }
+      expect { ApiRecipes.svc.users.show(1, 'headers' => headers).run }.to raise_error(ApiRecipes::ConfigurationError)
+    end
+    expect(WebMock).not_to have_requested(:any, /.*/)
+  end
+
   it 'does not change how Ruby treats the parent of an endpoint named after an implicit conversion' do
     parent = ApiRecipes.svc
     expect([parent].flatten).to eq([parent])

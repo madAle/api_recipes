@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+
 module ApiRecipes
   module Internals
     # The immutable result of compiling a configuration: one node per api and one
@@ -16,7 +18,21 @@ module ApiRecipes
         end
       end
 
+      # A definition holds the values of default_headers. Marshal and YAML
+      # would write them, so they are refused; JSON gets to_h, which hides them.
+      module Serialization
+        def marshal_dump = raise(TypeError, "an #{self.class} cannot be serialized: use to_h")
+
+        def encode_with(_coder) = raise(TypeError, "an #{self.class} cannot be serialized: use to_h")
+
+        def as_json(*) = to_h
+
+        def to_json(*args) = to_h.to_json(*args)
+      end
+
       class Api
+        include Serialization
+
         attr_reader :name, :protocol, :host, :port, :base_url, :timeout, :on_bad_code, :mime_type,
                     :verify_with, :default_headers, :auth, :variables, :recipe, :endpoints,
                     :host_template, :base_url_template, :header_templates
@@ -93,6 +109,8 @@ module ApiRecipes
       end
 
       class Endpoint
+        include Serialization
+
         attr_reader :name, :full_name, :path, :full_path, :path_params, :verb, :ok_code, :timeout, :on_bad_code,
                     :mime_type, :verify_with, :parent, :endpoints, :template
 

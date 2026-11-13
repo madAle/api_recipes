@@ -31,6 +31,17 @@ module ApiRecipes
       @variables = deep_copy(@variables)
     end
 
+    # The descriptions of the apis and the variables can hold secrets (header
+    # values, tenant names): only the names of the apis are shown.
+    def inspect
+      "#<#{self.class.name} apis_configs: #{@apis_configs.keys.inspect} " \
+        "apis_files_paths: #{@apis_files_paths.size} print_urls: #{@print_urls.inspect}>"
+    end
+
+    def to_s = inspect
+
+    def pretty_print(queue) = queue.text(inspect)
+
     def apis_configs=(configs = {})
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
 

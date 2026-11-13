@@ -1109,12 +1109,17 @@ What ApiRecipes does:
   not sent again if the chain comes back.
 - **Before sending**, the address that http.rb will contact is checked against
   the origin that was validated.
-- **Logs, errors and `inspect`** never contain a credential, a header, a body or
-  a query string. `definition` never holds a credential that was assigned with
-  `authorization=`, `basic_auth=` or `with`.
+- **Logs, errors and `inspect`.** A log line and an error message of the gem
+  never contain a credential, a header value, a body or a query string. Neither
+  does the `inspect`, the `to_s` or the `pp` of an API, an endpoint, a response,
+  a definition or the configuration. `definition` never holds a credential that
+  was assigned with `authorization=`, `basic_auth=` or `with`; the values of
+  `default_headers` are returned by that reader only, and `to_h` shows them as
+  `[FILTERED]`.
 - **Serialization.** An API, an endpoint and a response refuse `Marshal.dump`,
   `YAML.dump` and `as_json`, and raise `TypeError`: serialize `response.data` or
-  `response.body.to_s` instead.
+  `response.body.to_s` instead. A definition refuses `Marshal.dump` and
+  `YAML.dump`, and its JSON is the one of `to_h`.
 - **`fill`** calls only public writers and skips keys that are not plain
   attribute names.
 - **Configuration files** are read with `YAML.safe_load`, and the options are
