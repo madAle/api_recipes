@@ -12,6 +12,10 @@ Gem::Specification.new do |spec|
   spec.summary       = %q{Consume HTTP APIs with style}
   spec.homepage      = 'https://github.com/madAle/api_recipes'
   spec.license       = 'MIT'
+  spec.metadata      = {
+    'changelog_uri'   => 'https://github.com/madAle/api_recipes/blob/master/CHANGELOG.md',
+    'source_code_uri' => 'https://github.com/madAle/api_recipes'
+  }
 
   spec.files         = Dir['README.md', 'MIT-LICENSE', 'lib/**/*.rb']
   spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }
@@ -22,4 +26,5 @@ Gem::Specification.new do |spec|
   # Ruby 3.4 base64 is no longer a default gem. 5.x stays API compatible; 6.0 is
   # left out until it is verified.
   spec.add_dependency 'http', '>= 4.4', '< 6'
+  spec.add_dependency 'logger'
 end
