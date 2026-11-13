@@ -201,9 +201,9 @@ describe ApiRecipes::Configuration do
       expect(configuration.logger).to equal(logger)
     end
 
-    it 'builds a logger named ApiRecipes at debug level by default' do
+    it 'builds a logger named ApiRecipes at warn level by default' do
       configuration.log_to = StringIO.new
-      expect(configuration.logger.level).to eq(Logger::DEBUG)
+      expect(configuration.logger.level).to eq(Logger::WARN)
       expect(configuration.logger.progname).to eq('ApiRecipes')
     end
 
@@ -224,8 +224,8 @@ describe ApiRecipes::Configuration do
       end
     end
 
-    it 'writes to STDOUT by default' do
-      expect { configuration.logger.warn('hello') }.to output(/hello/).to_stdout_from_any_process
+    it 'writes to STDERR by default' do
+      expect { configuration.logger.warn('hello') }.to output(/hello/).to_stderr_from_any_process
     end
 
     {
@@ -239,6 +239,28 @@ describe ApiRecipes::Configuration do
           expect(config.logger.level).to eq(level)
         end
       end
+    end
+
+    it 'lowers the default level to info with print_urls when no level was chosen' do
+      configuration.log_to = StringIO.new
+      configuration.print_urls = true
+      expect(configuration.logger.level).to eq(Logger::INFO)
+    end
+
+    it 'keeps the chosen level with print_urls' do
+      configuration.log_to = StringIO.new
+      configuration.print_urls = true
+      configuration.log_level = :error
+      expect(configuration.logger.level).to eq(Logger::ERROR)
+    end
+
+    it 'keeps the level of LOG_LEVEL with print_urls' do
+      ENV['LOG_LEVEL'] = 'error'
+      configuration.log_to = StringIO.new
+      configuration.print_urls = true
+      expect(configuration.logger.level).to eq(Logger::ERROR)
+    ensure
+      ENV.delete('LOG_LEVEL')
     end
 
     it 'takes the default level from the LOG_LEVEL variable' do

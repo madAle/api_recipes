@@ -22,7 +22,16 @@ module ApiRecipes
       count = @options ? args.size - 1 : args.size
       raise PathParamsMismatch.new(definition.full_path, params, args.first(count)) unless count == params.size
 
-      own = definition.template.expand(args, endpoint: definition.full_name)
+      name = definition.full_name
+      own = definition.template.expand(args, endpoint: name) do |param, kind|
+        if kind == :slash
+          Registry.warn_once([name, param, kind], "#{name}: the value of '#{param}' contains '/' and is now sent " \
+                                                  "as %2F. To span several segments use *#{param} in the path.")
+        else
+          Registry.warn_once([name, param, kind], "#{name}: the value of '#{param}' looks already " \
+                                                  'percent-encoded. ApiRecipes now encodes path parameters itself.')
+        end
+      end
       if own.empty?
         @path = parent_path
       else

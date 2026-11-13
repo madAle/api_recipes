@@ -5,7 +5,8 @@ require 'logger'
 module ApiRecipes
   class Configuration
 
-    attr_accessor :log_to, :log_level, :print_urls, :upgrade_warnings
+    attr_accessor :upgrade_warnings
+    attr_reader :log_to, :log_level, :print_urls
     attr_reader :variables
 
     def initialize
@@ -21,6 +22,7 @@ module ApiRecipes
     # caller can change in place are copied, so the original stays as it was.
     def initialize_copy(source)
       super
+      @default_logger = nil
       @sources = @sources.dup
       @apis_configs = @apis_configs.dup
       @apis_files_paths = @apis_files_paths.dup
@@ -74,15 +76,27 @@ module ApiRecipes
       @logger = logger
     end
 
+    # The logger of the application, or one that writes to log_to or STDERR at
+    # warn level: normal use prints nothing, the warnings show.
     def logger
-      unless @logger
-        log = ::Logger.new(log_to || STDOUT)
-        log.level    = normalize_log_level
-        log.progname = 'ApiRecipes'
-        @logger = log
-      end
+      @logger || (@default_logger ||= default_logger)
+    end
 
-      @logger
+    # The default logger is built from the options as they are when it is
+    # first needed, so changing one of them drops it.
+    def log_to=(target)
+      @default_logger = nil
+      @log_to = target
+    end
+
+    def log_level=(level)
+      @default_logger = nil
+      @log_level = level
+    end
+
+    def print_urls=(value)
+      @default_logger = nil
+      @print_urls = value
     end
 
     private
@@ -155,6 +169,14 @@ module ApiRecipes
     end
 
     # @private
+    def default_logger
+      log = ::Logger.new(log_to || $stderr)
+      log.level    = normalize_log_level
+      log.progname = 'ApiRecipes'
+      log
+    end
+
+    # @private
     def normalize_log_level
       case @log_level
       when :debug, ::Logger::DEBUG, 'debug' then ::Logger::DEBUG
@@ -163,7 +185,7 @@ module ApiRecipes
       when :error, ::Logger::ERROR, 'error' then ::Logger::ERROR
       when :fatal, ::Logger::FATAL, 'fatal' then ::Logger::FATAL
       else
-        ENV['LOG_LEVEL'] || Logger::DEBUG
+        ENV['LOG_LEVEL'] || (print_urls ? ::Logger::INFO : ::Logger::WARN)
       end
     end
   end

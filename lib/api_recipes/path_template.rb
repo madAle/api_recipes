@@ -28,13 +28,16 @@ module ApiRecipes
 
     attr_reader :param_names
 
-    def expand(values, endpoint:)
+    # The block, if given, is called with the name of a parameter and :slash
+    # when its value (not a splat) contains '/', or :encoded when it contains a
+    # sequence %XX. It never receives the value.
+    def expand(values, endpoint:, &block)
       remaining = values.dup
       @parts.map do |kind, content|
         case kind
         when :text then content
-        when :param then encode_value(remaining.shift, content, endpoint)
-        when :splat then encode_splat(remaining.shift, content, endpoint)
+        when :param then encode_value(remaining.shift, content, endpoint, &block)
+        when :splat then encode_splat(remaining.shift, content, endpoint, &block)
         end
       end.join
     end
@@ -87,11 +90,11 @@ module ApiRecipes
       text.clear
     end
 
-    def encode_splat(value, name, endpoint)
+    def encode_splat(value, name, endpoint, &block)
       raise InvalidPathParameter.new(endpoint, name, 'is nil') if value.nil?
       pieces = value.to_s.b.split('/', -1)
       pieces = [''] if pieces.empty?
-      pieces.map { |piece| encode_value(piece, name, endpoint) }.join('/')
+      pieces.map { |piece| encode_value(piece, name, endpoint, &block) }.join('/')
     end
 
     def encode_value(value, name, endpoint)
@@ -99,6 +102,10 @@ module ApiRecipes
       string = value.to_s
       raise InvalidPathParameter.new(endpoint, name, 'is empty') if string.empty?
       raise InvalidPathParameter.new(endpoint, name, 'is a dot segment') if string == '.' || string == '..'
+      if block_given?
+        yield name, :slash if string.b.include?('/')
+        yield name, :encoded if string.b.match?(/%\h\h/)
+      end
       self.class.escape(string)
     end
   end

@@ -32,7 +32,12 @@ module ApiRecipes
       origin = @context.origin
       credential = @context.credential(origin)
       address = checked(url, origin)
+      logger = ApiRecipes.logger
+      logger.info(address) if ApiRecipes.configuration.print_urls
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       http_response = client(credential).request(@definition.verb, address, **send_options(credential, origin))
+      elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000
+      logger.debug("#{@definition.verb.to_s.upcase} #{address} -> #{http_response.code} (#{elapsed.round(1)}ms)")
       respond(http_response)
     end
 

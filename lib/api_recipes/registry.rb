@@ -7,6 +7,9 @@ module ApiRecipes
   # mix. The generation grows at every swap, reset! included.
   class Registry
     LOCK = Mutex.new
+    WARNED_LOCK = Mutex.new
+
+    @warned = {}
 
     @methods = [].freeze
 
@@ -21,6 +24,7 @@ module ApiRecipes
           definitions = Compiler.compile_all(apis)
           handles = definitions.transform_values { |definition| Handles.new(definition) }
           variables = Compiler.normalize(configuration.variables).to_h { |name, values| [name, variable_values(values)] }
+          WARNED_LOCK.synchronize { @warned = {} }
           @current = new(configs: Compiler.frozen_copy(apis), definitions: definitions, handles: handles,
                          generation: @current.generation + 1)
           warnings = define_methods(@current.apis) + handles.values.flat_map(&:warnings)
@@ -29,10 +33,22 @@ module ApiRecipes
         end
       end
 
+      # Writes message at warn level the first time it sees key, unless the
+      # configuration turned the upgrade warnings off. The message never holds
+      # a value of the application.
+      def warn_once(key, message)
+        configuration = ApiRecipes.configuration
+        return unless configuration.upgrade_warnings
+
+        first = WARNED_LOCK.synchronize { @warned.key?(key) ? false : (@warned[key] = true) }
+        configuration.logger.warn(message) if first
+      end
+
       # Removes the methods generated on ApiRecipes and empties the registry.
       def reset!
         LOCK.synchronize do
           define_methods([])
+          WARNED_LOCK.synchronize { @warned = {} }
           @current = new(generation: @current.generation + 1)
         end
       end
