@@ -9,6 +9,7 @@
 /tmp/
 /.superpowers/
 /docs/superpowers/
+/docs/decisions/
 *.orig
 .idea
 .rvmrc

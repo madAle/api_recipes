@@ -35,8 +35,7 @@ removes: do not write specs for it.
 | `spec/support/test_apis.rb` | shared configuration and helpers for specs |
 | `spec/fixtures` | YAML files for configuration specs |
 | `examples` | runnable scripts that call public APIs |
-| `docs/ROADMAP.md` | what each planned release contains |
-| `docs/decisions` | one file per design decision |
+| `docs/ROADMAP.md` | what the next major version contains |
 
 ## How a call works
 
@@ -112,5 +111,5 @@ the maintainer. A version number published on RubyGems cannot be reused.
 - With two versions of the uri gem installed for the same Ruby, switching
   `URI_VERSION` can fail with "You have already activated uri". Run
   `bundle update uri` after changing it.
-- `Gemfile.lock`, `coverage/`, `.superpowers/` and `docs/superpowers/` are not
-  versioned.
+- `Gemfile.lock`, `coverage/`, `.superpowers/`, `docs/superpowers/` and
+  `docs/decisions/` are not versioned. The last one holds local design notes.
