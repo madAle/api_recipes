@@ -1,6 +1,6 @@
 # 0004 Scope of credentials
 
-**Status:** Proposed, for 3.0
+**Status:** Accepted, for 3.0
 
 ## Decision
 

@@ -5,8 +5,8 @@ What each planned release contains. Design choices are explained in
 
 ## 3.0: fixes that change behaviour
 
-Status: proposed, scope to be confirmed. Each item is a known defect of the 2.x
-line. Specs must not pin the present behaviour of these.
+Status: planned. Each item is a known defect of the 2.x line. Specs must not pin
+the present behaviour of these.
 
 | Area | Today | In 3.0 |
 | --- | --- | --- |

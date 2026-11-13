@@ -8,7 +8,7 @@ alone. A record states the decision as it stands today.
 | [0001 Specs never use the network](0001-specs-never-use-the-network.md) | Accepted |
 | [0002 CI runs on the maintained Ruby versions](0002-ci-runs-on-maintained-rubies.md) | Accepted |
 | [0003 Releases and versioning](0003-releases-and-versioning.md) | Accepted |
-| [0004 Scope of credentials](0004-credentials-scope.md) | Proposed |
+| [0004 Scope of credentials](0004-credentials-scope.md) | Accepted, for 3.0 |
 
 ## Writing a record
 
