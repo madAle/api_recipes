@@ -5,6 +5,45 @@ describe ApiRecipes do
     expect(ApiRecipes::VERSION).to match(/\A\d+\.\d+\.\d+\z/)
   end
 
+# The concurrency examples stop threads on purpose. Every wait has a time
+# limit and a thread that raised fails the example with its own error,
+# instead of leaving the suite waiting for ever.
+def thread_limit = 5
+
+# Waits for a signal on queue. Meant for the main thread: if the thread that
+# should send it has died, its error is raised; if it is still running, the
+# example fails after the limit.
+def await_signal(queue, thread, what)
+  return if queue.pop(timeout: thread_limit)
+
+  thread.join(0)
+  thread.value unless thread.alive?
+  raise "timed out after #{thread_limit} seconds waiting for #{what}"
+end
+
+# Waits for the thread to end and re-raises the error that ended it.
+def finish_thread(thread, what)
+  raise "timed out after #{thread_limit} seconds waiting for #{what} to finish" unless thread.join(thread_limit)
+
+  thread.value
+end
+
+# Waits until the thread is blocked or finished.
+def await_blocked(thread, what)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + thread_limit
+  until thread.stop?
+    raise "timed out after #{thread_limit} seconds waiting for #{what} to block" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+    Thread.pass
+  end
+  thread.value unless thread.alive?
+end
+
+# Used inside the stopped thread: waits to be resumed, within the limit.
+def await_resume(queue)
+  raise "the thread was not resumed within #{thread_limit} seconds" unless queue.pop(timeout: thread_limit)
+end
+
   describe '.configure' do
     it 'yields the configuration and defines a method for each api' do
       yielded = nil
@@ -115,7 +154,7 @@ describe ApiRecipes do
         result = original.call(*args, &block)
         if Thread.current[:api_recipes_spec_stop]
           stopped << true
-          resume.pop
+          await_resume(resume)
         end
         result
       end
@@ -123,10 +162,11 @@ describe ApiRecipes do
         Thread.current[:api_recipes_spec_stop] = true
         call.call
       end
-      stopped.pop
+      thread.report_on_exception = false
+      await_signal(stopped, thread, 'the thread to stop')
       other.call
       resume << true
-      thread.join
+      finish_thread(thread, 'the thread')
     end
 
     it 'pairs the configuration with the registry built from it when two configure calls overlap' do
@@ -157,7 +197,7 @@ describe ApiRecipes do
         result = original.call(*args)
         if Thread.current[:api_recipes_spec_stop]
           stopped << true
-          resume.pop
+          await_resume(resume)
         end
         result
       end
@@ -170,11 +210,14 @@ describe ApiRecipes do
           config.variables = { shopify: { shop: 'old' } }
         end
       end
-      stopped.pop
+      configurer.report_on_exception = false
+      await_signal(stopped, configurer, 'configure to stop')
       resetter = Thread.new { ApiRecipes.reset! }
-      Thread.pass until resetter.stop?
+      resetter.report_on_exception = false
+      await_blocked(resetter, 'reset!')
       resume << true
-      [configurer, resetter].each(&:join)
+      finish_thread(configurer, 'configure')
+      finish_thread(resetter, 'reset!')
     end
 
     it 'empties the global variables when reset! runs while configure holds the lock' do
