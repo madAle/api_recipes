@@ -101,6 +101,49 @@ describe ApiRecipes::Configuration do
     end
   end
 
+  describe 'files that are hard to read' do
+    around { |example| Dir.mktmpdir { |dir| @dir = dir; example.run } }
+
+    def write(name, content)
+      File.binwrite(File.join(@dir, name), content)
+      File.join(@dir, name)
+    end
+
+    def load_from(path)
+      ApiRecipes.configure do |config|
+        config.logger = Logger.new(IO::NULL)
+        config.apis_files_paths = [path]
+      end
+    end
+
+    it 'loads a file with non-ASCII UTF-8 text' do
+      path = write('utf8.yml', "svc:\n  host: api.example.test\n  endpoints:\n    users: { path: 'café' }\n")
+      expect { load_from(path) }.not_to raise_error
+    end
+
+    it 'names a file that is not valid UTF-8' do
+      path = write('latin.yml', "svc: { host: \"caf\xE9\" }\n")
+      expect { load_from(path) }.to raise_error(ApiRecipes::RecipeFileError, /latin\.yml: file is not valid UTF-8/)
+    end
+
+    it 'names a directory given as a file' do
+      expect { load_from(@dir) }.to raise_error(ApiRecipes::RecipeFileError, /cannot read file \(EISDIR\)/)
+    end
+
+    it 'refuses a file with ERB when ERB is not asked for, and runs nothing' do
+      marker = File.join(@dir, 'marker')
+      path = write('erb.yml', "svc: { host: <%= File.write(#{marker.inspect}, '1') %> }\n")
+      expect { ApiRecipes::Configuration.new.read_recipe_file(path, erb: false) }
+        .to raise_error(ApiRecipes::RecipeFileError, /erb\.yml: contains ERB/)
+      expect(File.exist?(marker)).to be(false)
+    end
+
+    it 'evaluates ERB with erb: true' do
+      path = write('erb.yml', "svc: { host: <%= 'api.example.test' %> }\n")
+      expect(ApiRecipes::Configuration.new.read_recipe_file(path, erb: true)).to eq(svc: { host: 'api.example.test' })
+    end
+  end
+
   describe 'shared recipes among the files' do
     let(:body) { "<% raise 'evaluated' %>\nsvc:\n  host: evil.test\n" }
 

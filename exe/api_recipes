@@ -1,3 +1,4 @@
+#!/usr/bin/env ruby
 require 'api_recipes'
 require 'api_recipes/cli'
 exit ApiRecipes::CLI.run(ARGV)

@@ -50,6 +50,30 @@ describe 'api_recipes upgrade' do
     expect(run('nope')).to match([2, '', /unknown command: nope/])
   end
 
+  it 'says "1 finding" for exactly one' do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'a.rb'), "endpoint.route\n")
+      _, out, = run('upgrade', dir)
+      expect(out).to match(/^1 finding$/)
+    end
+  end
+
+  describe 'the executable' do
+    let(:exe) { File.expand_path('../../exe/api_recipes', __dir__) }
+
+    it 'starts with a shebang and is executable' do
+      expect(File.open(exe, &:readline)).to eq("#!/usr/bin/env ruby\n")
+      expect(File.executable?(exe)).to be(true)
+    end
+
+    it 'runs directly' do
+      lib = File.expand_path('../../lib', __dir__)
+      out = `RUBYOPT=-I#{lib} #{exe} --version 2>/dev/null`
+      expect(out.strip).to eq(ApiRecipes::VERSION)
+      expect($?.success?).to be(true)
+    end
+  end
+
   it 'is not loaded with the library' do
     expect(`ruby -Ilib -e 'require "api_recipes"; print defined?(ApiRecipes::CLI).inspect'`).to eq('nil')
   end
@@ -116,7 +140,7 @@ describe 'api_recipes upgrade' do
       write('a.rb', "endpoint.route\n")
       code, out, = run('upgrade', @dir)
       expect(code).to eq(1)
-      expect(out).to include('1 findings')
+      expect(out).to match(/^1 finding$/)
     end
 
     it 'turns problems of a configuration file into findings' do

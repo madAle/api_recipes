@@ -69,13 +69,21 @@ module ApiRecipes
         SILENT_CHANGES.each { |change| out.puts "  - #{change}" }
         out.puts
         @warnings.each { |warning| err.puts warning }
-        out.puts(findings.empty? ? 'Nothing to change' : "#{findings.size} findings") if findings.any? || @warnings.empty?
+        out.puts summary(findings.size) if findings.any? || @warnings.empty?
         return 1 if findings.any?
 
         @warnings.empty? ? 0 : 2
       end
 
       private
+
+      def summary(count)
+        case count
+        when 0 then 'Nothing to change'
+        when 1 then '1 finding'
+        else "#{count} findings"
+        end
+      end
 
       def format_finding(finding)
         where = finding.line ? "#{finding.file}:#{finding.line}" : finding.file
