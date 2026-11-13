@@ -7,12 +7,14 @@ module ApiRecipes
   # named for error messages: ApiRecipes::Api<svc>,
   # ApiRecipes::Endpoint<svc.users.show>.
   class Handles
-    # Names that Api and Endpoint, Ruby or common libraries (pp, psych, json)
-    # call on an object without being asked, whether or not they are loaded.
+    # Names that Api and Endpoint, Ruby (pattern matching among them) or common
+    # libraries (pp, psych, json) call on an object without being asked,
+    # whether or not they are loaded.
     RESERVED = %i[initialize raise block_given? method_missing respond_to_missing? initialize_copy initialize_dup
                   initialize_clone to_ary to_str to_hash to_proc to_a to_io to_path to_int to_regexp to_sym to_enum
                   coerce marshal_dump marshal_load _dump encode_with init_with to_yaml to_json as_json pretty_print
-                  pretty_print_cycle pretty_print_inspect pretty_print_instance_variables].freeze
+                  pretty_print_cycle pretty_print_inspect pretty_print_instance_variables deconstruct
+                  deconstruct_keys].freeze
 
     # Whether a method called name may not be generated on base: a reserved
     # name, a public method, or a private method that does not come from

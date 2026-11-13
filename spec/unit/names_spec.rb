@@ -70,7 +70,7 @@ describe 'Endpoint and api names' do
   %i[to_ary to_str to_hash to_proc to_a to_io to_path to_int to_regexp to_sym to_enum coerce marshal_dump
      marshal_load _dump encode_with init_with to_yaml to_json as_json pretty_print pretty_print_cycle
      pretty_print_inspect pretty_print_instance_variables singleton_method_added singleton_method_removed
-     singleton_method_undefined].each do |name|
+     singleton_method_undefined deconstruct deconstruct_keys].each do |name|
     it "keeps an endpoint called #{name} reachable with [] only, and its parent behaves as any endpoint" do
       logger = Logger.new(IO::NULL)
       expect(logger).to receive(:warn).with(/endpoint '#{name}' has the name of an existing method/).once
@@ -88,6 +88,24 @@ describe 'Endpoint and api names' do
       parent.define_singleton_method(:extra) { :extra }
       expect(parent.extra).to eq(:extra)
     end
+  end
+
+  it 'lets pattern matching treat a parent of deconstruct and deconstruct_keys as any endpoint' do
+    configure_with(Logger.new(IO::NULL),
+                   svc: { host: 'h.test', endpoints: { parent: { endpoints: { deconstruct: nil, deconstruct_keys: nil } },
+                                                       plain: nil } })
+    [ApiRecipes.svc.parent, ApiRecipes.svc.plain].each do |endpoint|
+      as_array = case endpoint
+                 in [_] then :matched
+                 else :other
+                 end
+      as_hash = case endpoint
+                in { a: _ } then :matched
+                else :other
+                end
+      expect([as_array, as_hash]).to eq(%i[other other])
+    end
+    expect(ApiRecipes.svc.parent[:deconstruct_keys].url.to_s).to eq('https://h.test/parent/deconstruct_keys')
   end
 
   it 'gives no module method to an api named like a conversion method' do
