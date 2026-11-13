@@ -1,6 +1,6 @@
 require 'simplecov'
+# spec/ is left out of the report by the default profile of SimpleCov.
 SimpleCov.start do
-  add_filter '/spec/'
   # Enforced on CI only, so that running a single file locally does not fail.
   minimum_coverage 90 if ENV['CI']
 end
