@@ -40,7 +40,7 @@ module ApiRecipes
         logger = ApiRecipes.logger
         logger.info(address) if ApiRecipes.configuration.print_urls
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        http_response = client(credential, chain).request(@definition.verb, address, **send_options(credential, origin))
+        http_response = send_request(client(credential, chain), address, send_options(credential, origin))
         elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000
         logger.debug("#{@definition.verb.to_s.upcase} #{address} -> #{http_response.code} (#{elapsed.round(1)}ms)")
         respond(http_response)
@@ -87,6 +87,19 @@ module ApiRecipes
         address
       rescue HTTP::URI::InvalidError
         raise InvalidUrl, "the url of api '#{@context.definition.name}' cannot be parsed"
+      end
+
+      # http.rb reads the address of a redirect that Ruby's URI cannot parse
+      # with the optional addressable gem. Without the gem that is a LoadError,
+      # which a server must not be able to cause: it becomes InvalidUrl. Any
+      # other LoadError passes.
+      def send_request(client, address, options)
+        client.request(@definition.verb, address, **options)
+      rescue LoadError => e
+        raise unless e.path.to_s.start_with?('addressable')
+
+        raise InvalidUrl, "api '#{@context.definition.name}' was redirected to an address that " \
+                          'cannot be read without the addressable gem'
       end
 
       def plain_uri?(address)

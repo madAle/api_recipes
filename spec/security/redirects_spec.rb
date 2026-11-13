@@ -150,6 +150,28 @@ describe 'Redirects' do
     expect(WebMock).to have_requested(:get, 'https://evil.test/steal').with { |r| !r.headers.key?('Authorization') }.times(3)
   end
 
+  describe 'to an address that http.rb can read only with the addressable gem, when the gem is missing' do
+    let(:missing) do
+      LoadError.new('cannot load such file -- addressable/uri').tap { |e| e.instance_variable_set(:@path, 'addressable/uri') }
+    end
+
+    before do
+      stub_request(:get, 'https://api.example.test/users')
+        .to_return(status: 302, headers: { 'Location' => "https://ex\u00E4mple.test/steal" })
+    end
+
+    it 'raises InvalidUrl instead of LoadError, without the address' do
+      allow(HTTP::URI).to receive(:require_addressable).and_raise(missing)
+      expect { new_request(base, %i[users], options: { follow: true }).perform }
+        .to raise_error(ApiRecipes::InvalidUrl) { |e| expect(e.message).not_to match(/steal|mple/) }
+    end
+
+    it 'leaves any other LoadError as it is' do
+      allow(HTTP::URI).to receive(:require_addressable).and_raise(LoadError.new('cannot load such file -- other'))
+      expect { new_request(base, %i[users], options: { follow: true }).perform }.to raise_error(LoadError, /other/)
+    end
+  end
+
   it 'does not follow redirects unless asked' do
     stub_request(:get, 'https://api.example.test/users').to_return(to_evil)
     expect { new_request(base, %i[users]).perform }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
