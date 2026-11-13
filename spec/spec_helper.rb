@@ -1,5 +1,9 @@
 require 'simplecov'
-SimpleCov.start { add_filter '/spec/' }
+SimpleCov.start do
+  add_filter '/spec/'
+  # Enforced on CI only, so that running a single file locally does not fail.
+  minimum_coverage 90 if ENV['CI']
+end
 
 require 'webmock/rspec'
 require 'api_recipes'
