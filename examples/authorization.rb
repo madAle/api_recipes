@@ -22,10 +22,11 @@ end
 # Navigate Profile => Settings => Developer Settings => Personal Access Tokens => Generate new token
 # Copy the generated string and set the env variable
 # e.g.  GITHUB_OAUTH_TOKEN=your_token bundle exec ruby examples/authorization.rb
-MyFancyClass.github.authorization = "token #{ENV['GITHUB_OAUTH_TOKEN']}"
+# Credentials are set on the api of the ApiRecipes module
+ApiRecipes.github.authorization = "token #{ENV['GITHUB_OAUTH_TOKEN']}"
 
-# From now on every MyFancyClass (and its instances) github's api request will
-# be authenticated through the provided auth
+# From now on every github's api request will be authenticated through the provided
+# auth, including those made by MyFancyClass and its instances
 
 # Get user's usernames from Github's Apis (https://github.com)
 usernames = nil
