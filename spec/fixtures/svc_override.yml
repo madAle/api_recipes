@@ -1,0 +1,4 @@
+svc:
+  host: other.example.test
+  endpoints:
+    ping:
