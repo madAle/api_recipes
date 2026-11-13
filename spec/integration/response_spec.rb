@@ -61,6 +61,16 @@ describe ApiRecipes::Response do
     it 'parses data with the mime_type of the api' do
       expect(configure({}, mime_type: 'application/json').things.run.data).to eq('id' => 1)
     end
+
+    it 'parses data with a mime_type given as a Symbol, an alias of http.rb' do
+      expect(configure(mime_type: :json).things.run.data).to eq('id' => 1)
+      expect(configure({}, mime_type: :json).things.run.data).to eq('id' => 1)
+    end
+
+    it 'parses data with a Symbol mime_type given to with' do
+      expect(configure.with(mime_type: :json).things.run.data).to eq('id' => 1)
+      expect(configure.things.with(mime_type: :json).run.data).to eq('id' => 1)
+    end
   end
 
   it 'cannot parse data when the body is empty' do

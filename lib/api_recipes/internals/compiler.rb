@@ -416,9 +416,12 @@ module ApiRecipes
         nil
       end
 
+      # A Symbol stays a Symbol: http.rb reads it as one of its aliases (:json).
       def mime_type(value, where)
         text = value.is_a?(String) || value.is_a?(Symbol) ? value.to_s : nil
-        return text.dup.freeze if text && !text.empty? && !CONTROL.match?(text)
+        if text && !text.empty? && !CONTROL.match?(text)
+          return value.is_a?(Symbol) ? value : text.dup.freeze
+        end
 
         add(where, 'must be a string without control characters')
         nil
