@@ -111,5 +111,5 @@ the maintainer. A version number published on RubyGems cannot be reused.
 - With two versions of the uri gem installed for the same Ruby, switching
   `URI_VERSION` can fail with "You have already activated uri". Run
   `bundle update uri` after changing it.
-- `Gemfile.lock`, `coverage/`, `.superpowers/`, `docs/superpowers/` and
-  `docs/decisions/` are not versioned. The last one holds local design notes.
+- `Gemfile.lock`, `coverage/`, `docs/superpowers/` and `docs/decisions/` are
+  not versioned. The last one holds local design notes.

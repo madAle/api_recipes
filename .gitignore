@@ -7,7 +7,6 @@
 /pkg/
 /spec/reports/
 /tmp/
-/.superpowers/
 /docs/superpowers/
 /docs/decisions/
 *.orig
