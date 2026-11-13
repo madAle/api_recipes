@@ -121,6 +121,7 @@ module ApiRecipes
     end
     @storage = nil
     @configuration = nil
+    @print_urls = nil
     nil
   end
 

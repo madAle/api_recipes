@@ -15,4 +15,10 @@ describe 'ApiRecipes.reset!' do
   it 'can be called before any configuration' do
     expect { ApiRecipes.reset! }.not_to raise_error
   end
+
+  it 'resets print_urls' do
+    ApiRecipes.print_urls = true
+    ApiRecipes.reset!
+    expect(ApiRecipes.print_urls).to eq(false)
+  end
 end

@@ -33,7 +33,7 @@ module TestApis
     end
   end
 
-  # Classe anonima che dichiara le due API di test.
+  # Anonymous class that declares the two test apis.
   def new_client_class
     Class.new do
       include ApiRecipes
