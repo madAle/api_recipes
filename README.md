@@ -304,6 +304,8 @@ A value is checked for the place where it ends up. In a `host` it can contain
 only letters, digits, dots, hyphens and underscores. In a `base_url` it is
 encoded like a path parameter. In a header it cannot contain a line break or
 another control character. Anything else raises `ApiRecipes::InvalidVariable`.
+A name that the API does not declare raises `ApiRecipes::ConfigurationError` at
+every level, so a misspelled name is never ignored.
 `variables` without an assignment returns the values set at the level you call
 it on. Assigning `nil` clears them. At the global level (`ApiRecipes.shopify`)
 that includes the values given with `config.variables`, which are the same level;
