@@ -52,6 +52,13 @@ module ApiRecipes
       apis
     end
 
+    # Reads one file with the rules of apis_files_paths and returns the apis as
+    # { name => description }. ERB is evaluated only with erb: true; without it a
+    # file that contains ERB is refused and nothing in it is run.
+    def read_recipe_file(path, erb: true)
+      read_file(path, erb: erb)
+    end
+
     def logger=(logger)
       @logger = logger
     end
@@ -84,19 +91,21 @@ module ApiRecipes
     end
 
     # @private
-    def read_file(path)
+    def read_file(path, erb: true)
       full_path = File.expand_path(path)
       if shared_recipe?(full_path)
         raise RecipeFileError.new(path, 'shared recipes are loaded with recipes_paths, not with apis_files_paths')
       end
 
-      begin
-        text = File.read(full_path)
-      rescue Errno::ENOENT
-        raise RecipeFileError.new(path, 'file not found')
+      text = read_text(path, full_path)
+      if erb
+        text = ERB.new(text).result
+      elsif text.include?('<%')
+        raise RecipeFileError.new(path, 'contains ERB: run again with --erb to evaluate it ' \
+                                        '(this executes the code in the file)')
       end
       data = begin
-               YAML.safe_load(ERB.new(text).result, permitted_classes: [Symbol], aliases: true)
+               YAML.safe_load(text, permitted_classes: [Symbol], aliases: true)
              rescue Psych::Exception => e
                raise RecipeFileError.new(path, "invalid YAML: #{e.message}")
              end
@@ -104,6 +113,18 @@ module ApiRecipes
       raise RecipeFileError.new(path, 'must contain a mapping of api names') unless data.is_a?(Hash)
 
       deep_symbolize(data)
+    end
+
+    # @private
+    def read_text(path, full_path)
+      text = File.read(full_path, encoding: 'UTF-8')
+      raise RecipeFileError.new(path, 'file is not valid UTF-8') unless text.valid_encoding?
+
+      text
+    rescue Errno::ENOENT
+      raise RecipeFileError.new(path, 'file not found')
+    rescue SystemCallError => e
+      raise RecipeFileError.new(path, "cannot read file (#{e.class.name.split('::').last})")
     end
 
     # @private

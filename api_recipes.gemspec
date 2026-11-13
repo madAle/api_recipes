@@ -18,8 +18,9 @@ Gem::Specification.new do |spec|
     'rubygems_mfa_required' => 'true'
   }
 
-  spec.files         = Dir['README.md', 'MIT-LICENSE', 'lib/**/*.rb']
-  spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }
+  spec.files         = Dir['README.md', 'MIT-LICENSE', 'UPGRADING.md', 'exe/*', 'lib/**/*.rb']
+  spec.bindir        = 'exe'
+  spec.executables   = ['api_recipes']
   spec.require_paths = ['lib']
   spec.required_ruby_version = '>= 3.3.0'
 

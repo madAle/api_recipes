@@ -23,4 +23,9 @@ describe 'api_recipes.gemspec' do
     expect(gemspec.required_ruby_version).to eq(Gem::Requirement.new('>= 3.3.0'))
     expect(gemspec.metadata['rubygems_mfa_required']).to eq('true')
   end
+
+  it 'ships the command and the upgrade guide' do
+    expect(gemspec.executables).to eq(['api_recipes'])
+    expect(gemspec.files).to include('exe/api_recipes', 'UPGRADING.md')
+  end
 end
