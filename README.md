@@ -742,6 +742,9 @@ uri gem:
 
     $ URI_VERSION='~> 1.0' bundle exec rspec
 
+What is planned for the next releases is in the [roadmap](docs/ROADMAP.md); the
+reasons behind the main design choices are in [docs/decisions](docs/decisions).
+
 Bug reports and pull requests are welcome on
 [GitHub](https://github.com/madAle/api_recipes). Contributors are expected to
 follow the [Contributor Covenant](CODE_OF_CONDUCT.md).
