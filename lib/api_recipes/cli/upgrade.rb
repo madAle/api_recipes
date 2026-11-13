@@ -146,7 +146,7 @@ module ApiRecipes
 
       def check_config(file)
         apis = Configuration.new.read_recipe_file(file, erb: @erb)
-        Compiler.compile_all(apis)
+        Core::Compiler.compile_all(apis)
         []
       rescue RecipeFileError => e
         e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }

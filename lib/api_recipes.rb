@@ -3,21 +3,21 @@
 require 'http'
 
 require 'api_recipes/errors'
-require 'api_recipes/credential'
-require 'api_recipes/level'
-require 'api_recipes/path_template'
-require 'api_recipes/template'
-require 'api_recipes/definition'
-require 'api_recipes/compiler'
-require 'api_recipes/context'
-require 'api_recipes/request'
+require 'api_recipes/core/credential'
+require 'api_recipes/core/level'
+require 'api_recipes/core/path_template'
+require 'api_recipes/core/template'
+require 'api_recipes/core/definition'
+require 'api_recipes/core/compiler'
+require 'api_recipes/core/context'
+require 'api_recipes/core/request'
 require 'api_recipes/response'
 require 'api_recipes/configuration'
 require 'api_recipes/api'
 require 'api_recipes/endpoint'
-require 'api_recipes/handles'
-require 'api_recipes/registry'
-require 'api_recipes/declaration'
+require 'api_recipes/core/handles'
+require 'api_recipes/core/registry'
+require 'api_recipes/core/declaration'
 
 module ApiRecipes
   # `include ApiRecipes` adds the class macro `api`. options is a positional
@@ -26,7 +26,7 @@ module ApiRecipes
   # of the class).
   def self.included(receiver)
     def receiver.api(name, options = {})
-      Declaration.declare(self, name, options)
+      Core::Declaration.declare(self, name, options)
     end
   end
 
@@ -39,7 +39,7 @@ module ApiRecipes
 
     draft = configuration.dup
     yield draft
-    Registry.install(draft) { @configuration = draft }
+    Core::Registry.install(draft) { @configuration = draft }
     nil
   end
 
@@ -50,15 +50,15 @@ module ApiRecipes
   # The global api called name, for any name.
   def self.[](name)
     key = name.is_a?(String) && name.valid_encoding? ? name.to_sym : name
-    Registry.current.global(key) || raise(UnknownEndpoint.new('ApiRecipes', name, apis))
+    Core::Registry.current.global(key) || raise(UnknownEndpoint.new('ApiRecipes', name, apis))
   end
 
-  def self.apis = Registry.current.apis
+  def self.apis = Core::Registry.current.apis
 
   # Removes the global apis and their methods, the configuration and every
   # credential and variable value.
   def self.reset!
-    Registry.reset! { @configuration = nil }
+    Core::Registry.reset! { @configuration = nil }
     nil
   end
 

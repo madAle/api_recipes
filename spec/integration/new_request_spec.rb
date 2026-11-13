@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe ApiRecipes::Request do
+describe ApiRecipes::Core::Request do
   let(:json) { { 'Content-Type' => 'application/json' } }
   let(:base) { { host: 'api.example.test', endpoints: { users: { endpoints: { show: { path: '/:id' } } }, group: { route: false } } } }
 
@@ -39,7 +39,7 @@ describe ApiRecipes::Request do
   end
 
   it 'puts the credential where auth says' do
-    ApiRecipes::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Credential.authorization('KEY')) }
+    ApiRecipes::Core::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Core::Credential.authorization('KEY')) }
     new_request(base.merge(auth: { type: 'header', name: 'X-Api-Key' }), %i[users]).perform
     expect(WebMock).to have_requested(:get, 'https://api.example.test/users').with(headers: { 'X-Api-Key' => 'KEY' })
     request = new_request(base.merge(auth: { type: 'query', name: 'api_key' }), %i[users], options: { params: { page: 2 } })

@@ -56,8 +56,8 @@ module TestApis
   # levels of owner are read through declaration (nil: the global level only).
   def new_request(config, endpoint_path, values = [], owner: ApiRecipes, overrides: nil, options: {}, global: :same,
                   declaration: nil)
-    definition = ApiRecipes::Compiler.compile(:svc, config)
-    context = ApiRecipes::Context.new(definition: definition, owner: owner,
+    definition = ApiRecipes::Core::Compiler.compile(:svc, config)
+    context = ApiRecipes::Core::Context.new(definition: definition, owner: owner,
                                       global_definition: global == :same ? definition : global,
                                       declaration: declaration)
     context = context.with(overrides) if overrides
@@ -68,6 +68,6 @@ module TestApis
       own = remaining.shift(node.path_params.size)
       [parent_path, node.template.expand(own, endpoint: node.full_name)].join('/').squeeze('/')
     end
-    ApiRecipes::Request.new(context: context, definition: node, path: path, options: options)
+    ApiRecipes::Core::Request.new(context: context, definition: node, path: path, options: options)
   end
 end

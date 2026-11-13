@@ -4,11 +4,11 @@ require 'yaml'
 require 'pp'
 require 'stringio'
 
-describe ApiRecipes::Credential do
+describe ApiRecipes::Core::Credential do
   it 'never shows its value' do
     credential = described_class.authorization('Bearer SECRET')
     expect(credential.value).to eq('Bearer SECRET')
-    expect([credential.inspect, credential.to_s, "#{credential}"]).to all(eq('#<ApiRecipes::Credential authorization [FILTERED]>'))
+    expect([credential.inspect, credential.to_s, "#{credential}"]).to all(eq('#<ApiRecipes::Core::Credential authorization [FILTERED]>'))
   end
 
   it 'treats nil as an explicit absence' do

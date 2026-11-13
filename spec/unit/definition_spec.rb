@@ -1,8 +1,8 @@
 require 'spec_helper'
 
-describe 'ApiRecipes::Definition' do
+describe 'ApiRecipes::Core::Definition' do
   let(:api) do
-    ApiRecipes::Compiler.compile(:svc, host: 'api.example.test',
+    ApiRecipes::Core::Compiler.compile(:svc, host: 'api.example.test',
       endpoints: { users: { endpoints: { show: { path: '/:id' } } }, group: { route: false, endpoints: { ping: {} } } })
   end
 
@@ -29,21 +29,21 @@ describe 'ApiRecipes::Definition' do
   end
 
   it 'writes the parameters of every step in the call of a route' do
-    nested = ApiRecipes::Compiler.compile(:svc, endpoints: { users: { path: '/users/:uid', endpoints: { show: { path: ':id' } } } })
+    nested = ApiRecipes::Core::Compiler.compile(:svc, endpoints: { users: { path: '/users/:uid', endpoints: { show: { path: ':id' } } } })
     expect(nested.routes.map(&:call)).to eq(['svc.users(uid)', 'svc.users(uid).show(id)'])
   end
 
   describe 'what is shown' do
     let(:secret_api) do
-      ApiRecipes::Compiler.compile(:svc, host: 'api.example.test', port: 8443,
+      ApiRecipes::Core::Compiler.compile(:svc, host: 'api.example.test', port: 8443,
         default_headers: { 'Authorization' => 'Bearer s3cret' },
         endpoints: { users: { endpoints: { show: { path: '/:id' } } }, repos: nil })
     end
 
     it 'inspects without header values or the tree' do
-      expect(secret_api.inspect).to eq('#<ApiRecipes::Definition::Api svc https://api.example.test:8443 endpoints: users, repos>')
+      expect(secret_api.inspect).to eq('#<ApiRecipes::Core::Definition::Api svc https://api.example.test:8443 endpoints: users, repos>')
       show = secret_api.endpoints[:users].endpoints[:show]
-      expect(show.inspect).to eq('#<ApiRecipes::Definition::Endpoint svc.users.show GET /users/:id>')
+      expect(show.inspect).to eq('#<ApiRecipes::Core::Definition::Endpoint svc.users.show GET /users/:id>')
       expect([secret_api.inspect, show.inspect, secret_api.endpoints[:users].inspect].join).not_to include('s3cret')
     end
 

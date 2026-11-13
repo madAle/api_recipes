@@ -7,15 +7,15 @@ describe 'Credentials' do
 
   # The levels of classes and objects belong to a declaration (one for every
   # owner here); the global level keeps the api name.
-  let(:declaration) { ApiRecipes::Declaration.new(klass, :svc, {}, nil) }
+  let(:declaration) { ApiRecipes::Core::Declaration.new(klass, :svc, {}, nil) }
 
   before { stub_request(:any, /example\.test/).to_return(status: 200, body: '{}', headers: json) }
 
   def declaration_for(owner) = owner.equal?(ApiRecipes) ? nil : declaration
 
   def assign(owner, value)
-    credential = ApiRecipes::Credential.from(:authorization, value)
-    ApiRecipes::LevelSet.write(owner, declaration_for(owner) || :svc) { |l| l.with(credential: credential) }
+    credential = ApiRecipes::Core::Credential.from(:authorization, value)
+    ApiRecipes::Core::LevelSet.write(owner, declaration_for(owner) || :svc) { |l| l.with(credential: credential) }
   end
 
   # The helper of TestApis, with the levels of owner read through the declaration.
@@ -58,7 +58,7 @@ describe 'Credentials' do
 
   it 'does not send a token to an origin it was not set for' do
     assign(ApiRecipes, 'Bearer global')
-    global = ApiRecipes::Compiler.compile(:svc, base)
+    global = ApiRecipes::Core::Compiler.compile(:svc, base)
     other = base.merge(host: 'other.example.test')
     expect { new_request(other, %i[users], owner: klass, global: global).perform }
       .to raise_error(ApiRecipes::CredentialOriginMismatch, /other\.example\.test/)
@@ -85,7 +85,7 @@ describe 'Credentials' do
 
   it 'sends it when the same level sets destination and token' do
     assign(klass, 'Bearer class')
-    global = ApiRecipes::Compiler.compile(:svc, base)
+    global = ApiRecipes::Core::Compiler.compile(:svc, base)
     new_request(base.merge(host: 'other.example.test'), %i[users], owner: klass, global: global).perform
     new_request(base, %i[users], overrides: { host: 'third.example.test', authorization: 'Bearer chain' }).perform
     expect(WebMock).to have_requested(:get, 'https://other.example.test/users').with(headers: { 'Authorization' => 'Bearer class' })
@@ -104,7 +104,7 @@ describe 'Credentials' do
     parent = Class.new
     child = Class.new(parent)
     assign(parent, 'Bearer parent')
-    ApiRecipes::LevelSet.write(child, declaration) { |l| l.with(variables: { shop: 'other' }.freeze) }
+    ApiRecipes::Core::LevelSet.write(child, declaration) { |l| l.with(variables: { shop: 'other' }.freeze) }
     expect { new_request(config, %i[users], owner: child.new).perform }
       .to raise_error(ApiRecipes::CredentialOriginMismatch, /other\.example\.test/)
     expect(WebMock).not_to have_requested(:any, /example\.test/)

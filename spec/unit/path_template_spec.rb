@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe ApiRecipes::PathTemplate do
+describe ApiRecipes::Core::PathTemplate do
   def expand(template, *values)
     described_class.parse(template).expand(values, endpoint: 'svc.things')
   end

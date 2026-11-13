@@ -138,7 +138,7 @@ describe 'Credentials through the DSL' do
     end
 
     it 'sends a restored credential container as no credential, whatever the form' do
-      credential = ApiRecipes::Credential.authorization('Bearer SECRET')
+      credential = ApiRecipes::Core::Credential.authorization('Bearer SECRET')
       [Marshal.dump(credential), YAML.dump(credential), JSON.generate(credential)].each do |dumped|
         expect(dumped).not_to include('SECRET')
       end

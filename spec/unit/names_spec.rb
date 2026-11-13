@@ -48,7 +48,7 @@ describe 'Endpoint and api names' do
     end
   end
 
-  (Kernel.private_instance_methods - ApiRecipes::Handles::RESERVED).each do |name|
+  (Kernel.private_instance_methods - ApiRecipes::Core::Handles::RESERVED).each do |name|
     next unless name.match?(/\A[a-z_]\w*\z/)
 
     it "accepts #{name} as an endpoint method" do

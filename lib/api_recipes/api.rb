@@ -38,8 +38,8 @@ module ApiRecipes
         raise Error, 'an api returned by with cannot set authorization for the caller: use with(authorization: ...)'
       end
 
-      credential = Credential.from(:authorization, value)
-      LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
+      credential = Core::Credential.from(:authorization, value)
+      Core::LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
     end
 
     def basic_auth
@@ -52,13 +52,13 @@ module ApiRecipes
         raise Error, 'an api returned by with cannot set basic_auth for the caller: use with(basic_auth: ...)'
       end
 
-      credential = Credential.from(:basic_auth, value)
-      LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
+      credential = Core::Credential.from(:basic_auth, value)
+      Core::LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
     end
 
     # The variable values of the caller's level.
     def variables
-      level = LevelSet.read(@context.owner, @context.level_key)
+      level = Core::LevelSet.read(@context.owner, @context.level_key)
       (level && level.variables) || {}
     end
 
@@ -68,11 +68,11 @@ module ApiRecipes
         raise Error, 'an api returned by with cannot set variables for the caller: use with(variables: ...)'
       end
 
-      values = Registry.variable_values(values)
-      problems = Compiler.unknown_variables(values, @context.definition)
+      values = Core::Registry.variable_values(values)
+      problems = Core::Compiler.unknown_variables(values, @context.definition)
       raise ConfigurationError.new(problems) unless problems.empty?
 
-      LevelSet.write(@context.owner, @context.level_key) { |level| level.with(variables: values) }
+      Core::LevelSet.write(@context.owner, @context.level_key) { |level| level.with(variables: values) }
     end
 
     def inspect
