@@ -6,7 +6,7 @@ require 'api_recipes'
 ApiRecipes.configure do |config|
   # Give an array of paths to YAML files containing api configs. Files can contain ERB code.
   config.apis_files_paths = ['examples/config/github.yml.erb']
-  # Debug option that will print invoked urls to console before making the call
+  # Debug option that logs the URL of every request, at info level
   config.print_urls = true
 end
 

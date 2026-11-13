@@ -1161,7 +1161,7 @@ The [`examples`](examples) folder contains scripts that call public APIs:
 | `multiple_endpoints.rb` | two APIs from two files |
 | `authorization.rb` | token authorization |
 | `basic_auth.rb` | basic auth |
-| `authorization_with_default_headers.rb` | a token for one class |
+| `authorization_for_a_class.rb` | a token for one class |
 
 Run one from the root of the repository:
 
