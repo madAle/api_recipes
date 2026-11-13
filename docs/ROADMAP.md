@@ -3,16 +3,6 @@
 What each planned release contains. Design choices are explained in
 [decisions](decisions).
 
-## 2.10.4: maintenance
-
-Ready on `feature/test-foundation`. No behaviour change for existing code.
-
-- `logger` is a declared dependency. From Ruby 4.0 it is no longer a default gem.
-- `ApiRecipes.reset!` clears the global configuration and apis, for test suites.
-- The gem metadata links the changelog and the source code.
-- The README is a complete usage guide.
-- The test suite runs without network and on CI.
-
 ## 3.0: fixes that change behaviour
 
 Status: proposed, scope to be confirmed. Each item is a known defect of the 2.x

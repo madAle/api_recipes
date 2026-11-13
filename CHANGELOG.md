@@ -1,4 +1,4 @@
-## Unreleased
+## Version 2.10.4
 
 - Declares `logger` as a dependency: from Ruby 4.0 it is no longer a default gem.
 - Adds `ApiRecipes.reset!`, which clears the global configuration and the apis defined
