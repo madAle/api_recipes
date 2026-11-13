@@ -47,6 +47,8 @@ module ApiRecipes
     end
 
     def fill(object, only: nil, except: nil)
+      only = only && Array(only).map(&:to_sym)
+      except = except && Array(except).map(&:to_sym)
       data = self.data
       filled = case data
                when Hash
