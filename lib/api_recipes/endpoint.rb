@@ -28,7 +28,10 @@ module ApiRecipes
 
       own = definition.template.expand(args, endpoint: definition.full_name, &UPGRADE_WARNING)
       if own.empty?
-        @path = parent_path
+        # A root endpoint with an empty path is the address of the api, which
+        # ends with a slash; a nested one is the address of its parent.
+        root = definition.parent.is_a?(Internals::Definition::Api) && !parent_path.end_with?('/')
+        @path = root ? "#{parent_path}/".freeze : parent_path
       else
         path = "#{parent_path}/#{own}"
         path.squeeze!('/')
