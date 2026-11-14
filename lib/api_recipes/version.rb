@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module ApiRecipes
-  VERSION = '2.10.4'.freeze
+  VERSION = '3.0.0.beta1'
 end
