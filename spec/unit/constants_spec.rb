@@ -40,8 +40,11 @@ RSpec.describe 'constants of the ApiRecipes module' do
 
   it 'defines VERSION with the library, without Bundler loading the gemspec' do
     lib = File.expand_path('../../lib', __dir__)
+    # The gems come from the load path of this process, because without
+    # Bundler the new one finds only the gems installed for the whole Ruby.
+    paths = ([lib] + $LOAD_PATH.select { |path| File.directory?(path) }).uniq.flat_map { |path| ['-I', path] }
     out, err, status = Bundler.with_unbundled_env do
-      Open3.capture3(RbConfig.ruby, '-I', lib, '-e', 'require "api_recipes"; print ApiRecipes::VERSION')
+      Open3.capture3(RbConfig.ruby, *paths, '-e', 'require "api_recipes"; print ApiRecipes::VERSION')
     end
     expect([err, status.success?]).to eq(['', true])
     expect(out).to eq(File.read(File.join(lib, 'api_recipes/version.rb'))[/'([^']+)'/, 1])
