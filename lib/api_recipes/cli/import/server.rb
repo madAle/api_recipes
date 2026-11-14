@@ -109,14 +109,14 @@ module ApiRecipes
         def with_defaults(text, what)
           text.gsub(VARIABLE) do
             name = Regexp.last_match(1)
-            default = @declared[name].is_a?(Hash) ? @declared[name]['default'] : nil
+            default = @declared[name].is_a?(Hash) ? Import.text(@declared[name]['default']) : nil
             if default.nil?
               raise Error, "#{@where}: the variable #{Import.shown(name)} of the #{what} has no default"
             end
 
             @warnings << "the variable #{Import.shown(name)} of the #{what} was replaced with its default " \
                          "#{Import.shown(default)}: the gem has no variables there"
-            default.to_s
+            default
           end
         end
 
@@ -154,7 +154,8 @@ module ApiRecipes
             return {}
           end
           out = {}
-          out['default'] = declared['default'].to_s unless declared['default'].nil?
+          default = Import.text(declared['default'])
+          out['default'] = default unless default.nil?
           description = Import.one_line(declared['description'])
           out['description'] = description unless description.empty?
           out

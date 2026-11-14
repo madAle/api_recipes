@@ -44,12 +44,13 @@ module ApiRecipes
           end
 
           # Dates are the only values beyond plain YAML that a description
-          # written by hand contains. An alias is refused: a description comes
-          # from someone else, and aliases let a small file grow without limit.
+          # written by hand contains. Aliases are accepted, since tools write
+          # them for repeated parts: an alias is the same object, not a copy,
+          # and the importer never expands or prints a mapping or a list.
           def parse_yaml(text)
-            YAML.safe_load(text, permitted_classes: [Date, Time], aliases: false)
+            YAML.safe_load(text, permitted_classes: [Date, Time], aliases: true)
           rescue Psych::BadAlias
-            raise Error, 'the description uses a YAML alias: expand the aliases, or convert the file to JSON'
+            raise Error, 'the description uses a YAML alias that is not defined'
           rescue Psych::DisallowedClass
             raise Error, 'the description contains something that is not plain data'
           rescue Psych::SyntaxError => e
@@ -58,7 +59,7 @@ module ApiRecipes
 
           def check_version(data)
             if data.key?('swagger')
-              raise Error, "Swagger #{data['swagger'].to_s[0, 10].gsub(/[^\d.]/, '')} is not supported: " \
+              raise Error, "Swagger #{Import.text(data['swagger']).to_s[0, 10].gsub(/[^\d.]/, '')} is not supported: " \
                            'convert it to OpenAPI 3 first'
             end
             version = data['openapi']
@@ -103,8 +104,7 @@ module ApiRecipes
 
         def text_of(key)
           info = @root['info']
-          value = info.is_a?(Hash) ? info[key] : nil
-          value.nil? ? nil : value.to_s
+          Import.text(info.is_a?(Hash) ? info[key] : nil)
         end
 
         # The pieces of a JSON pointer: the %XX of the URL fragment first, then

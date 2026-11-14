@@ -115,8 +115,22 @@ describe ApiRecipes::CLI::Import::Document do
     end
   end
 
-  it 'refuses a YAML alias, a Ruby object and a file that is not a mapping' do
-    expect { parse("openapi: 3.0.3\ninfo: &a {title: T}\nx-copy: *a\n") }.to raise_error(error, /alias/)
+  it 'reads YAML aliases, which are the same object and not a copy' do
+    doc = parse("openapi: 3.0.3\ninfo: &a {title: T}\nx-copy: *a\n")
+    expect(doc.root['x-copy']).to equal(doc.root['info'])
+    expect { parse("openapi: 3.0.3\nx-copy: *missing\n") }.to raise_error(error, /alias that is not defined/)
+  end
+
+  it 'never turns a mapping or a list of the description into text' do
+    levels = (1..40).map { |n| "x#{n}: &x#{n} [*x#{n - 1}, *x#{n - 1}, *x#{n - 1}, *x#{n - 1}]" }
+    doc = parse("openapi: 3.0.3\nx0: &x0 [lol]\n#{levels.join("\n")}\ninfo: {title: *x40, version: *x40}\nswagger-like: *x40\n")
+    expect([doc.title, doc.version]).to eq([nil, nil])
+    expect(doc.inspect.length).to be < 200
+    expect(ApiRecipes::CLI::Import.shown(doc.root['x40'])).to eq('a list')
+    expect(ApiRecipes::CLI::Import.one_line(doc.root['x40'])).to eq('')
+  end
+
+  it 'refuses a Ruby object and a file that is not a mapping' do
     expect { parse("--- !ruby/object:Object {}\n") }.to raise_error(error, /plain data/)
     expect { parse("openapi: 3.0.3\nx-o: !ruby/object:OpenStruct {a: 1}\n") }.to raise_error(error, /plain data/)
     expect { parse("- a\n- b\n") }.to raise_error(error, /mapping/)

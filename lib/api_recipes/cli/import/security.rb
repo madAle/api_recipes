@@ -93,6 +93,14 @@ module ApiRecipes
           { 'type' => scheme['in'], 'name' => scheme['name'] }
         end
 
+        # The scheme names of a list of requirements: what two of them are
+        # compared by, without walking the whole structure.
+        def names_of(requirements)
+          return nil unless requirements.is_a?(Array)
+
+          requirements.map { |requirement| requirement.is_a?(Hash) ? requirement.keys.map { |key| Import.text(key) } : nil }
+        end
+
         def unsupported(what)
           @warnings << "#{what} is not supported: no auth was written for it"
           nil
@@ -102,13 +110,14 @@ module ApiRecipes
           paths = @document.root['paths']
           return unless paths.is_a?(Hash)
 
+          chosen = names_of(global)
           count = paths.sum do |path, item|
             item = @document.resolve(item, "paths.#{Import.shown(path)}")
             next 0 unless item.is_a?(Hash)
 
             METHODS.count do |method|
               operation = item[method]
-              operation.is_a?(Hash) && operation.key?('security') && operation['security'] != global
+              operation.is_a?(Hash) && operation.key?('security') && names_of(operation['security']) != chosen
             end
           end
           return if count.zero?
