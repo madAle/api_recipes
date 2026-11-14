@@ -14,8 +14,19 @@ module ApiRecipes
         text = value.to_s.scrub('?').gsub(/[^[:print:]]/, '?')
         "'#{text.length > 80 ? "#{text[0, 80]}..." : text}'"
       end
+
+      # Free text of the description (a title, a description, an operationId)
+      # as it may appear in the recipe: one line, without control characters
+      # and without the ERB delimiters, which a recipe file would evaluate.
+      def self.one_line(value, limit = 200)
+        text = value.to_s.scrub('?').gsub(/[[:cntrl:]\s]+/, ' ')
+        text = text.gsub(/<%|%>/, '') while text.match?(/<%|%>/)
+        text.strip[0, limit]
+      end
     end
   end
 end
 
 require 'api_recipes/cli/import/document'
+require 'api_recipes/cli/import/server'
+require 'api_recipes/cli/import/security'
