@@ -23,7 +23,7 @@ end
 # Copy the generated string and set the env variable
 # e.g.  GITHUB_OAUTH_TOKEN=your_token bundle exec ruby examples/authorization.rb
 # Credentials are set on the api of the ApiRecipes module
-ApiRecipes.github.authorization = "token #{ENV['GITHUB_OAUTH_TOKEN']}"
+ApiRecipes.github.authorization = "token #{ENV.fetch('GITHUB_OAUTH_TOKEN')}"
 
 # From now on every github's api request will be authenticated through the provided
 # auth, including those made by MyFancyClass and its instances

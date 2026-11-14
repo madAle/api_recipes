@@ -10,46 +10,60 @@
 Describe an HTTP API once, in YAML, and call it with plain Ruby methods.
 
 ```ruby
-ApiRecipes.github.users.repos('octocat').run.data
+ApiRecipes.github.users.repos('octocat') do |response|
+  response.data.each { |repo| puts repo['name'] }
+end
 # GET https://api.github.com/users/octocat/repos
-# => [{ "name" => "Hello-World", ... }, ...]
+# prints "Hello-World" and the other repository names
 ```
 
 There are no client classes to write. Hosts, paths, verbs, timeouts and expected
 status codes live in a configuration file, and ApiRecipes turns them into a chain
 of methods. Requests are made with [http.rb](https://github.com/httprb/http).
 
+This page describes version 3.0, which is in pre-release. The documentation of
+version 2 is the
+[README of the `v2.10.4` tag](https://github.com/madAle/api_recipes/blob/v2.10.4/README.md).
+Coming from version 2? Read [UPGRADING.md](UPGRADING.md) first.
+
 ## Contents
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Describing an API](#describing-an-api)
+- [Variables](#variables)
 - [Loading the configuration](#loading-the-configuration)
 - [Where an API is available](#where-an-api-is-available)
 - [Making requests](#making-requests)
+- [Options for one chain: `with`](#options-for-one-chain-with)
+- [Reaching an endpoint by name: `[]`](#reaching-an-endpoint-by-name-)
 - [Reading the response](#reading-the-response)
 - [Deciding what counts as success](#deciding-what-counts-as-success)
 - [Handling errors](#handling-errors)
 - [Authorization](#authorization)
 - [Logging and debugging](#logging-and-debugging)
+- [Inspecting an API](#inspecting-an-api)
 - [Recipes](#recipes)
+- [Security](#security)
 - [Options reference](#options-reference)
 - [Good to know](#good-to-know)
 - [Runnable examples](#runnable-examples)
 - [Compatibility](#compatibility)
+- [Upgrading from 2.x](#upgrading-from-2x)
 - [Development](#development)
 
 ## Installation
 
-Add the gem to your Gemfile and run `bundle install`:
+Add the gem to your Gemfile and run `bundle install`. While 3.0 is in
+pre-release, Bundler installs it only when you ask for a pre-release version:
 
 ```ruby
-gem 'api_recipes'
+gem 'api_recipes', '>= 3.0.0.beta1'
 ```
 
 Or install it directly:
 
-    $ gem install api_recipes
+    $ gem install api_recipes --pre
 
 ## Quick start
 
@@ -83,7 +97,8 @@ end
 response = ApiRecipes.github.users.show('octocat').run
 
 response.code          # => 200
-response.data['name']  # => "The Octocat"
+response.data['name']
+# => "The Octocat"
 ```
 
 Each endpoint in the file becomes a method, arguments fill the `:placeholders`
@@ -113,6 +128,8 @@ github:
         show:                           # GET  /repos/:owner/:repo
           path: ''
         contributors:                   # GET  /repos/:owner/:repo/contributors
+        contents:                       # GET  /repos/:owner/:repo/contents/*path
+          path: /contents/*path
         issues:                         # GET  /repos/:owner/:repo/issues
           endpoints:
             create:                     # POST /repos/:owner/:repo/issues
@@ -124,6 +141,12 @@ github:
       endpoints:
         repositories:                   # GET  /search/repositories
 ```
+
+The configuration is checked when it is loaded. A mistake, such as an unknown
+option, a verb that does not exist or a negative timeout, raises
+`ApiRecipes::ConfigurationError`. Its message lists every problem at once, so you
+fix them in one go. Keys that start with `x-` are free: ApiRecipes ignores them,
+and you can use them for your own notes.
 
 ### How a path is built
 
@@ -152,6 +175,31 @@ ApiRecipes.github.repos('rails', 'rails').contributors.url.to_s
 ```
 
 The wrong number of values raises `ApiRecipes::PathParamsMismatch`.
+
+ApiRecipes encodes each value for you, so a value cannot add segments, a query
+string or a fragment to the URL:
+
+```ruby
+ApiRecipes.github.users.show('Jane Doe').url.to_s
+# => "https://api.github.com/users/Jane%20Doe"
+
+ApiRecipes.github.users.show('a/b').url.to_s
+# => "https://api.github.com/users/a%2Fb"
+```
+
+Do not encode values yourself: `%2F` would be sent as `%252F`. A value that is
+`nil`, empty, `.` or `..` raises `ApiRecipes::InvalidPathParameter`.
+
+When a value really is several segments, such as the path of a file, write the
+placeholder with a `*`. Each segment is encoded and the slashes stay:
+
+```ruby
+ApiRecipes.github.repos('rails', 'rails').contents('lib/rails.rb').url.to_s
+# => "https://api.github.com/repos/rails/rails/contents/lib/rails.rb"
+```
+
+A `*name` placeholder works only at the start of a segment, and a `:` that must
+stay in the path is written `\:`.
 
 ### Endpoints that only group others
 
@@ -182,11 +230,113 @@ ApiRecipes.billing.invoices.show(42).url.to_s
 # => "http://billing_service:3000/api/v1/invoices/42"
 ```
 
+`host` is a plain host name: no scheme, port, path or spaces. Use `protocol` and
+`port` for those. A `base_url` cannot contain a `:name` or `*name` placeholder;
+for a value that changes, use a [variable](#variables).
+
 All options are listed in the [options reference](#options-reference).
+
+## Variables
+
+A variable is a `{name}` placeholder in the `host`, the `base_url` or the value
+of a header. Use it for what changes from one account or one environment to the
+next, such as the address of a shop. Declare the variables of the API, with an
+optional `default` and `description`:
+
+```yaml
+shopify:
+  variables:
+    shop:
+      description: the part of the shop address before .myshopify.com
+    api_version:
+      default: '2026-10'
+  host: '{shop}.myshopify.com'
+  base_url: admin/api/{api_version}
+  auth:
+    type: header
+    name: X-Shopify-Access-Token
+  endpoints:
+    products:
+```
+
+A variable without a value and without a default raises
+`ApiRecipes::MissingVariable` when the request is built. Give it a value in the
+way that fits your code. The nearest one wins: the chain (`with`), then the
+object, then its class, then `ApiRecipes.shopify`, then the default of the file.
+
+```ruby
+ApiRecipes.shopify.with(variables: { shop: 'acme' }).products.url.to_s
+# => "https://acme.myshopify.com/admin/api/2026-10/products"
+
+ApiRecipes.shopify.variables = { shop: 'acme' }
+ApiRecipes.shopify.products.url.to_s
+# => "https://acme.myshopify.com/admin/api/2026-10/products"
+
+ApiRecipes.shopify.with(variables: { api_version: '2027-01' }).products.url.to_s
+# => "https://acme.myshopify.com/admin/api/2027-01/products"
+```
+
+For one class, or for the objects of a class:
+
+```ruby
+class Store
+  include ApiRecipes
+  api :shopify, variables: { shop: 'acme' }
+end
+
+Store.shopify.products.url.to_s
+# => "https://acme.myshopify.com/admin/api/2026-10/products"
+
+store = Store.new
+store.shopify.variables = { shop: 'zed' }
+store.shopify.products.url.to_s
+# => "https://zed.myshopify.com/admin/api/2026-10/products"
+```
+
+The options that a class gives to `api` can use the variables of the API, as in
+`api :shopify, host: '{shop}.staging.example.test'`. When an API exists only in
+a class, the names given in `variables:` are its variables, so each one gets a
+value there, and an object or `with` can give another:
+
+```ruby
+class Sandbox
+  include ApiRecipes
+  api :sandbox, host: '{tenant}.sandbox.example.test', variables: { tenant: 'demo' },
+                endpoints: { ping: nil }
+end
+
+Sandbox.sandbox.with(variables: { tenant: 'acme' }).ping.url.to_s
+# => "https://acme.sandbox.example.test/ping"
+```
+
+Or for everybody, when the application starts:
+
+```ruby
+ApiRecipes.configure do |config|
+  config.variables = { shopify: { shop: 'acme' } }
+end
+```
+
+ApiRecipes never reads the environment for you: if the shop comes from an
+environment variable, read it in your code and pass it in.
+
+A value is checked for the place where it ends up. In a `host` it can contain
+only letters, digits, dots, hyphens and underscores. In a `base_url` it is
+encoded like a path parameter. In a header it cannot contain a line break or
+another control character. Anything else raises `ApiRecipes::InvalidVariable`.
+A name that the API does not declare raises `ApiRecipes::ConfigurationError` at
+every level, so a misspelled name is never ignored.
+`variables` without an assignment returns the values set at the level you call
+it on. Assigning `nil` clears them. At the global level (`ApiRecipes.shopify`)
+that includes the values given with `config.variables`, which are the same level;
+a default declared in the file applies again.
+The values given with `config.variables` are applied again at every `configure`,
+so a value assigned directly with `ApiRecipes.shopify.variables = ...` under the
+same name lasts only until the next `configure`.
 
 ## Loading the configuration
 
-Configure ApiRecipes once, before the first request.
+Configure ApiRecipes once, when your application starts.
 
 ### From YAML files
 
@@ -197,18 +347,26 @@ end
 ```
 
 A file can describe one API or several. If two files describe the same API, the
-later one replaces the earlier one entirely.
+later one replaces the earlier one entirely. The same holds for the sources
+together: they are applied in the order they are assigned, so assigning
+`apis_configs` after `apis_files_paths` lets the Hash replace the file.
+
+A file that is missing, empty, not valid YAML or not valid UTF-8 raises
+`ApiRecipes::RecipeFileError`, which names the file. A file called
+`something.recipe.yml` is refused: that name is kept for another purpose.
 
 Files are evaluated with ERB before being parsed, so values can come from the
 environment:
 
 ```yaml
-github:
-  host: <%= ENV.fetch('GITHUB_HOST', 'api.github.com') %>
-  timeout: <%= ENV.fetch('GITHUB_TIMEOUT', 3) %>
+billing:
+  host: <%= ENV.fetch('BILLING_HOST', 'billing.example.com') %>
+  timeout: <%= ENV.fetch('BILLING_TIMEOUT', 3) %>
   endpoints:
-    users:
+    invoices:
 ```
+
+Only files you wrote and trust should be loaded: ERB runs the Ruby code in them.
 
 ### From a Hash
 
@@ -225,16 +383,28 @@ ApiRecipes.configure do |config|
 end
 ```
 
-Keys can be strings or symbols.
+Keys can be strings or symbols, but not both for the same option.
+
+If the configuration has a problem, `configure` raises and the previous
+configuration stays active.
 
 ## Where an API is available
 
 ### On the `ApiRecipes` module
 
-Every configured API is a method of the module:
+Every configured API is a method of the module, and `ApiRecipes[...]` reaches the
+same API by name, which is handy when the name is in a variable:
 
 ```ruby
 ApiRecipes.github.users.run
+ApiRecipes[:github].users.run
+```
+
+`ApiRecipes.apis` lists the names:
+
+```ruby
+ApiRecipes.apis.inspect
+# => "[:github, :billing, :shopify]"
 ```
 
 ### In your classes
@@ -260,6 +430,20 @@ class GithubProfile
   end
 end
 ```
+
+`api :github, as: :gh` gives the method another name. An API is declared once in
+a class and its ancestors, modules included: declaring it twice raises
+`ApiRecipes::ApiNameClashError`. If a subclass needs other options, use
+[`with`](#options-for-one-chain-with). A singleton class cannot declare an API
+(`ApiRecipes::ApiNameClashError`): declare it in a module and `extend` the object
+with it.
+
+An API declared in a module is available as an instance method of every class
+that includes the module, and as `Module.name_of_api` on the module itself. The
+including class gets no class-level method.
+
+A credential or a variable set through one declaration is never seen by another
+declaration of the same API name.
 
 ### With settings of its own
 
@@ -289,6 +473,10 @@ Forecast.weather.forecast('rome').url.to_s
 # => "https://api.weather.test/forecast/rome"
 ```
 
+The options are checked like the ones in a file. When a class changes the
+destination, with its own `host`, `protocol` or `port`, it needs a credential of
+its own: see [Authorization](#authorization).
+
 ## Making requests
 
 ### `run` or a block
@@ -308,7 +496,7 @@ end
 ```
 
 Use `run` when you need the returned value: the block form returns the endpoint,
-not the response.
+not the response. `run` with a block yields the response and returns it.
 
 ### Query string, body and headers
 
@@ -323,6 +511,7 @@ They are the options of
 | `form:` | a form-encoded body |
 | `body:` | a raw body |
 | `headers:` | extra headers for this request only |
+| `follow:` | follow redirects: `true`, or a Hash with `strict`, `max_hops` and `on_redirect` |
 
 ```ruby
 # GET /search/repositories?q=api%20language:ruby&per_page=5
@@ -338,6 +527,16 @@ ApiRecipes.github.repos('rails', 'rails').issues.create(json: { title: 'Found a 
 ApiRecipes.github.users.show('octocat', headers: { 'X-Request-Id' => 'abc123' }).run
 ```
 
+An option http.rb does not know raises its own `ArgumentError`. `follow` accepts
+`true`, `false`, `nil` or a Hash with the keys above, and anything else raises
+`ApiRecipes::ConfigurationError` before the request is sent.
+
+When a redirect leads to another origin (another scheme, host or port), the
+`Authorization` header, the header named by `auth.name`, the `Cookie` header and
+the credential query parameter are not sent there, wherever they came from.
+Cookies that a server sets during a chain of redirects are not carried to the
+next hop.
+
 ### Verbs
 
 The verb is part of the endpoint description (`verb: post`, `put`, `patch`,
@@ -349,6 +548,59 @@ The verb is part of the endpoint description (`verb: post`, `put`, `patch`,
 ApiRecipes.github.users.repos('octocat').url.to_s
 # => "https://api.github.com/users/octocat/repos"
 ```
+
+`url` sends nothing and has no query string. For an endpoint with `route: no` it
+returns `nil`.
+
+## Options for one chain: `with`
+
+`with` returns a copy of the API with some options changed. The copy is used for
+the chain that follows it, and nothing is stored: the API itself does not change.
+
+```ruby
+ApiRecipes.github.with(host: 'github.example.com').users.show('octocat').url.to_s
+# => "https://github.example.com/users/octocat"
+```
+
+On an API, `with` takes `protocol`, `host`, `port`, `base_url`, `timeout`,
+`on_bad_code`, `mime_type`, `verify_with`, `default_headers`, `variables`,
+`authorization` and `basic_auth`. The values are checked like the ones in a file,
+and an option that is not in this list raises `ApiRecipes::ConfigurationError`.
+
+On an endpoint, `with` takes `timeout`, `on_bad_code`, `ok_code`, `mime_type` and
+`verify_with`, for that request only:
+
+```ruby
+ApiRecipes.github.users.show('octocat').with(timeout: 10, ok_code: [200, 304]).run
+```
+
+Giving an option as `nil` drops the value given before it in the same chain.
+`default_headers` given to `with` are added to the ones already configured:
+
+```ruby
+ApiRecipes.github.with(default_headers: { 'X-Request-Id' => 'abc123' }).users.run
+```
+
+The options of a chain are one set. A credential given to `with` is sent
+wherever that chain goes, also to a `host` given by another `with` of the same
+chain: give them together only when the credential is meant for that host.
+
+The other way of changing an API for a while is `api :name, options` in a class.
+
+## Reaching an endpoint by name: `[]`
+
+Every endpoint can be reached with `[]`, with a name that is a Symbol or a
+String. The arguments after the name are the path parameters:
+
+```ruby
+ApiRecipes.github[:users][:show, 'octocat'].url.to_s
+# => "https://api.github.com/users/octocat"
+```
+
+It is the same call as `github.users.show('octocat')`. Use it when the name is
+in a variable, and for an endpoint whose name is already a method (see
+[Good to know](#good-to-know)). A name that does not exist raises
+`ApiRecipes::UnknownEndpoint`, and its message lists the available names.
 
 ## Reading the response
 
@@ -370,19 +622,63 @@ anything that is not JSON, or for an empty body, it raises `HTTP::Error`: read
 `response.body.to_s` instead. If a server sends JSON with the wrong
 `Content-Type`, set `mime_type: application/json` on the endpoint or on the API.
 
+`response.success?` tells whether the response passed the rule of the endpoint
+(see the next section). It is the way to check a response when `on_bad_code` is
+`ignore`.
+
+`response.uri` is the address that was requested. When the API sends its
+credential in the query string, the parameter is left out of it.
+
+### Filling an object
+
+`fill` copies the data into an object, through its public writers:
+
+```ruby
+class Profile
+  attr_accessor :login, :name
+end
+
+profile = ApiRecipes.github.users.show('octocat').run.fill(Profile.new)
+profile.login
+# => "octocat"
+
+ApiRecipes.github.users.show('octocat').run.fill(Profile.new, only: :login).name.nil?
+# => "true"
+```
+
+Given an Array, `fill` takes a class and returns one new object per element. Keys
+that the object has no writer for, or that are not plain attribute names, are
+skipped. `only:` and `except:` take one name or a list, as Symbols or Strings.
+An error raised by a writer is not hidden.
+
+With a block, `fill` calls it with the filled object (or the list of objects),
+the parsed data and the status of the response, and still returns the filled
+object:
+
+```ruby
+ApiRecipes.github.users.show('octocat').run.fill(Profile.new) do |profile, data, status|
+  puts "#{status}: #{profile.login}"
+end
+```
+
 ## Deciding what counts as success
 
 By default any 2xx status is a success and anything else raises
 `ApiRecipes::ResponseCodeNotAsExpected`. Three options change that, for one
 endpoint or for the whole API.
 
-**Expect one exact status** with `ok_code`:
+**Expect given statuses** with `ok_code`, one status or a list:
 
 ```yaml
 create:
   path: ''
   verb: post
   ok_code: 201        # a 200 is now an error
+```
+
+```yaml
+refresh:
+  ok_code: [200, 304]
 ```
 
 **Never raise** with `on_bad_code: ignore`, and inspect the response yourself:
@@ -394,7 +690,7 @@ health:
 
 ```ruby
 response = ApiRecipes.status.health.run
-response.status.success?   # => false, and no exception
+response.success?   # => false, and no exception
 ```
 
 **Decide in Ruby** with `verify_with`, the name of a method of the object that
@@ -425,7 +721,8 @@ end
 ```
 
 The method can be private. It is looked up on the caller, so `verify_with` is
-meant for APIs used from a class or an instance.
+meant for APIs used from a class or an instance. A nested endpoint that has no
+`verify_with` of its own uses the one of its parent.
 
 ## Handling errors
 
@@ -444,25 +741,40 @@ rescue HTTP::ConnectionError
 end
 ```
 
-> **Rescue ApiRecipes errors by name.** They inherit from `Exception`, not from
-> `StandardError`, so a bare `rescue` or `rescue => e` does not catch them.
+Every error of ApiRecipes inherits from `ApiRecipes::Error`, which is a
+`StandardError`. A bare `rescue` catches them, so rescue by name when you want
+to treat them differently. The message of an error never contains the response
+body, a credential or a query string: the body is on `error.response`.
 
 | Error | Raised when |
 | --- | --- |
 | `ApiRecipes::ResponseCodeNotAsExpected` | the response is not a success; has `response`, `path` and `expected_code` |
 | `ApiRecipes::PathParamsMismatch` | an endpoint gets the wrong number of path parameters |
+| `ApiRecipes::InvalidPathParameter` | a path parameter is `nil`, empty, `.` or `..` |
 | `ApiRecipes::NoRouteExists` | `run` is called on an endpoint with `route: no` |
-| `ApiRecipes::ApiNameClashError` | `api :name` is declared in a class that already has a method `name` |
+| `ApiRecipes::UnknownEndpoint` | `[]` gets a name that does not exist |
+| `ApiRecipes::MissingVariable` | a variable has no value and no default |
+| `ApiRecipes::InvalidVariable` | the value of a variable is not allowed where it is used |
+| `ApiRecipes::InvalidCredential` | a credential is not a String, or contains a line break or a control character |
+| `ApiRecipes::CredentialOriginMismatch` | a request would send a credential to an origin other than the one it was set for |
+| `ApiRecipes::InvalidUrl` | the address that would be contacted is not the one that was validated |
+| `ApiRecipes::ConfigurationError` | the configuration or the options of `with` or `follow` are not valid; has `errors`, the list of problems |
+| `ApiRecipes::RecipeFileError` | a configuration file cannot be read; a kind of `ConfigurationError` that names the file |
+| `ApiRecipes::ApiNameClashError` | an API is declared twice in a class hierarchy, or `api :name` names a method the class already has |
 | `ApiRecipes::ApiConfigIsNotAnHash` | the second argument of `api` is not a Hash |
-| `ApiRecipes::RouteNameClashWithExistentMethod` | a nested endpoint has the name of an existing method, such as `url`, `run` or `name` |
-| `HTTP::TimeoutError`, `HTTP::ConnectionError` | http.rb network errors; these are `StandardError`s |
+| `HTTP::TimeoutError`, `HTTP::ConnectionError` | http.rb network errors |
 
 ## Authorization
 
-Credentials are set on the API of the `ApiRecipes` module. They apply to every
-request to that API, including those made from classes that declare it.
+A credential belongs to a level, and a request uses the nearest one. From the
+nearest to the farthest:
 
-**A token**, sent as the `Authorization` header:
+1. the chain, with `with(authorization: ...)` or `with(basic_auth: ...)`
+2. the object that makes the call
+3. its class, then the classes and modules it inherits from
+4. the API of the `ApiRecipes` module
+
+**A token**, sent as the `Authorization` header, as it is written:
 
 ```ruby
 ApiRecipes.github.authorization = "Bearer #{ENV.fetch('GITHUB_TOKEN')}"
@@ -474,37 +786,186 @@ ApiRecipes.github.authorization = "Bearer #{ENV.fetch('GITHUB_TOKEN')}"
 ApiRecipes.github.basic_auth = { user: 'me', pass: 'secret' }
 ```
 
-**A different token for one class**, through its own default headers:
+**A different token for one class.** It applies to the class and its instances:
 
 ```ruby
 class AdminClient
   include ApiRecipes
-  api :github, default_headers: { 'Authorization' => "Bearer #{ENV.fetch('ADMIN_TOKEN')}" }
+  api :github
+end
+
+AdminClient.github.authorization = "Bearer #{ENV.fetch('ADMIN_TOKEN')}"
+```
+
+**A different token for one object**, for example one object per user:
+
+```ruby
+class UserRepos
+  include ApiRecipes
+  api :github
+
+  def initialize(user)
+    github.authorization = "Bearer #{user.github_token}"
+  end
 end
 ```
 
-**A different token for one request**, for example the token of the current user:
+**A different token for one chain**, for example the token of the current user:
 
 ```ruby
-ApiRecipes.github.users.repos('octocat', headers: { 'Authorization' => "Bearer #{user.token}" }).run
+ApiRecipes.github.with(authorization: "Bearer #{user.token}").users.repos('octocat').run
 ```
 
-> Set credentials on `ApiRecipes.github`, not on `MyClass.github`. The second form
-> returns a new object at every call, so the value is lost.
+The reader returns what the nearest level assigned:
+
+```ruby
+ApiRecipes.github.authorization = 'Bearer abc'
+ApiRecipes.github.authorization
+# => "Bearer abc"
+```
+
+**No credential.** Assigning `nil` means "send none" and ends the search: it
+does not fall back to a level farther away. The same goes for
+`with(authorization: nil)`:
+
+```ruby
+AdminClient.github.authorization = nil               # this class sends none
+ApiRecipes.github.with(authorization: nil).users.run  # this chain sends none
+```
+
+`authorization=`, `basic_auth=` and `variables=` change the level of the object
+they are called on. They raise on an API that `with` returned: use
+`with(authorization: ...)` there.
+
+A credential is valid only for the origin it was set for: the scheme, the host
+and the port. If a nearer level changes the destination (its own `host`,
+`protocol` or `port`, or a variable of the host) and does not set a credential of
+its own, the request raises `ApiRecipes::CredentialOriginMismatch` instead of
+sending the credential somewhere else. Set the credential where you change the
+destination:
+
+```ruby
+class EnterpriseClient
+  include ApiRecipes
+  api :github, host: 'github.example.com'
+end
+
+EnterpriseClient.github.authorization = "Bearer #{ENV.fetch('ENTERPRISE_TOKEN')}"
+```
+
+An API or an endpoint kept in a variable keeps the destination it was created
+with. If a later `configure` moves the API to another origin, a request made
+through it raises the same error instead of sending a credential of the levels
+to the old origin: ask `ApiRecipes` (or the class, or the object) for the API
+again. A `configure` that does not move the origin changes nothing for it.
+
+The readers `authorization` and `basic_auth` return the nearest credential that
+was assigned. They do not apply that check: only a request does.
+
+A credential with a line break or another control character raises
+`ApiRecipes::InvalidCredential`. The message never contains the value. A client
+restored from a serialized form has no credential.
+
+An API can say where its credential goes with `auth`:
+
+| `auth.type` | The credential assigned with `authorization=` goes |
+| --- | --- |
+| none of these, or `none`, `bearer`, `basic` | in the `Authorization` header, as it is written |
+| `header`, with a `name` | in the header called `name` |
+| `query`, with a `name` | in the query parameter called `name` |
+
+```yaml
+weather:
+  host: api.weather.test
+  auth:
+    type: query
+    name: api_key
+  endpoints:
+    forecast:
+```
+
+Basic auth cannot be sent to an API of type `header` or `query`: the request
+raises `ApiRecipes::InvalidCredential`. Assign the value with `authorization=`.
+
+A credential written in `headers:` or in `default_headers` is sent as it is.
+ApiRecipes does not check its origin, so prefer the levels above.
 
 ## Logging and debugging
 
 ```ruby
 ApiRecipes.configure do |config|
-  config.logger = Rails.logger          # any Logger; set it before the files
-  config.print_urls = true              # print every URL to STDOUT as it is built
+  config.logger = Rails.logger          # any Logger
+  config.print_urls = true              # log the URL of every request
   config.apis_files_paths = ['config/apis/github.yml']
 end
 ```
 
-Without `logger`, ApiRecipes logs to STDOUT at debug level. `config.log_to`
-(a path or an IO) and `config.log_level` (`:debug`, `:info`, `:warn`, `:error`,
-`:fatal`) change that without building a Logger.
+Without `logger`, ApiRecipes logs to STDERR at warn level, so normal use prints
+nothing and a problem shows up. `config.log_to` (a path or an IO) and
+`config.log_level` (`:debug`, `:info`, `:warn`, `:error`, `:fatal`) change that
+without building a Logger. Without `log_level`, the `LOG_LEVEL` environment
+variable is used, in any letter case; a value that is not a level is ignored.
+
+- The level of the default logger is, in this order: `log_level`; the `LOG_LEVEL`
+  variable; info when `print_urls` is on; otherwise warn. A level you chose is
+  never lowered by `print_urls`. A logger you provide keeps its own level.
+- `print_urls = true` logs the URL of each request at info level.
+- At debug level, every request logs one line: the verb, the URL, the status and
+  the time it took. A response with a bad status that raises is logged too. A
+  request whose connection fails or times out logs nothing.
+- A log line never contains a query string, a header, a body or a credential.
+- `ApiRecipes.logger` is the logger in use, and `ApiRecipes.configuration` is the
+  current configuration. Change the configuration only inside `configure`.
+
+At the start, ApiRecipes logs one warning for each endpoint whose name cannot
+become a method, when the configuration is loaded (see
+[Good to know](#good-to-know)).
+
+It also warns, once for each endpoint, when the value of a path parameter
+contains a `/` (it is sent as `%2F`) or looks already percent-encoded (it is
+encoded again). The warning names the endpoint and never the value.
+`config.upgrade_warnings = false` turns these two warnings off.
+
+## Inspecting an API
+
+`inspect` is made for the console. It shows the name and the origin, and never a
+credential, a header, a body or a query string:
+
+```ruby
+ApiRecipes.github.inspect
+# => "#<ApiRecipes::Api github https://api.github.com endpoints: users, repos, search>"
+
+ApiRecipes.github.users.show('octocat').inspect
+# => "#<ApiRecipes::Endpoint github.users.show GET https://api.github.com/users/octocat>"
+```
+
+`definition` returns a read-only description of an API or of an endpoint:
+
+```ruby
+ApiRecipes.github.definition.host
+# => "api.github.com"
+
+ApiRecipes.github.users.show('octocat').definition.full_path
+# => "/users/:login"
+```
+
+For an API: `name`, `protocol`, `host`, `port`, `base_url`, `timeout`,
+`on_bad_code`, `mime_type`, `verify_with`, `default_headers`, `auth`,
+`variables`, `endpoints`, `routes` and `to_h`. For an endpoint: `name`,
+`full_name`, `path`, `full_path`, `path_params`, `verb`, `route?`, `ok_code`,
+`timeout`, `on_bad_code`, `mime_type`, `verify_with`, `parent`, `endpoints` and
+`to_h`. A definition never holds a credential assigned with `authorization=`,
+`basic_auth=` or `with`, nor the value of a variable. It does return the
+`default_headers` as they are configured, so do not write a credential there if
+you pass definitions around; `to_h` and `inspect` hide the values of the headers.
+
+`routes` lists every endpoint that can be called, with the call that reaches it:
+
+```ruby
+route = ApiRecipes.github.definition.routes.find { |r| r.call.end_with?('.contributors') }
+[route.call, route.verb, route.url].join(' ')
+# => "github.repos(owner, repo).contributors get https://api.github.com/repos/:owner/:repo/contributors"
+```
 
 ## Recipes
 
@@ -525,11 +986,11 @@ ApiRecipes.github.authorization = "Bearer #{Rails.application.credentials.github
 Keep one file and let ERB pick the values:
 
 ```yaml
-billing:
-  protocol: <%= ENV.fetch('BILLING_PROTOCOL', 'https') %>
-  host: <%= ENV.fetch('BILLING_HOST', 'billing.example.com') %>
+reports:
+  protocol: <%= ENV.fetch('REPORTS_PROTOCOL', 'https') %>
+  host: <%= ENV.fetch('REPORTS_HOST', 'reports.example.com') %>
   endpoints:
-    invoices:
+    monthly:
 ```
 
 ### Every page of a list
@@ -559,19 +1020,22 @@ response.code            # => 201
 response.data['number']  # => 1347
 ```
 
-### A token per user in a multi-threaded application
+### A token per user
 
-Credentials set with `authorization=` are shared by the whole process. When each
-user has a token, pass it with the request instead:
+Give each user's object its own credential, or pass it with the chain, and the
+users never see each other's token:
 
 ```ruby
 class UserRepos
+  include ApiRecipes
+  api :github
+
   def initialize(user)
-    @headers = { 'Authorization' => "Bearer #{user.github_token}" }
+    @token = user.github_token
   end
 
   def names
-    ApiRecipes.github.users.repos('octocat', headers: @headers).run.data.map { |repo| repo['name'] }
+    github.with(authorization: "Bearer #{@token}").users.repos('octocat').run.data.map { |repo| repo['name'] }
   end
 end
 ```
@@ -589,7 +1053,7 @@ status:
 
 ```ruby
 def service_up?
-  ApiRecipes.status.health.run.status.success?
+  ApiRecipes.status.health.run.success?
 rescue HTTP::Error      # timeout, refused connection, DNS failure
   false
 end
@@ -628,14 +1092,63 @@ end
 ```
 
 If your tests configure ApiRecipes themselves, `ApiRecipes.reset!` removes the
-global configuration and the API methods defined on the module, so each example
-can start clean:
+global configuration, the API methods defined on the module and every credential
+and variable value that was assigned, so each example can start clean:
 
 ```ruby
 RSpec.configure do |config|
   config.before(:each) { ApiRecipes.reset! }
 end
 ```
+
+## Security
+
+What ApiRecipes does:
+
+- **Path parameters** are encoded one by one. A value cannot add a segment, a
+  query string or a fragment. `nil`, an empty value, `.` and `..` are refused.
+- **Variables** are checked for the place where they end up: a host, a path or a
+  header.
+- **Credentials** are sent only to the origin they were set for, and a request
+  that would send one elsewhere raises. A value with a control character is
+  refused, so a credential cannot add a header.
+- **Redirects.** With `follow`, a redirect to another origin drops the
+  credentials, the `Cookie` header and the credential query parameter. They are
+  not sent again if the chain comes back.
+- **Before sending**, the address that http.rb will contact is checked against
+  the origin that was validated.
+- **Logs, errors and `inspect`.** A log line and an error message of the gem
+  never contain a credential, a header value, a body or a query string. Neither
+  does the `inspect` or the `pp` of an API, an endpoint, a response, a
+  definition or the configuration, nor their `to_s`, except that the `to_s` of
+  a response is its body, as for the http.rb response. `definition` never holds
+  a credential that was assigned with `authorization=`, `basic_auth=` or `with`.
+  It does hold the values of `default_headers`, which its readers return; its
+  `inspect`, its `to_h` and its JSON show them as `[FILTERED]`.
+- **Serialization.** An API, an endpoint and a response refuse `Marshal.dump`,
+  `YAML.dump`, `as_json` and `to_json`, and raise `TypeError`: serialize
+  `response.data` or `response.body.to_s` instead. A definition refuses
+  `Marshal.dump` and `YAML.dump`, and its JSON is the one of `to_h`.
+- **`fill`** calls only public writers and skips keys that are not plain
+  attribute names.
+- **Configuration files** are read with `YAML.safe_load`, and the options are
+  validated when they are loaded.
+
+What stays with your application:
+
+- ApiRecipes checks the form of a host, not who owns it. Never pass a value
+  chosen by an end user as a whole host: not in `with(host: ...)`, and not in a
+  variable that is the entire host. Check it against a list of hosts you know. A
+  variable that is only a part of a host, like the shop name in
+  `{shop}.myshopify.com`, is the intended use.
+- `response.original_response` is the raw http.rb response, and it gives access
+  to the request that was sent, headers included. Do not log or serialize it.
+- ERB in a configuration file runs code. Load only files you trust.
+- Do not put a credential in the source of an application or in a file of the
+  repository: read it from the place where your application keeps secrets.
+
+Every protection has an example in [`spec/security`](spec/security); its
+[README](spec/security/README.md) maps each one to the example that proves it.
 
 ## Options reference
 
@@ -645,24 +1158,28 @@ end
 | --- | --- |
 | `apis_files_paths` | Array of YAML files, evaluated with ERB |
 | `apis_configs` | Hash of API descriptions |
+| `variables` | Hash of default variable values, as `{ api_name: { variable: value } }` |
 | `logger` | a Logger to use |
-| `log_to` | path or IO for the default logger (default: STDOUT) |
-| `log_level` | level of the default logger (default: the `LOG_LEVEL` variable, or debug) |
-| `print_urls` | print each URL to STDOUT when it is built (default: false) |
+| `log_to` | path or IO for the default logger (default: STDERR) |
+| `log_level` | level of the default logger (default: the `LOG_LEVEL` variable, or warn) |
+| `print_urls` | log the URL of each request at info level (default: false) |
+| `upgrade_warnings` | warn when a path parameter value contains `/` or looks already percent-encoded (default: true) |
 
 ### API
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `protocol` | `https` | `http` or `https` |
-| `host` | `localhost` | host name |
+| `host` | `localhost` | host name, which can contain `{variables}` |
 | `port` | port of the protocol | port number |
-| `base_url` | none | prefix of every path, for example `api/v1` |
+| `base_url` | none | prefix of every path, for example `api/v1`; can contain `{variables}` |
 | `timeout` | `3` | seconds allowed for the whole request |
-| `default_headers` | none | headers sent with every request |
+| `default_headers` | none | headers sent with every request; a value can contain `{variables}` |
 | `on_bad_code` | `raise` | `raise` or `ignore` when the response is not a success |
 | `mime_type` | from the response | content type used by `response.data` |
 | `verify_with` | none | method that decides whether a response is a success |
+| `auth` | none | where the credential goes: `type` (`none`, `bearer`, `basic`, `header`, `query`) and `name` (for `header` and `query`) |
+| `variables` | none | the variables of the API, each with an optional `default` and `description` |
 | `endpoints` | none | the endpoints of the API |
 
 ### Endpoint
@@ -672,7 +1189,7 @@ end
 | `path` | the endpoint name | segment added to the parent path; `''` adds nothing |
 | `verb` | `get` | HTTP verb |
 | `route` | `yes` | `no` makes the endpoint a group that cannot be called |
-| `ok_code` | any 2xx | the only status accepted as a success |
+| `ok_code` | any 2xx | the status, or the list of statuses, accepted as a success |
 | `timeout` | the API value | seconds allowed for the whole request |
 | `on_bad_code` | the API value | `raise` or `ignore` |
 | `mime_type` | the API value | content type used by `response.data` |
@@ -684,26 +1201,49 @@ the endpoint that contains it.
 
 ## Good to know
 
-- **Configure before the first request.** A class keeps the configuration it saw
-  the first time it used its API.
-- **Unknown options are ignored without a message.** If an option seems to have
-  no effect, check its spelling: the verb is `verb`, not `method`.
-- **Path parameters are not encoded.** A value containing `/` spans two path
-  segments, and `nil` or an empty string produce the URL of the parent
-  (`/users/`). Check values that come from user input, and encode them with
-  `ERB::Util.url_encode` when they can contain reserved characters.
-- **Credentials are shared by the whole process.** For a token per user, see
-  [the recipe above](#a-token-per-user-in-a-multi-threaded-application).
-- **Some names are taken.** An endpoint cannot be called like a method its parent
-  already has. Directly under the API, such an endpoint (`name`, `configs`,
-  `object`) is skipped without a message; a nested one (`url`, `run`, `name`,
-  `params`, `route`, `children`) raises `RouteNameClashWithExistentMethod`. An
-  API must not be called `configure`, `configuration`, `logger` or `print_urls`:
-  it would replace that method of the module.
-- **Core extensions.** The gem adds a few methods to `Hash` and `Array`
-  (`deep_symbolize_keys`, `deep_merge`, `extract_options!` and similar, with the
-  same behaviour as in ActiveSupport). With the uri gem older than 1.0 it also
-  makes `URI` accept underscores in host names.
+- **Configure once, at startup.** Calling `configure` again replaces the whole
+  configuration. A class sees the new configuration at its next call.
+- **Mistakes are reported, not ignored.** An unknown option, a wrong value or a
+  verb that does not exist raises `ApiRecipes::ConfigurationError` when the
+  configuration is loaded. The only free keys start with `x-`.
+- **Sharing a name.** An endpoint can have any name, and it is always reachable
+  with `[]`. When the name is also a method of the object (`with`, `definition`,
+  `authorization`, `basic_auth` or `variables` on an API; `run`, `url`, `with` or `definition`
+  on an endpoint) or one of the names that Ruby and common libraries call on any
+  object by themselves (`to_ary`, `to_str`, `to_json`...), no method is generated
+  for it and ApiRecipes logs a warning when the configuration is loaded. Reach
+  it with `[]`, as in `ApiRecipes.github[:with]`. Private methods of Ruby's
+  `Kernel`, such as `test`, `open` and `format`, are not a problem. An API or an
+  endpoint name cannot be empty or contain control characters.
+- **An API name can be a method of the module.** An API called `configure`,
+  `configuration`, `logger`, `apis` or `reset!` gets no method of its own, so the
+  method of the module keeps working, and a warning is logged. Reach the API with
+  `ApiRecipes[:logger]`. In a class, `api :open` raises
+  `ApiRecipes::ApiNameClashError` because `open` is already a method of the
+  class: give the API another method name with `as:`.
+- **One declaration per API.** An API name is declared once in a class and its
+  ancestors, modules included. A subclass that needs other options uses `with`.
+  A credential or a variable set through one declaration is never seen by another
+  declaration of the same API name.
+- **Serialization is refused.** An API, an endpoint and a response cannot be
+  dumped with `Marshal` or `YAML`.
+- **Internationalized hosts.** A redirect to a host with non-ASCII characters
+  needs the [addressable](https://github.com/sporkmonger/addressable) gem; without
+  it http.rb raises `LoadError`.
+- **Constants seen by a class that includes `ApiRecipes`.** Ruby looks a constant
+  up in the ancestors of a class before the top level, so inside a class that
+  includes `ApiRecipes` the constants of the gem win over the constants of your
+  application with the same name: `Api`, `Endpoint`, `Response`, `Configuration`,
+  `Internals`, `VERSION`, `Error` and the error classes (`ApiConfigIsNotAnHash`,
+  `ApiNameClashError`, `ConfigurationError`, `CredentialOriginMismatch`,
+  `InvalidCredential`, `InvalidPathParameter`, `InvalidUrl`, `InvalidVariable`,
+  `MissingVariable`, `NoRouteExists`, `PathParamsMismatch`, `RecipeFileError`,
+  `ResponseCodeNotAsExpected` and `UnknownEndpoint`). If your application has a
+  class with one of these names, write it with a leading `::` inside the classes
+  that include `ApiRecipes`, for example `::Response`. The internal classes of
+  the gem are all under `ApiRecipes::Internals`, so they hide nothing else.
+- **No changes to Ruby.** The gem adds no method to `Hash`, `Array` or any other
+  class of Ruby, and does not touch `URI`.
 
 ## Runnable examples
 
@@ -717,7 +1257,7 @@ The [`examples`](examples) folder contains scripts that call public APIs:
 | `multiple_endpoints.rb` | two APIs from two files |
 | `authorization.rb` | token authorization |
 | `basic_auth.rb` | basic auth |
-| `authorization_with_default_headers.rb` | a token for one class, through default headers |
+| `authorization_for_a_class.rb` | a token for one class |
 
 Run one from the root of the repository:
 
@@ -728,9 +1268,16 @@ configuration file with every option commented.
 
 ## Compatibility
 
-- Ruby 2.7 or higher. The test suite runs on the maintained versions: 3.3, 3.4 and 4.0
-- http.rb from 4.4 to 5.x
+- Ruby 3.3 or higher. The test suite runs on the maintained versions: 3.3, 3.4 and 4.0
+- http.rb 6 (6.0.4 or higher)
 - uri 0.x and 1.x
+
+## Upgrading from 2.x
+
+[UPGRADING.md](UPGRADING.md) lists what stops with a message, what changes
+silently and what is new, and explains the `api_recipes upgrade` command, which
+looks for the changes in your code. A YAML file that is valid for 2.x keeps
+working, apart from the cases listed there.
 
 ## Development
 
@@ -741,6 +1288,10 @@ The specs never use the network. To run them against a specific version of the
 uri gem:
 
     $ URI_VERSION='~> 1.0' bundle exec rspec
+
+The examples in this README and in UPGRADING.md are checked by
+`spec/docs/examples_spec.rb`. The protections described in the Security section
+are proved by the examples in [`spec/security`](spec/security).
 
 What is planned for the next releases is in the [roadmap](docs/ROADMAP.md).
 

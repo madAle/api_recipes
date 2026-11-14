@@ -9,11 +9,13 @@ describe 'The api class macro' do
     expect(klass.new.svc).to be_a(ApiRecipes::Api)
   end
 
-  it 'passes the caller to the api as object' do
+  it 'checks responses with the verify_with method of the caller, class or instance' do
+    stub_request(:get, "#{base_url}/checked").to_return(status: 200, body: '')
     klass = new_client_class
-    instance = klass.new
-    expect(klass.svc.object).to equal(klass)
-    expect(instance.svc.object).to equal(instance)
+    klass.define_singleton_method(:response_ok?) { |_response| false }
+    klass.define_method(:response_ok?) { |_response| true }
+    expect { klass.svc.checked.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
+    expect(klass.new.svc.checked.run.code).to eq(200)
   end
 
   it 'accepts the api name as a String' do
@@ -80,5 +82,56 @@ describe 'The api class macro' do
         api :name
       end
     end.to raise_error(ApiRecipes::ApiNameClashError)
+  end
+
+  it 'rejects an empty or invalid name and an as: that is not a method name, and declares nothing' do
+    klass = Class.new { include ApiRecipes }
+    ['', :'', "\xFF"].each { |name| expect { klass.api(name) }.to raise_error(ArgumentError) }
+    [42, 'not a name', '', { 'as' => :a, as: :b }].each do |as|
+      options = as.is_a?(Hash) ? as : { as: as }
+      expect { klass.api(:svc, options) }.to raise_error(ApiRecipes::ConfigurationError)
+    end
+    expect { klass.api(:svc, variables: 'x') }.to raise_error(ApiRecipes::ConfigurationError)
+    klass.api(:svc)
+    expect(klass.svc.users.url.to_s).to eq("#{base_url}/users")
+  end
+
+  describe 'one declaration of an api per class hierarchy' do
+    let(:parent) do
+      Class.new do
+        include ApiRecipes
+        api :svc
+      end
+    end
+
+    it 'refuses a subclass that declares the api again, plain, with other options or with as:' do
+      [[], [{ timeout: 5 }], [{ as: :service }]].each do |extra|
+        child = Class.new(parent)
+        expect { child.api(:svc, *extra) }.to raise_error(ApiRecipes::ApiNameClashError, /already declared/)
+        expect(child).not_to respond_to(:service)
+      end
+    end
+
+    it 'refuses a class that declares the api twice under two method names' do
+      klass = Class.new do
+        include ApiRecipes
+        api :svc, as: :first
+      end
+      expect { klass.api(:svc, as: :second) }.to raise_error(ApiRecipes::ApiNameClashError, /already declared/)
+      expect(klass).not_to respond_to(:second)
+    end
+
+    it 'refuses a superclass that declares an api one of its subclasses already declares' do
+      base = Class.new { include ApiRecipes }
+      child = Class.new(base) { api :svc, as: :service }
+      expect { base.api(:svc) }.to raise_error(ApiRecipes::ApiNameClashError, /already declared/)
+      expect(child.service).to be_a(ApiRecipes::Api)
+    end
+
+    it 'lets a subclass declare another api' do
+      child = Class.new(parent) { api :versioned }
+      expect(child.versioned.ping.url.to_s).to eq('http://api.example.test:8080/v1/ping')
+      expect(child.svc.users.url.to_s).to eq("#{base_url}/users")
+    end
   end
 end

@@ -1,4 +1,5 @@
 require 'spec_helper'
+require 'pathname'
 require 'tmpdir'
 
 describe ApiRecipes::Configuration do
@@ -20,7 +21,7 @@ describe ApiRecipes::Configuration do
 
   it 'lets a later file replace an api defined by an earlier one' do
     configure_files('svc.yml.erb', 'svc_override.yml')
-    expect(ApiRecipes.svc.configs[:host]).to eq('other.example.test')
+    expect(ApiRecipes.svc.definition.host).to eq('other.example.test')
     expect(ApiRecipes.svc).not_to respond_to(:users)
     expect(ApiRecipes.svc).to respond_to(:ping)
   end
@@ -59,6 +60,145 @@ describe ApiRecipes::Configuration do
     expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
   end
 
+  it 'does not need the logger before the files' do
+    logger = Logger.new(IO::NULL)
+    expect(logger).to receive(:debug).with(/svc_override\.yml overrides config for 'svc'/)
+    ApiRecipes.configure do |config|
+      config.apis_files_paths = [fixture('svc.yml.erb'), fixture('svc_override.yml')]
+      config.logger = logger
+    end
+  end
+
+  it 'applies the sources in the order they are assigned' do
+    ApiRecipes.configure do |config|
+      config.logger = Logger.new(IO::NULL)
+      config.apis_files_paths = [fixture('two_apis.yml')]
+      config.apis_configs = { svc: { host: 'hash.example.test', endpoints: { users: nil } } }
+    end
+    expect(ApiRecipes.svc.users.url.to_s).to eq('https://hash.example.test/users')
+    expect(ApiRecipes.billing.invoices.url.to_s).to eq('http://billing_service:3000/invoices')
+  end
+
+  it 'keeps the options between two calls to configure' do
+    configure_files('svc.yml.erb')
+    ApiRecipes.configure { |config| config.print_urls = false }
+    expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
+  end
+
+  it 'refuses a path that is not a String or a Pathname, or that has a null byte, as a configuration error' do
+    [[nil], [42], [fixture('svc.yml.erb'), :sym], ["a\0b.yml"]].each do |paths|
+      expect { ApiRecipes.configure { |config| config.apis_files_paths = paths } }
+        .to raise_error(ApiRecipes::ConfigurationError, /apis_files_paths/)
+    end
+  end
+
+  it 'accepts a Pathname' do
+    ApiRecipes.configure { |config| config.apis_files_paths = [Pathname.new(fixture('svc.yml.erb'))] }
+    expect(ApiRecipes.apis).to include(:svc)
+  end
+
+  it 'reads no file before load' do
+    configuration = ApiRecipes::Configuration.new
+    configuration.apis_files_paths = [fixture('missing.yml')]
+    expect { configuration.load }.to raise_error(ApiRecipes::RecipeFileError)
+  end
+
+  {
+    'missing.yml' => /missing\.yml: file not found/,
+    'empty.yml'   => /empty\.yml: file is empty/,
+    'list.yml'    => /list\.yml: must contain a mapping/,
+    'unsafe.yml'  => /unsafe\.yml: invalid YAML/
+  }.each do |name, pattern|
+    it "names the file when #{name} cannot be loaded" do
+      expect { configure_files(name) }.to raise_error(ApiRecipes::RecipeFileError, pattern)
+    end
+  end
+
+  describe 'files that are hard to read' do
+    around { |example| Dir.mktmpdir { |dir| @dir = dir; example.run } }
+
+    def write(name, content)
+      File.binwrite(File.join(@dir, name), content)
+      File.join(@dir, name)
+    end
+
+    def load_from(path)
+      ApiRecipes.configure do |config|
+        config.logger = Logger.new(IO::NULL)
+        config.apis_files_paths = [path]
+      end
+    end
+
+    it 'loads a file with non-ASCII UTF-8 text' do
+      path = write('utf8.yml', "svc:\n  host: api.example.test\n  endpoints:\n    users: { path: 'café' }\n")
+      expect { load_from(path) }.not_to raise_error
+    end
+
+    it 'names a file that is not valid UTF-8' do
+      path = write('latin.yml', "svc: { host: \"caf\xE9\" }\n")
+      expect { load_from(path) }.to raise_error(ApiRecipes::RecipeFileError, /latin\.yml: file is not valid UTF-8/)
+    end
+
+    it 'names a directory given as a file' do
+      expect { load_from(@dir) }.to raise_error(ApiRecipes::RecipeFileError, /cannot read file \(EISDIR\)/)
+    end
+
+    it 'refuses a file with ERB when ERB is not asked for, and runs nothing' do
+      marker = File.join(@dir, 'marker')
+      path = write('erb.yml', "svc: { host: <%= File.write(#{marker.inspect}, '1') %> }\n")
+      expect { ApiRecipes::Configuration.new.read_recipe_file(path, erb: false) }
+        .to raise_error(ApiRecipes::RecipeFileError, /erb\.yml: contains ERB/)
+      expect(File.exist?(marker)).to be(false)
+    end
+
+    it 'evaluates ERB with erb: true' do
+      path = write('erb.yml', "svc: { host: <%= 'api.example.test' %> }\n")
+      expect(ApiRecipes::Configuration.new.read_recipe_file(path, erb: true)).to eq(svc: { host: 'api.example.test' })
+    end
+  end
+
+  describe 'shared recipes among the files' do
+    let(:body) { "<% raise 'evaluated' %>\nsvc:\n  host: evil.test\n" }
+
+    def expect_refused(path)
+      expect do
+        ApiRecipes.configure { |config| config.apis_files_paths = [path] }
+      end.to raise_error(ApiRecipes::RecipeFileError, /shared recipe files \(\.recipe\.yml\) are not supported by this version/)
+    end
+
+    it 'refuses a shared recipe without evaluating its ERB' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'x.recipe.yml')
+        File.write(path, body)
+        expect_refused(path)
+      end
+    end
+
+    it 'refuses a shared recipe whatever the letter case of the name' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'x.RECIPE.YML')
+        File.write(path, body)
+        expect_refused(path)
+      end
+    end
+
+    it 'refuses a link that points to a shared recipe' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'x.recipe.yml')
+        link = File.join(dir, 'plain.yml')
+        File.write(target, body)
+        File.symlink(target, link)
+        expect_refused(link)
+      end
+    end
+  end
+
+  it 'has defaults for variables and upgrade_warnings' do
+    configuration = ApiRecipes::Configuration.new
+    expect(configuration.variables).to eq({})
+    expect(configuration.upgrade_warnings).to eq(true)
+  end
+
   describe 'logger' do
     let(:configuration) { ApiRecipes::Configuration.new }
 
@@ -74,9 +214,9 @@ describe ApiRecipes::Configuration do
       expect(configuration.logger).to equal(logger)
     end
 
-    it 'builds a logger named ApiRecipes at debug level by default' do
+    it 'builds a logger named ApiRecipes at warn level by default' do
       configuration.log_to = StringIO.new
-      expect(configuration.logger.level).to eq(Logger::DEBUG)
+      expect(configuration.logger.level).to eq(Logger::WARN)
       expect(configuration.logger.progname).to eq('ApiRecipes')
     end
 
@@ -97,8 +237,8 @@ describe ApiRecipes::Configuration do
       end
     end
 
-    it 'writes to STDOUT by default' do
-      expect { configuration.logger.warn('hello') }.to output(/hello/).to_stdout_from_any_process
+    it 'writes to STDERR by default' do
+      expect { configuration.logger.warn('hello') }.to output(/hello/).to_stderr_from_any_process
     end
 
     {
@@ -114,25 +254,56 @@ describe ApiRecipes::Configuration do
       end
     end
 
+    it 'lowers the default level to info with print_urls when no level was chosen' do
+      configuration.log_to = StringIO.new
+      configuration.print_urls = true
+      expect(configuration.logger.level).to eq(Logger::INFO)
+    end
+
+    it 'keeps the chosen level with print_urls' do
+      configuration.log_to = StringIO.new
+      configuration.print_urls = true
+      configuration.log_level = :error
+      expect(configuration.logger.level).to eq(Logger::ERROR)
+    end
+
+    it 'keeps the level of LOG_LEVEL with print_urls' do
+      ENV['LOG_LEVEL'] = 'error'
+      configuration.log_to = StringIO.new
+      configuration.print_urls = true
+      expect(configuration.logger.level).to eq(Logger::ERROR)
+    ensure
+      ENV.delete('LOG_LEVEL')
+    end
+
+    it 'ignores a LOG_LEVEL that is not a level, as if it was not set' do
+      ENV['LOG_LEVEL'] = 'bogus'
+      configuration.log_to = StringIO.new
+      expect(configuration.logger.level).to eq(Logger::WARN)
+      configuration.print_urls = true
+      expect(configuration.logger.level).to eq(Logger::INFO)
+    ensure
+      ENV.delete('LOG_LEVEL')
+    end
+
+    it 'honours LOG_LEVEL in any letter case' do
+      { 'debug' => Logger::DEBUG, 'DEBUG' => Logger::DEBUG, 'Info' => Logger::INFO, 'ERROR' => Logger::ERROR }
+        .each do |value, level|
+        ENV['LOG_LEVEL'] = value
+        config = ApiRecipes::Configuration.new
+        config.log_to = StringIO.new
+        expect(config.logger.level).to eq(level)
+      end
+    ensure
+      ENV.delete('LOG_LEVEL')
+    end
+
     it 'takes the default level from the LOG_LEVEL variable' do
       ENV['LOG_LEVEL'] = 'warn'
       configuration.log_to = StringIO.new
       expect(configuration.logger.level).to eq(Logger::WARN)
     ensure
       ENV.delete('LOG_LEVEL')
-    end
-  end
-
-  describe 'print_urls' do
-    it 'prints each url to STDOUT when it is built' do
-      configure_test_apis
-      ApiRecipes.configuration.print_urls = true
-      expect { ApiRecipes.svc.users.url }.to output("https://api.example.test/users\n").to_stdout
-    end
-
-    it 'prints nothing by default' do
-      configure_test_apis
-      expect { ApiRecipes.svc.users.url }.not_to output.to_stdout
     end
   end
 end

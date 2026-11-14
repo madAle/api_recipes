@@ -61,6 +61,16 @@ describe ApiRecipes::Response do
     it 'parses data with the mime_type of the api' do
       expect(configure({}, mime_type: 'application/json').things.run.data).to eq('id' => 1)
     end
+
+    it 'parses data with a mime_type given as a Symbol, an alias of http.rb' do
+      expect(configure(mime_type: :json).things.run.data).to eq('id' => 1)
+      expect(configure({}, mime_type: :json).things.run.data).to eq('id' => 1)
+    end
+
+    it 'parses data with a Symbol mime_type given to with' do
+      expect(configure.with(mime_type: :json).things.run.data).to eq('id' => 1)
+      expect(configure.things.with(mime_type: :json).run.data).to eq('id' => 1)
+    end
   end
 
   it 'cannot parse data when the body is empty' do
@@ -70,39 +80,108 @@ describe ApiRecipes::Response do
     expect(response.body.to_s).to eq('')
   end
 
-  describe 'Route#fill' do
+  describe '#fill' do
     let(:user_class) { Struct.new(:login, :id) }
 
-    def route_after(body)
+    def response_for(body)
       respond_with(body, 'application/json')
-      endpoint = configure.things
-      endpoint.run
-      endpoint.route
+      configure.things.run
     end
 
     it 'assigns the attributes of a JSON object to the given object' do
-      user = route_after('{"login":"octocat","id":1}').fill(user_class.new)
+      user = response_for('{"login":"octocat","id":1}').fill(user_class.new)
       expect(user.login).to eq('octocat')
       expect(user.id).to eq(1)
     end
 
     it 'skips the keys the object has no writer for' do
-      user = route_after('{"login":"octocat","unknown":true}').fill(user_class.new)
+      user = response_for('{"login":"octocat","unknown":true}').fill(user_class.new)
       expect(user.login).to eq('octocat')
     end
 
     it 'builds one object per element of a JSON array when given a class' do
-      users = route_after('[{"login":"a"},{"login":"b"}]').fill(user_class)
+      users = response_for('[{"login":"a"},{"login":"b"}]').fill(user_class)
       expect(users.map(&:login)).to eq(%w[a b])
       expect(users).to all(be_a(user_class))
     end
 
     it 'yields the object, the data and the status to a block' do
       yielded = nil
-      route_after('{"login":"octocat"}').fill(user_class.new) { |object, data, status| yielded = [object, data, status] }
+      response_for('{"login":"octocat"}').fill(user_class.new) { |object, data, status| yielded = [object, data, status] }
       expect(yielded[0].login).to eq('octocat')
       expect(yielded[1]).to eq('login' => 'octocat')
       expect(yielded[2].code).to eq(200)
+    end
+
+    it 'lets an error raised by a setter through' do
+      strict = Class.new do
+        def login=(_value)
+          raise ArgumentError, 'no'
+        end
+      end
+      expect { response_for('{"login":"x"}').fill(strict.new) }.to raise_error(ArgumentError, 'no')
+    end
+  end
+
+  it 'tells what it can do' do
+    respond_with('{"id":1}', 'application/json')
+    response = configure.things.run
+    expect(response).to respond_to(:code, :status, :headers, :body, :data, :fill, :success?)
+    expect(response).not_to respond_to(:request)
+    expect(response.inspect).to eq('#<ApiRecipes::Response 200 OK application/json>')
+  end
+
+  it 'returns the cookies of the response as HTTP::Cookie objects' do
+    stub_request(:get, url).to_return(status: 200, body: '{}',
+                                      headers: { 'Content-Type' => 'application/json', 'Set-Cookie' => 'session=abc; Path=/' })
+    cookies = configure.things.run.cookies
+    expect(cookies).to all(be_a(HTTP::Cookie))
+    expect(cookies.map { |cookie| [cookie.name, cookie.value] }).to eq([%w[session abc]])
+  end
+
+  it 'reads headers only through headers, and matches as an Array but not by keys, which would show the request' do
+    respond_with('{"id":1}', 'application/json')
+    response = configure.things.run
+    expect(response).not_to respond_to(:[], :[]=, :deconstruct_keys)
+    matched = (response in [200, Hash, '{"id":1}'])
+    expect(matched).to eq(true)
+  end
+
+  it 'says whether the response passed the rule of the endpoint' do
+    respond_with('', 'text/plain', 500)
+    expect(configure(on_bad_code: 'ignore').things.run.success?).to eq(false)
+  end
+
+  describe '#uri' do
+    def build(url, **options)
+      request = HTTP::Request.new(verb: :get, uri: url)
+      http = HTTP::Response.new(status: 200, version: '1.1', body: '', request: request)
+      described_class.new(http, **options)
+    end
+
+    it 'returns the uri of the http.rb response when no parameter is hidden' do
+      expect(build("#{base_url}/a?k=1&x=2").uri.to_s).to eq("#{base_url}/a?k=1&x=2")
+    end
+
+    it 'removes only the hidden query parameter' do
+      expect(build("#{base_url}/a?k=1&x=2&y=a%20b", hidden_param: 'k').uri.to_s).to eq("#{base_url}/a?x=2&y=a%20b")
+    end
+
+    it 'keeps a pair whose name is not valid percent-encoding, and never raises' do
+      expect(build("#{base_url}/a?key=1&%zz=2", hidden_param: 'key').uri.to_s).to eq("#{base_url}/a?%zz=2")
+      expect(build("#{base_url}/a?%zz=2&%", hidden_param: 'key').uri.to_s).to eq("#{base_url}/a?%zz=2&%")
+    end
+
+    it 'removes every pair of the hidden parameter, also when its name is percent-encoded' do
+      expect(build("#{base_url}/a?key=1&x=2&key=3&ke%79=4", hidden_param: 'key').uri.to_s).to eq("#{base_url}/a?x=2")
+    end
+
+    it 'drops the query when the hidden parameter is the only one' do
+      expect(build("#{base_url}/a?k=1", hidden_param: :k).uri.to_s).to eq("#{base_url}/a")
+    end
+
+    it 'leaves a uri without that parameter alone' do
+      expect(build("#{base_url}/a?x=2", hidden_param: 'k').uri.to_s).to eq("#{base_url}/a?x=2")
     end
   end
 end

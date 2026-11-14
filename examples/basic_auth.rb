@@ -17,7 +17,7 @@ class MyFancyClass
 end
 
 # Setup Basic Auth. Credentials are set on the api of the ApiRecipes module
-ApiRecipes.github.basic_auth = { user: ENV['GITHUB_USERNAME'], pass: ENV['GITHUB_PASSWORD'] }
+ApiRecipes.github.basic_auth = { user: ENV.fetch('GITHUB_USERNAME'), pass: ENV.fetch('GITHUB_PASSWORD') }
 
 # From now on every github's api request will be authenticated with basic auth,
 # including those made by MyFancyClass and its instances
