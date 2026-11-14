@@ -5,6 +5,7 @@ require 'api_recipes'
 require 'api_recipes/version'
 require 'api_recipes/cli/upgrade'
 require 'api_recipes/cli/import'
+require 'api_recipes/cli/routes'
 
 module ApiRecipes
   # The api_recipes command. It is not loaded by `require 'api_recipes'`.
@@ -25,6 +26,10 @@ module ApiRecipes
             --server chooses the entry of servers, counted from 0. Nothing in FILE is run, no
             other file is read and the network is not used.
             Exits with 1 if the description cannot be imported, 2 if the arguments are wrong.
+        routes [--erb] FILE...
+            Lists the calls that the recipes in each FILE offer, with the verb and the address.
+            A file that contains ERB is evaluated only with --erb: this runs the code in it.
+            Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
 
       Options:
         --version   print the version
@@ -46,6 +51,8 @@ module ApiRecipes
           upgrade(args, out, err)
         when 'import'
           import(args, out, err)
+        when 'routes'
+          routes(args, out, err)
         when nil
           err.puts USAGE
           2
@@ -108,6 +115,22 @@ module ApiRecipes
       rescue SystemCallError => e
         err.puts "#{output}: cannot be written (#{e.class.name.split('::').last})"
         false
+      end
+
+      def routes(args, out, err)
+        erb = false
+        parser = OptionParser.new
+        parser.on('--erb') { erb = true }
+        files = parser.parse(args)
+        if files.empty?
+          err.puts 'routes needs at least one configuration file'
+          return 2
+        end
+
+        Routes.new(files, erb: erb).report(out, err)
+      rescue OptionParser::ParseError => e
+        err.puts e.message
+        2
       end
 
       def upgrade(args, out, err)
