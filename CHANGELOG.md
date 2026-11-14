@@ -1,4 +1,4 @@
-## Unreleased
+## Version 3.0.0.beta1
 
 The first pre-release of 3.0. The DSL is the same, and a YAML file that is valid
 for 2.x needs no change, apart from what the configuration check now refuses.

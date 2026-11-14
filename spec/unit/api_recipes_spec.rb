@@ -2,7 +2,7 @@ require 'spec_helper'
 
 describe ApiRecipes do
   it 'has a version number' do
-    expect(ApiRecipes::VERSION).to match(/\A\d+\.\d+\.\d+\z/)
+    expect(ApiRecipes::VERSION).to match(/\A\d+\.\d+\.\d+(\.(alpha|beta|rc)\d+)?\z/)
   end
 
 # The concurrency examples stop threads on purpose. Every wait has a time
