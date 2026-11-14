@@ -1,179 +1,69 @@
+# frozen_string_literal: true
+
 require 'http'
 
-require 'api_recipes/utils'
-require 'api_recipes/exceptions'
-require 'api_recipes/configuration'
-require 'api_recipes/route'
-require 'api_recipes/endpoint'
-require 'api_recipes/api'
+require 'api_recipes/version'
+require 'api_recipes/errors'
+require 'api_recipes/internals/credential'
+require 'api_recipes/internals/level'
+require 'api_recipes/internals/path_template'
+require 'api_recipes/internals/template'
+require 'api_recipes/internals/definition'
+require 'api_recipes/internals/compiler'
+require 'api_recipes/internals/context'
+require 'api_recipes/internals/request'
 require 'api_recipes/response'
-require 'api_recipes/settings'
-
-# TODO: Sistema i default nelle config
+require 'api_recipes/configuration'
+require 'api_recipes/api'
+require 'api_recipes/endpoint'
+require 'api_recipes/internals/handles'
+require 'api_recipes/internals/registry'
+require 'api_recipes/internals/declaration'
 
 module ApiRecipes
-
+  # `include ApiRecipes` adds the class macro `api`. options is a positional
+  # Hash, so that `api :github, host: 'x'` works; besides the api options it
+  # takes `as` (the name of the method) and `variables` (values for the level
+  # of the class).
   def self.included(receiver)
-
-    def receiver.api(api_name, configs = {})
-      unless api_name.is_a?(String) || api_name.is_a?(Symbol)
-        raise ArgumentError, "api name must be a Symbol or String"
-      end
-
-      if configs && !configs.is_a?(Hash)
-        raise ApiRecipes::ApiConfigIsNotAnHash.new(api_name)
-      end
-
-      api_name = api_name.to_sym
-      # configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
-      if self.respond_to? api_name
-        raise ApiNameClashError.new(self, api_name)
-      else
-
-        define_method api_name do
-          configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
-          api = Api.new(api_name, configs, self)
-          ApiRecipes.copy_global_authorizations_to_api api
-          api
-        end
-        define_singleton_method api_name do
-          configs = ApiRecipes._aprcps_merge_apis_configs(api_name, configs.deep_symbolize_keys)
-          api = Api.new(api_name, configs, self)
-          ApiRecipes.copy_global_authorizations_to_api api
-          api
-        end
-      end
+    def receiver.api(name, options = {})
+      Internals::Declaration.declare(self, name, options)
     end
   end
 
-  def self.print_urls=(value)
-    @print_urls = value
-  end
-
-  def self.print_urls
-    @print_urls || false
-  end
-
-  def self.configuration
-    unless @configuration
-      @configuration = Configuration.new
-    end
-
-    @configuration
-  end
-
+  # Yields a copy of the configuration, then loads and compiles it. The copy
+  # becomes the configuration only if that succeeds, together with the apis
+  # built from it: otherwise the previous configuration and apis stay as they
+  # were. Without a block, returns the configuration.
   def self.configure
-    if block_given?
-      yield(configuration)
-      configuration.setup
-    else
-      configuration
-    end
-  end
+    return configuration unless block_given?
 
-  def self.copy_global_authorizations_to_api(api)
-    if _aprcps_global_storage[api.name]
-      if auth = _aprcps_global_storage[api.name].basic_auth
-        api.basic_auth = auth
-      end
-      if auth = _aprcps_global_storage[api.name].authorization
-        api.authorization = auth
-      end
-    end
-  end
-
-  def self.set_authorization_for_api(authorization, api_name)
-    api_name = api_name.to_sym
-
-    # Set authorization on thread storage
-    if _aprcps_thread_storage[api_name]
-      _aprcps_thread_storage[api_name].each do |_, api|
-        api.authorization = authorization
-      end
-    end
-  end
-
-  def self.set_basic_auth_for_api(basic_auth, api_name)
-    api_name = api_name.to_sym
-
-    # Set authorization on thread storage
-    if _aprcps_thread_storage[api_name]
-      _aprcps_thread_storage[api_name].each do |_, api|
-        api.authorization = basic_auth
-      end
-    end
-  end
-
-  def self._aprcps_define_global_apis
-    configuration.apis_configs.each do |api_name, api_configs|
-      api_name = api_name.to_sym
-      _aprcps_global_storage[api_name] = Api.new api_name, api_configs, self
-      define_singleton_method api_name do
-        _aprcps_global_storage[api_name]
-      end
-    end
-  end
-
-  # Removes the global api methods, the storage and the configuration.
-  def self.reset!
-    _aprcps_global_storage.each_key do |api_name|
-      singleton_class.send(:remove_method, api_name) if singleton_class.method_defined?(api_name, false)
-    end
-    @storage = nil
-    @configuration = nil
-    @print_urls = nil
+    draft = configuration.dup
+    yield draft
+    Internals::Registry.install(draft) { @configuration = draft }
     nil
   end
 
-  def self._aprcps_global_storage
-    unless @storage
-      @storage = {}
-    end
-
-    @storage
+  def self.configuration
+    @configuration ||= Configuration.new
   end
 
-  def self._aprcps_thread_storage
-    unless Thread.current[:api_recipes]
-      Thread.current[:api_recipes] = {}
-    end
-    Thread.current[:api_recipes]
+  # The global api called name, for any name.
+  def self.[](name)
+    key = name.is_a?(String) && name.valid_encoding? ? name.to_sym : name
+    Internals::Registry.current.global(key) || raise(UnknownEndpoint.new('ApiRecipes', name, apis))
   end
 
-  def self._aprcps_merge_apis_configs(api_name, configs = nil)
-    unless api_name.is_a?(String) || api_name.is_a?(Symbol)
-      raise ArgumentError, "no api_name provided. Given: #{api_name.inspect}"
-    end
-    global_api_configs = _aprcps_global_storage[api_name]&.configs || {}
-    if configs
-      global_api_configs.deep_merge(configs) do |_, old_val, new_val|
-        if new_val.nil?
-          old_val
-        else
-          new_val
-        end
-      end
-    else
-      global_api_configs
-    end
+  def self.apis = Internals::Registry.current.apis
+
+  # Removes the global apis and their methods, the configuration and every
+  # credential and variable value.
+  def self.reset!
+    Internals::Registry.reset! { @configuration = nil }
+    nil
   end
 
   def self.logger
     configuration.logger
-  end
-end
-
-# Monkey-patch URI so it can accept hostnames with underscores like "web_service_1"
-# (e.g. docker-compose service names), which Route#build_uri validates through
-# URI::DEFAULT_PARSER. Only the uri gem's RFC 2396 parser (uri < 1.0) rejects them.
-# From uri 1.0 the default parser follows RFC 3986, which accepts them, and
-# URI::Parser is that parser, whose constructor takes no arguments.
-if defined?(URI::RFC2396_Parser) && URI::DEFAULT_PARSER.instance_of?(URI::RFC2396_Parser)
-  module URI
-    # Undef DEFAULT_PARSER
-    URI.send(:remove_const, :DEFAULT_PARSER)
-
-    # Redefine DEFAULT_PARSER
-    DEFAULT_PARSER = RFC2396_Parser.new(HOSTNAME: "(?:(?:[a-zA-Z\\d](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.)*(?:[a-zA-Z](?:[-\\_a-zA-Z\\d]*[a-zA-Z\\d])?)\\.?")
   end
 end

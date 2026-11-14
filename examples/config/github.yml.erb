@@ -2,14 +2,20 @@ github:
   protocol: https               # Optional. Default: 'https'
   host: api.github.com          # Optional. Default: 'localhost'
   port: 443                     # Optional. Default: 80 for http and 443 for https
-  base_url:                     # Optional. Default: ''. Useful for example when specifying API version
+  base_url:                     # Optional. Default: none. Useful for example when specifying API version
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
   on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise]
   mime_type:                    # Optional. Default: nil. By default the library will try to automatically guess the mime type based on response's Content-Type header. Provide this option to override the default behaviour
   verify_with:                  # Optional. Default nil. Specify a method (on the api-calling object) that will be called in order to verify if response was OK. Given method must accept one argument (response)
-  default_headers:
-    accept: 'application/vnd.github.v3+json'
-    content_type: 'application/json'
+  default_headers:              # Optional. Headers sent with every request. A value can contain {variables}
+    Accept: 'application/vnd.github.v3+json'
+  # auth:                       # Optional. Where the credential assigned with authorization= goes. Default: the Authorization header
+  #   type: header              # none, bearer, basic, header or query. header and query need a name
+  #   name: X-Access-Token
+  # variables:                  # Optional. Declares {name} placeholders usable in host, base_url and the values of default_headers
+  #   shop:                     # Give a value with ApiRecipes.github.with(variables: { shop: 'acme' }) or config.variables
+  #     default: acme           # Optional. Used when no value is given
+  #     description: the name of the shop
 
   endpoints:
     users:                      # Route building method consists of appending endpoint/action (e.g users/list)
@@ -17,14 +23,14 @@ github:
       # path: 'users'           # Optional. Default: nil. If specified, replaces default path strategy that uses endpoint name (e.g. /users)
                                 # Example: path: TheUsersList  => path will be built in the form of /TheUsersList
       verb: get                 # Optional. Default: get
-      ok_code: 200              # Optional. Default: from 200 to 299 HTTP status code are considered OK
+      ok_code: 200              # Optional. Default: from 200 to 299 HTTP status code are considered OK. Can be a list, such as [200, 304]
       timeout: 2                # Optional. Overrides global property
       on_bad_code:              # Optional. Overrides global property
       mime_type:                # Optional. Overrides global property
       verify_with:              # Optional. Overrides global property
       endpoints:
         show:
-          path: /:user_id       # You can use :some_param notation and provide the param when calling the route (see examples/simple.rb)
+          path: /:user_id       # You can use :some_param notation and provide the param when calling the route (see examples/simple_usage.rb)
 
         repos:
           path: /:user_id/repos

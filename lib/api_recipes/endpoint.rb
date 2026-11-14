@@ -1,141 +1,91 @@
+# frozen_string_literal: true
+
 module ApiRecipes
+  # One step of a chain: a node of the tree with its path filled. The
+  # subclass generated for the node adds a method per child.
+  #
+  # Every method of this class is a name an endpoint cannot use as a method:
+  # the class has only the public methods below, and inside them the only
+  # private methods called are raise and block_given?.
   class Endpoint
+    # One Proc for all the endpoints: a block written in initialize costs an
+    # object per endpoint, in a chain that is built again at every call.
+    UPGRADE_WARNING = proc { |param, kind, endpoint| Internals::Registry.warn_upgrade(endpoint, param, kind) }
 
-    attr_reader :api, :name, :params, :route, :children
+    # args: the path values, then optionally a Hash of options for http.rb.
+    # overrides: the options given to with, for this request only.
+    def initialize(context, definition, parent_path, args, overrides = nil)
+      @context = context
+      @definition = definition
+      @parent_path = parent_path
+      @args = args
+      @overrides = overrides
+      last = args.last
+      @options = last.is_a?(Hash) ? last : nil
+      params = definition.path_params
+      count = @options ? args.size - 1 : args.size
+      raise PathParamsMismatch.new(definition.full_path, params, args.first(count)) unless count == params.size
 
-    FORWARDABLE_PARAMS = %i[verify_with].freeze
-
-    def initialize(api: nil, name: nil, path: nil, params: {}, request_params: [], &block)
-      @api = api
-      @name = name
-      @path = path.to_s
-      new_params = params.dup || {}
-      self.params = new_params
-      @children = new_params.delete :endpoints
-      @route = nil
-      @request_params = request_params.extract_options!
-      self.path_params = request_params
-
-      generate_route
-      generate_children
-      if block_given?
-        run &block
-      end
-    end
-
-    def run(&block)
-      if @route
-        @route.start_request &block
+      own = definition.template.expand(args, endpoint: definition.full_name, &UPGRADE_WARNING)
+      if own.empty?
+        # A root endpoint with an empty path is the address of the api, which
+        # ends with a slash; a nested one is the address of its parent.
+        root = definition.parent.is_a?(Internals::Definition::Api) && !parent_path.end_with?('/')
+        @path = root ? "#{parent_path}/".freeze : parent_path
       else
-        raise NoRouteExists.new @name
+        path = "#{parent_path}/#{own}"
+        path.squeeze!('/')
+        @path = path.freeze
       end
     end
 
+    # The child called name. With a block, sends its request at once.
+    def [](name, *args, &block)
+      endpoint = @context.handles.endpoint(@context, @definition, @path, name, args)
+      endpoint.run(&block) if block
+      endpoint
+    end
+
+    # Sends the request. With a block, passes it the response.
+    def run
+      response = Internals::Request.new(context: @context, definition: @definition, path: @path, options: @options,
+                                   overrides: @overrides).perform
+      yield response if block_given?
+      response
+    end
+
+    # The URL without the query string, or nil without a route. Sends nothing.
     def url
-      if @route
-        @route.url
-      else
-        ApiRecipes.logger.debug "No route configured for '#{api.name}#{absolute_path}': Is option 'route: no' present?"
-        nil
+      Internals::Request.new(context: @context, definition: @definition, path: @path, options: @options,
+                        overrides: @overrides).url
+    end
+
+    # A copy with options for this request only, not for the children. An
+    # option given as nil drops the one given before.
+    def with(options)
+      overrides = Internals::Compiler.resolve_options(options, :with_endpoint)
+      if @overrides
+        merged = @overrides.merge(overrides)
+        options.each { |key, value| merged.delete(key.to_sym) if value.nil? }
+        overrides = merged.freeze
       end
+      self.class.new(@context, @definition, @parent_path, @args, overrides)
     end
 
-    private
+    attr_reader :definition
 
-    def generate_route
-      # Check if we have to generate route for this endpoint
-      if create_route?
-        ensure_route_does_not_clash @name
-        # Generate route
-        attrs = params.dup
-        attrs.delete(:endpoints)
-        # puts "Generating route '#{@name}' with path '#{build_path}'"
-        @route = Route.new(api: @api, endpoint: self, path: build_path, attributes: attrs, req_pars: @request_params)
-      end
+    def inspect
+      "#<ApiRecipes::Endpoint #{@definition.full_name} #{@definition.verb.to_s.upcase} " \
+        "#{@context.shown_origin}#{@path}>"
     end
 
-    def generate_children
-      # Generate children endpoints if any
-      # puts "generating children of #{@name}: #{children.inspect}"
-      if children
-        children.each do |ep_name, pars|
-          pars = forwardable_params.merge(pars) if pars
-          # TODO: Merge pars with params
-          # puts "Creating Endpoint '#{@name}' child '#{ep_name}' passing path #{build_path}"
-          define_singleton_method ep_name do |*request_params, &block|
-            Endpoint.new api: @api, name: ep_name, path: build_path, params: pars, request_params: request_params, &block
-          end
-        end
-      end
-    end
+    # An Endpoint holds options that can contain secrets: it is never serialized.
+    def marshal_dump = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
 
-    def ensure_route_does_not_clash(route_name)
-      # Check if a method named route_name has already been defined on this object
-      if respond_to? route_name
-        raise RouteNameClashWithExistentMethod.new(@name, route_name)
-      end
-    end
+    def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
 
-    def create_route?
-      res = params[:route].eql?('yes') || params[:route].eql?(true)
-      res
-    end
+    def as_json(*) = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
 
-    def absolute_path
-      # Append path passed to initialize and (params[:path] || @name)
-      append = params[:path] || @name
-      unless append.empty?
-        "#{@path}/#{append}"
-      else
-        "#{@path}"
-      end.gsub(/\/+/, '/')   # remove multiple consecutive '//'
-    end
-
-    def params=(attrs)
-      unless attrs.is_a? Hash
-        raise ArgumentError, "provided 'attrs' must be an Hash"
-      end
-      # Merge DEFAULT_ROUTE_ATTRIBUTES with Api base_configs
-      # Then merge the result with provided attributes
-      @params = Settings::DEFAULT_ROUTE_ATTRIBUTES.inject({}) do |out, key_val|
-        new_val = @api.base_configs[key_val.first]
-        out[key_val.first] = new_val.nil? ? key_val.last : new_val
-        out
-      end.inject({}) do |out, key_val|
-        new_val = attrs[key_val.first]
-        out[key_val.first] = new_val.nil? ? key_val.last : new_val
-        out
-      end
-    end
-
-    def build_path
-      final_path = absolute_path
-      # Check if provided path_params match with required path params
-      req_params = required_params_for_path
-      if @path_params.size != req_params.size
-        # puts "\nWARNING\n"
-        raise PathParamsMismatch.new(final_path, req_params, @path_params)
-      end
-      # Replace required_params present in path with params provided by user (@path_params)
-      @path_params.each { |par| final_path.sub! /(:[^\/]+)/, par.to_s }
-
-      final_path
-    end
-
-    def path_params=(params)
-      unless params.is_a? Array
-        raise ArgumentError, 'path params must be an Array'
-      end
-      # Merge route attributes with defaults and deep clone route attributes
-      @path_params = params
-    end
-
-    def required_params_for_path
-      absolute_path.scan(/:(\w+)/).flatten.map { |p| p.to_sym }
-    end
-
-    def forwardable_params
-      params.select { |k, v| FORWARDABLE_PARAMS.include? k }
-    end
+    def to_json(*) = raise(TypeError, 'an ApiRecipes::Endpoint cannot be serialized')
   end
 end

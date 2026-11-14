@@ -27,4 +27,24 @@ describe 'An api declared in a class' do
     expect(klass.svc.repos('rails').contributors.url.to_s)
       .to eq('https://other.example.test/repos/rails/contributors')
   end
+
+  it 'adds the endpoints that a class gives without options' do
+    klass = Class.new do
+      include ApiRecipes
+      api :svc, endpoints: { extra: nil, users: { endpoints: { more: nil } } }
+    end
+    expect(klass.svc.extra.url.to_s).to eq("#{base_url}/extra")
+    expect(klass.svc.users.more.url.to_s).to eq("#{base_url}/users/more")
+    expect(klass.svc[:extra].url.to_s).to eq("#{base_url}/extra")
+    expect(klass.svc[:users][:more].url.to_s).to eq("#{base_url}/users/more")
+  end
+
+  it 'keeps the global options of an endpoint that a class gives without options' do
+    klass = Class.new do
+      include ApiRecipes
+      api :svc, endpoints: { repos: nil, files: nil }
+    end
+    expect(klass.svc.repos('rails').contributors.url.to_s).to eq("#{base_url}/repos/rails/contributors")
+    expect(klass.svc.files('a').url.to_s).to eq("#{base_url}/files/a.json")
+  end
 end

@@ -1,71 +1,93 @@
+# frozen_string_literal: true
+
 module ApiRecipes
+  # One configured api, as ApiRecipes.github, MyClass.github and
+  # client.github return it. The subclass generated for the tree adds a
+  # method per root endpoint.
+  #
+  # Every method of this class is a name an endpoint cannot use as a method:
+  # the class has only the public methods below, and inside them the only
+  # private methods called are raise and block_given?.
   class Api
+    def initialize(context)
+      @context = context
+    end
 
-    attr_accessor :name, :configs, :authorization, :basic_auth
-    attr_reader :base_configs, :object
+    # The root endpoint called name. With a block, sends its request at once.
+    def [](name, *args, &block)
+      endpoint = @context.handles.endpoint(@context, @context.definition, @context.base_path, name, args)
+      endpoint.run(&block) if block
+      endpoint
+    end
 
-    BASE_CONFIGS_KEYS = [:protocol, :host, :port, :api_version, :timeout, :on_bad_code, :mime_type, :verify_with]
+    # A copy with options for the chain that follows it only.
+    def with(options) = self.class.new(@context.with(options))
 
-    def initialize(name, configs, object)
-      @name = name
-      @configs = ApiRecipes::Settings::DEFAULT.merge configs
-      @object = object
+    def definition = @context.definition
 
-      # Generate   some_api.some_endpoint  methods
-      # e.g.  github.users
-      endpoints = @configs[:endpoints]
-      if endpoints && endpoints.is_a?(Hash)
-        endpoints.each do |ep_name, params|
-          unless respond_to? ep_name
-            # TODO: store endpoints, routes and routes_urls
-            define_singleton_method ep_name do |*request_params, &block|
-              # puts "API params: #{params}"
-              Endpoint.new api: self, name: ep_name, path: path, params: params, request_params: request_params, &block
-            end
-          end
-        end
+    # The credential resolved along the chain; nil for the other kind.
+    def authorization
+      credential = @context.assigned_credential
+      credential && credential.kind == :authorization ? credential.value : nil
+    end
+
+    # Sets the credential of the caller's level; nil means "send none". The
+    # writers refuse an api returned by with: its options belong to its chain.
+    def authorization=(value)
+      unless @context.overrides.empty?
+        raise Error, 'an api returned by with cannot set authorization for the caller: use with(authorization: ...)'
       end
+
+      credential = Internals::Credential.from(:authorization, value)
+      Internals::LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
     end
 
-    def authorization=(auth)
-      @authorization = auth
+    def basic_auth
+      credential = @context.assigned_credential
+      credential && credential.kind == :basic_auth ? credential.value : nil
+    end
 
-      # Check if I'm the global api
-      if global?
-        # Set authorization also on every "children" (classes that define the same api)
-        ApiRecipes.set_authorization_for_api auth, name
+    def basic_auth=(value)
+      unless @context.overrides.empty?
+        raise Error, 'an api returned by with cannot set basic_auth for the caller: use with(basic_auth: ...)'
       end
+
+      credential = Internals::Credential.from(:basic_auth, value)
+      Internals::LevelSet.write(@context.owner, @context.level_key) { |level| level.with(credential: credential) }
     end
 
-    def basic_auth=(auth)
-      @basic_auth = auth
+    # The variable values of the caller's level.
+    def variables
+      level = Internals::LevelSet.read(@context.owner, @context.level_key)
+      (level && level.variables) || {}
+    end
 
-      # Check if I'm the global api
-      if global?
-        # Set authorization also on every "children" (classes that define the same api)
-        ApiRecipes.set_basic_auth_for_api auth, name
+    # Sets the variable values of the caller's level; nil removes them.
+    def variables=(values)
+      unless @context.overrides.empty?
+        raise Error, 'an api returned by with cannot set variables for the caller: use with(variables: ...)'
       end
+
+      values = Internals::Registry.variable_values(values)
+      problems = Internals::Compiler.unknown_variables(values, @context.definition)
+      raise ConfigurationError.new(problems) unless problems.empty?
+
+      Internals::LevelSet.write(@context.owner, @context.level_key) { |level| level.with(variables: values) }
     end
 
-    def base_configs
-      @configs.select { |c| BASE_CONFIGS_KEYS.include? c }
+    def inspect
+      definition = @context.definition
+      list = definition.endpoints.empty? ? '' : " endpoints: #{definition.endpoints.keys.join(', ')}"
+      "#<ApiRecipes::Api #{definition.name} #{@context.shown_origin}#{list}>"
     end
 
-    private
+    # An Api holds options that can contain secrets: it is never serialized.
+    def marshal_dump = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
 
-    def check_route_name_does_not_clash(route_name)
-      # Check if a method named route_name has already been defined on this object
-      if respond_to? route_name
-        raise RouteNameClashWithExistentMethod.new(@name, route_name)
-      end
-    end
+    def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
 
-    def global?
-      ApiRecipes._aprcps_global_storage[name] == self
-    end
+    def as_json(*) = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
 
-    def path
-      "/#{configs[:base_url]}/"
-    end
+    def to_json(*) = raise(TypeError, 'an ApiRecipes::Api cannot be serialized')
   end
 end

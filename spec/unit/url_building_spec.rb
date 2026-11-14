@@ -32,6 +32,22 @@ describe 'URL building' do
       expect(svc.users.show(7).url.to_s).to eq('https://h.test/api/v2/users/7')
     end
 
+    it 'ends the url of a root endpoint with an empty path with a slash, as 2.x did' do
+      svc = api(host: 'h.test', base_url: 'api/v2',
+                endpoints: { root: { path: '', endpoints: { same: { path: '' }, kid: nil } }, users: nil })
+      expect(svc.root.url.to_s).to eq('https://h.test/api/v2/')
+      expect(svc.root.same.url.to_s).to eq('https://h.test/api/v2/')
+      expect(svc.root.kid.url.to_s).to eq('https://h.test/api/v2/kid')
+      expect(svc.root.definition.full_path).to eq('/api/v2/')
+      expect(svc.users.url.to_s).to eq('https://h.test/api/v2/users')
+      expect(api(host: 'h.test', endpoints: { root: { path: '' } }).root.url.to_s).to eq('https://h.test/')
+    end
+
+    it 'does not add a slash to a nested endpoint with an empty path' do
+      svc = api(host: 'h.test', base_url: 'api/v2', endpoints: { users: { endpoints: { all: { path: '' } } } })
+      expect(svc.users.all.url.to_s).to eq('https://h.test/api/v2/users')
+    end
+
     it 'ignores extra slashes around base_url' do
       expect(api(host: 'h.test', base_url: '/v1/', endpoints: { ping: nil }).ping.url.to_s)
         .to eq('https://h.test/v1/ping')
@@ -103,7 +119,7 @@ describe 'URL building' do
     end
 
     it 'creates a route by default' do
-      expect(api(host: 'h.test', endpoints: { ping: {} }).ping.route).to be_a(ApiRecipes::Route)
+      expect(api(host: 'h.test', endpoints: { ping: {} }).ping.definition.route?).to eq(true)
     end
   end
 end
