@@ -8,11 +8,13 @@ end
 require 'webmock/rspec'
 require 'api_recipes'
 require 'support/test_apis'
+require 'support/import_helpers'
 
 WebMock.disable_net_connect!
 
 RSpec.configure do |config|
   config.include TestApis
+  config.include ImportHelpers
   config.before(:each) { ApiRecipes.reset! }
   config.order = :random
 end

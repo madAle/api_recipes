@@ -4,6 +4,7 @@ require 'optparse'
 require 'api_recipes'
 require 'api_recipes/version'
 require 'api_recipes/cli/upgrade'
+require 'api_recipes/cli/import'
 
 module ApiRecipes
   # The api_recipes command. It is not loaded by `require 'api_recipes'`.
