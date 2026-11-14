@@ -3,10 +3,10 @@
 Version 3.0 keeps the way you use the gem: the YAML files, `ApiRecipes.configure`,
 `api :name` in a class and the chain
 `ApiRecipes.github.users.show('octocat').run` work as before. A YAML file that
-is valid for 2.x needs no change, with two exceptions that part 2 describes: a
-placeholder in `base_url` and a `{word}` in a header value. What changes is how
-the gem behaves around them: it checks more, it refuses more, and a few results
-are different.
+is valid for 2.x needs no change, apart from what part 2 describes: options and
+values that 2.x accepted without checking them, a placeholder in `base_url` and a
+`{word}` in a header value. What changes is how the gem behaves around them: it
+checks more, it refuses more, and a few results are different.
 
 This guide has six parts:
 
@@ -175,6 +175,12 @@ A credential with a line break or another control character raises
 `ApiRecipes::InvalidCredential`. The message never contains the value. So does a
 credential that is not a String, such as a Symbol or a number, which 2.x passed
 on to http.rb: convert it with `to_s`.
+
+The `headers:` given with a request are checked in the same way before anything
+is sent. They must be a Hash (a list of pairs and `HTTP::Headers` are accepted
+too), and a name or a value with a control character raises
+`ApiRecipes::ConfigurationError`, which names the header and never shows the
+value. A tab inside a value is allowed.
 
 ### `follow` with something else than `true`, `false` or a Hash
 

@@ -1,8 +1,8 @@
 ## Unreleased
 
 The first pre-release of 3.0. The DSL is the same, and a YAML file that is valid
-for 2.x needs no change, except for a placeholder in `base_url` and a `{word}` in
-a header value. Read [UPGRADING.md](UPGRADING.md) before you move: it lists what stops, what
+for 2.x needs no change, apart from what the configuration check now refuses.
+Read [UPGRADING.md](UPGRADING.md) before you move: it lists what stops, what
 changes silently and what was removed, and explains `api_recipes upgrade`, which
 looks for them in your code.
 
@@ -31,7 +31,8 @@ looks for them in your code.
   `ApiNameClashError`; use `as:`. An api can be declared once in a class hierarchy.
 - A credential with a line break or a control character, or one that is not a
   String, raises `ApiRecipes::InvalidCredential`.
-- A control character in a name or a value of the `headers:` of a request raises
+- The `headers:` of a request must be a Hash, and a control character in a name
+  or a value (a tab inside a value is allowed) raises
   `ApiRecipes::ConfigurationError`, which never shows the value.
 - Empty names and names with control characters are refused for apis and
   endpoints.
@@ -68,8 +69,8 @@ looks for them in your code.
   `Response#to_s` returns the body.
 - A redirect to an address that http.rb reads only with the `addressable` gem
   raises `ApiRecipes::InvalidUrl` when the gem is missing.
-- `Api`, `Endpoint` and `Response` refuse serialization. A definition refuses
-  `Marshal` and YAML, and its JSON is its `to_h`.
+- `Api`, `Endpoint` and `Response` refuse serialization, JSON included. A
+  definition refuses `Marshal` and YAML, and its JSON is its `to_h`.
 
 #### Removed
 
