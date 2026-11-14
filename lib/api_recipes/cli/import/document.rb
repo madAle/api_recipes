@@ -46,8 +46,12 @@ module ApiRecipes
           # Dates are the only values beyond plain YAML that a description
           # written by hand contains. Aliases are accepted, since tools write
           # them for repeated parts: an alias is the same object, not a copy,
-          # and the importer never expands or prints a mapping or a list.
+          # and the importer never expands or prints a mapping or a list. The
+          # shape is checked first, on the events of the parser, because Ruby
+          # computes the hash of every key: a key that is an alias of a large
+          # structure would keep it busy for ever.
           def parse_yaml(text)
+            Psych::Parser.new(Shape.new).parse(text)
             YAML.safe_load(text, permitted_classes: [Date, Time], aliases: true)
           rescue Psych::BadAlias
             raise Error, 'the description uses a YAML alias that is not defined'
@@ -66,6 +70,48 @@ module ApiRecipes
             return if (version.is_a?(String) || version.is_a?(Numeric)) && SUPPORTED.match?(version.to_s)
 
             raise Error, 'only OpenAPI 3.0 or 3.1 is supported: the description must say which one in its openapi key'
+          end
+        end
+
+        # Refuses, while the text is parsed and before any object is built, a
+        # key that is not plain text and a nesting that is too deep.
+        class Shape < Psych::Handler
+          MAX_DEPTH = 200
+
+          def initialize
+            super
+            @open = []
+          end
+
+          def scalar(*) = child(false)
+
+          def alias(_anchor) = child(true)
+
+          def start_mapping(*) = start(:mapping)
+
+          def start_sequence(*) = start(:sequence)
+
+          def end_mapping = @open.pop
+
+          def end_sequence = @open.pop
+
+          private
+
+          def start(kind)
+            child(true)
+            @open << [kind, 0]
+            raise Error, 'the description is nested too deeply' if @open.size > MAX_DEPTH
+          end
+
+          # In a mapping the children come as key, value, key, value.
+          def child(composite)
+            kind, count = @open.last
+            return unless kind == :mapping
+
+            @open.last[1] = count + 1
+            return unless count.even? && composite
+
+            raise Error, 'a key of the description is an alias, a mapping or a list: keys must be plain text'
           end
         end
 

@@ -23,6 +23,7 @@ Spec files:
 | `dsl_objects_spec.rb` | what `Api`, `Endpoint` and `Response` show, write and let Ruby do |
 | `dsl_logging_spec.rb` | what the logger receives |
 | `configuration_spec.rb` | local files, ERB, YAML, refused configurations |
+| `openapi_import_spec.rb` | `api_recipes import`: a hostile OpenAPI description and the recipe written from it |
 
 ## Values put in the URL and in the headers
 
@@ -89,6 +90,22 @@ have control characters or invalid encoding, a placeholder in `base_url`, a
 host with a character a host cannot have), and the previous configuration
 being kept (`configuration_spec.rb`, `a configuration that is refused before
 anything is built`).
+
+## Importing an OpenAPI description
+
+The description comes from someone else. The recipe written from it is then
+loaded as a local file, where ERB is evaluated.
+
+| Risk | Protection | Spec | Example |
+| --- | --- | --- | --- |
+| The description makes the importer read another file or download something | only a `$ref` inside the file is followed; any other is an error; one file is opened, the network is never used | `openapi_import_spec.rb` | `a $ref never makes the importer open another file or use the network` |
+| A `$ref` that goes round in a circle | found, with an error. The schemas, which refer to themselves by design, are never walked | `openapi_import_spec.rb` | `a $ref that goes round in a circle is an error, not an endless loop` |
+| A title, an `operationId` or a parameter name with line breaks adds keys to the recipe | a comment is one line; every name and value is written by the YAML generator; the text is read back and compared with the data before it is returned | `openapi_import_spec.rb` | `free text of the description with line breaks never adds a key to the recipe` |
+| Text of the description with `<%` becomes code when the recipe is loaded | `<%` and `%>` are removed from comments; in a value they are an error that says where; the text written never contains `<%` | `openapi_import_spec.rb` | `free text of the description with ERB is removed from the comments, and loading the recipe as a file runs nothing`, `free text of the description with ERB split so that removing a part leaves another is still removed`, `a value of the recipe with ERB in ... is refused, and the message says where` (one per place), `a value of the recipe is never built by the importer from a description of ERB in a parameter name` |
+| A value with a line break starts a new line of the recipe | a control character in a name or a value is an error | `openapi_import_spec.rb` | `a value of the recipe with a line break is refused` |
+| Endpoint names that are not valid | reduced to letters, digits and `_`; the real segment stays in `path` | `openapi_import_spec.rb` | `writes endpoint names made only of letters, digits and underscores` |
+| A YAML description that builds Ruby objects | read with `YAML.safe_load`: plain data and dates only | `openapi_import_spec.rb` | `refuses a description with a Ruby object` |
+| A small YAML description that describes a huge structure through aliases | an alias is the same object, never a copy; the importer never expands, compares or prints a mapping or a list; a key that is not plain text and a nesting deeper than 200 levels are refused before any object is built | `openapi_import_spec.rb` | `reads a description made huge with YAML aliases without expanding or printing it`, `refuses a key that is an alias of a huge structure, instead of computing its hash for ever` |
 
 ## What the gem does not do
 

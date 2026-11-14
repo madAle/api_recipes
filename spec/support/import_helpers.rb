@@ -1,4 +1,6 @@
 require 'yaml'
+require 'stringio'
+require 'tmpdir'
 
 # Helpers for the specs of `api_recipes import`. They are methods, not
 # constants: a constant of the module is not visible from an example.
@@ -17,6 +19,22 @@ module ImportHelpers
 
   def fixture_openapi(name)
     File.expand_path("../fixtures/openapi/#{name}", __dir__)
+  end
+
+  # Runs the api_recipes command and returns [exit code, STDOUT, STDERR].
+  def run_cli(*argv)
+    out = StringIO.new
+    err = StringIO.new
+    [ApiRecipes::CLI.run(argv.map(&:to_s), out: out, err: err), out.string, err.string]
+  end
+
+  # Writes text in a new file of a temporary directory and yields its path.
+  def with_description(text, name = 'openapi.yml')
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, name)
+      File.write(path, text)
+      yield path, dir
+    end
   end
 
   # Every operation of a description as [VERB, path], where each {parameter}

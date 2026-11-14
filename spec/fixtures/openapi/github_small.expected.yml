@@ -1,0 +1,24 @@
+github:
+  host: api.github.com
+  endpoints:
+    users:
+      endpoints:
+        show:
+          path: /:username
+        repos:
+          path: /:username/repos
+    repos:
+      route: no
+      endpoints:
+        issues:
+          path: /:owner/:repo/issues
+          endpoints:
+            create:
+              path: ''
+              verb: post
+              ok_code: 201
+            show:
+              path: /:issue_number
+            update:
+              path: /:issue_number
+              verb: patch

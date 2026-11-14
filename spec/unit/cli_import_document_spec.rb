@@ -2,6 +2,7 @@ require 'spec_helper'
 require 'api_recipes/cli'
 require 'json'
 require 'tmpdir'
+require 'timeout'
 
 describe ApiRecipes::CLI::Import::Document do
   let(:error) { ApiRecipes::CLI::Import::Error }
@@ -128,6 +129,23 @@ describe ApiRecipes::CLI::Import::Document do
     expect(doc.inspect.length).to be < 200
     expect(ApiRecipes::CLI::Import.shown(doc.root['x40'])).to eq('a list')
     expect(ApiRecipes::CLI::Import.one_line(doc.root['x40'])).to eq('')
+  end
+
+  it 'refuses a key that is not plain text, before Ruby computes its hash' do
+    levels = (1..40).map { |n| "x#{n}: &x#{n} [*x#{n - 1}, *x#{n - 1}, *x#{n - 1}, *x#{n - 1}]" }
+    bomb = "x0: &x0 [lol]\n#{levels.join("\n")}\n"
+    ["#{bomb}openapi: 3.0.3\npaths: {*x40 : {}}\n", "openapi: 3.0.3\n? [a, b]\n: 1\n", "openapi: 3.0.3\n? {a: 1}\n: 1\n",
+     "openapi: 3.0.3\nx: &a text\n*a : 1\n"].each do |text|
+      expect { Timeout.timeout(5) { parse(text) } }.to raise_error(error, /keys must be plain text/)
+    end
+    merged = parse("openapi: 3.0.3\ninfo: &i {title: T}\nx-copy: {<<: *i, version: '1'}\n")
+    expect(merged.root['x-copy']).to eq('title' => 'T', 'version' => '1')
+  end
+
+  it 'refuses a nesting too deep to be a description, instead of exhausting the stack' do
+    expect { parse("openapi: 3.0.3\nx: #{'[' * 5000}#{']' * 5000}\n") }.to raise_error(error, /nested too deeply/)
+    expect { parse("{\"openapi\": \"3.0.3\", \"x\": #{'[' * 5000}#{']' * 5000}}") }.to raise_error(error, /not valid JSON/)
+    expect(parse("openapi: 3.0.3\nx: #{'[' * 150}#{']' * 150}\n").root).to include('x')
   end
 
   it 'refuses a Ruby object and a file that is not a mapping' do
