@@ -13,6 +13,8 @@ bundle exec rspec spec/unit/url_building_spec.rb
 bundle exec rspec spec/security                 # one example per protection
 bundle exec rspec spec/docs                     # the examples in README.md and UPGRADING.md
 bundle exec ruby -Ilib exe/api_recipes upgrade app lib --config config/apis/github.yml
+bundle exec ruby -Ilib exe/api_recipes import spec/fixtures/openapi/github_small.yml --name github
+bundle exec ruby -Ilib exe/api_recipes routes spec/fixtures/openapi/github_small.expected.yml
 URI_VERSION='~> 1.0' bundle exec rspec          # pick the uri gem: '~> 1.0' or '< 1.0'
 gem build api_recipes.gemspec -o /tmp/check.gem # packaging check
 ```
@@ -40,6 +42,13 @@ fails under 90% line coverage.
 | `lib/api_recipes/internals/declaration.rb` | one `api :name` in a class or a module |
 | `lib/api_recipes/internals/request.rb` | builds the URL and the http.rb client, sends the request, checks the outcome |
 | `lib/api_recipes/cli.rb`, `cli/upgrade.rb`, `exe/api_recipes` | the `api_recipes` command and its `upgrade` checks |
+| `lib/api_recipes/cli/import.rb` | the `import` command: from an OpenAPI description to the text of a recipe, checked before it is returned |
+| `lib/api_recipes/cli/import/document.rb` | reads the description (YAML or JSON) and follows its internal `$ref` |
+| `lib/api_recipes/cli/import/server.rb`, `security.rb` | the address, the variables and the `auth` of the api |
+| `lib/api_recipes/cli/import/tree.rb` | from the paths to the tree of endpoints: names, operations, comments, warnings |
+| `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
+| `lib/api_recipes/cli/routes.rb` | the `routes` command |
+| `spec/fixtures/openapi` | OpenAPI descriptions for the specs; `SOURCE.md` says where the real one comes from |
 | `spec/unit`, `spec/integration` | specs; integration specs stub HTTP with WebMock |
 | `spec/security` | one example per protection, and `README.md` that maps them |
 | `spec/docs/examples_spec.rb` | evaluates the examples of README.md and UPGRADING.md |
@@ -76,6 +85,7 @@ classes are built once, by `configure`.
 - A behaviour change comes with its spec, written first.
 - Internal classes live under `ApiRecipes::Internals`, so that `include ApiRecipes` does not shadow an application's own constants. Only `Api`, `Endpoint`, `Response`, `Configuration`, the errors and `VERSION` stay directly under `ApiRecipes`.
 - Ruby 3.3 syntax; the block parameter `it` is not allowed (Ruby 3.4).
+- The code of the commands lives under `ApiRecipes::CLI`, uses only the standard library and is not loaded by `require 'api_recipes'`. `api_recipes import` opens one file, never uses the network, and never turns a mapping or a list of the description into text (`Import.text`): with YAML aliases a small file can describe a huge structure.
 - `Api` and `Endpoint` have only these public methods. `Api`: `[]`, `with`,
   `definition`, `authorization`, `authorization=`, `basic_auth`, `basic_auth=`,
   `variables`, `variables=`, `inspect`. `Endpoint`: `[]`, `run`, `url`, `with`,
