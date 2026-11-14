@@ -75,6 +75,8 @@ module ApiRecipes
 
     def as_json(*) = raise(TypeError, 'an ApiRecipes::Response cannot be serialized: use response.data')
 
+    def to_json(*) = raise(TypeError, 'an ApiRecipes::Response cannot be serialized: use response.data')
+
     private
 
     def hidden_pair?(pair)

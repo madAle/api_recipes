@@ -10,6 +10,7 @@ module ApiRecipes
       FOLLOW_PROBLEM = 'follow: must be true, false or a Hash'.freeze
       FOLLOW_OPTIONS = %i[strict max_hops on_redirect].freeze
       CONTROL_BYTE = /[\x00-\x1f\x7f]/n
+      VALUE_CONTROL_BYTE = /[\x00-\x08\x0a-\x1f\x7f]/n
 
       def initialize(context:, definition:, path:, options:, overrides: nil)
         @context = context
@@ -160,22 +161,29 @@ module ApiRecipes
         options
       end
 
-      # http.rb refuses a header with a line break and puts the value in its
-      # error. The headers of the request are checked here, and named without
-      # their value.
+      # http.rb puts in its errors the headers it cannot read and the value of
+      # a header with a line break. The headers of the request are checked
+      # here, and named without their value. A tab is allowed inside a value.
       def check_headers
         headers = @options[:headers]
-        return unless headers.respond_to?(:each)
+        return if headers.nil?
+        unless headers.is_a?(Hash) || headers.is_a?(Array) || headers.is_a?(HTTP::Headers)
+          raise ConfigurationError.new(['headers: must be a Hash'])
+        end
 
         headers.each do |name, value|
-          next unless control?(name) || Array(value).any? { |item| control?(item) }
+          next unless bad_text?(name, CONTROL_BYTE) || Array(value).any? { |item| bad_text?(item, VALUE_CONTROL_BYTE) }
 
           shown = name.to_s.scrub('?').gsub(/[^[:print:]]/, '?')[0, 40]
-          raise ConfigurationError.new(["headers: the name and the value of '#{shown}' must not contain control characters"])
+          raise ConfigurationError.new(["headers: the name and the value of '#{shown}' must be valid text " \
+                                        'without control characters'])
         end
       end
 
-      def control?(text) = text.to_s.b.match?(CONTROL_BYTE)
+      def bad_text?(text, control)
+        text = text.to_s
+        !text.valid_encoding? || text.b.match?(control)
+      end
 
       # http.rb follows any value that responds to fetch, so only the values the
       # protection can wrap are accepted. http.rb reads the options of a Hash

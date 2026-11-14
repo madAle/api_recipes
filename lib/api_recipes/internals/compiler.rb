@@ -405,7 +405,9 @@ module ApiRecipes
         nil
       end
 
+      # A String of digits is read as its number, as 2.x did.
       def positive_integer(value, where)
+        value = value.to_i if value.is_a?(String) && value.match?(/\A[0-9]{1,5}\z/)
         return value if value.is_a?(Integer) && value.between?(1, 65_535)
 
         add(where, 'must be an integer from 1 to 65535')

@@ -72,6 +72,13 @@ describe ApiRecipes::Internals::Compiler do
     end
   end
 
+  it 'accepts a port written as a String of digits, as 2.x did' do
+    expect(compile(port: '3000').port).to eq(3000)
+    ['0', '99999', 'abc', '3000 ', "3000\n", '', '+80', '8_0'].each do |port|
+      expect(problems(port: port)).to include('svc.port: must be an integer from 1 to 65535')
+    end
+  end
+
   it 'accepts what is valid today' do
     valid = { protocol: :http, host: 'web_service_1', port: 3000, on_bad_code: :ignore, 'x-note' => 'free',
               endpoints: { a: { route: 'no', ok_code: [200, 201], 'x-doc' => 1, endpoints: { b: { route: true } } } } }

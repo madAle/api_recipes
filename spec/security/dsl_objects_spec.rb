@@ -95,6 +95,30 @@ describe 'Objects of the DSL' do
     expect(WebMock).not_to have_requested(:any, /.*/)
   end
 
+  it 'refuses headers of the request that are not a Hash, a list of pairs or HTTP::Headers, without showing them' do
+    ['Authorization: Bearer SECRET', Struct.new(:auth).new("SECRET\nx"), 42, :SECRET].each do |headers|
+      expect { ApiRecipes.svc.users.show(1, headers: headers).run }.to raise_error(ApiRecipes::ConfigurationError) { |e|
+        expect(e.errors).to eq(['headers: must be a Hash'])
+      }
+    end
+    expect(WebMock).not_to have_requested(:any, /.*/)
+  end
+
+  it 'refuses a header of the request whose name or value is not valid text, without showing its value' do
+    [{ "X-\xFF" => 'SECRET' }, { 'X-Private' => "SECRET\xFF" }].each do |headers|
+      expect { ApiRecipes.svc.users.show(1, headers: headers).run }
+        .to raise_error(ApiRecipes::ConfigurationError) { |e| expect(e.message).not_to include('SECRET') }
+    end
+    expect(WebMock).not_to have_requested(:any, /.*/)
+  end
+
+  it 'accepts headers given as a Hash, as pairs or as HTTP::Headers, and a tab inside a value' do
+    [{ 'X-Private' => "a\tb" }, [['X-Private', "a\tb"]], HTTP::Headers.coerce('X-Private' => "a\tb")].each do |headers|
+      ApiRecipes.svc.users.show(1, headers: headers).run
+    end
+    expect(WebMock).to have_requested(:get, %r{api\.example\.test/users/1}).with(headers: { 'X-Private' => "a\tb" }).times(3)
+  end
+
   it 'does not change how Ruby treats the parent of an endpoint named after an implicit conversion' do
     parent = ApiRecipes.svc
     expect([parent].flatten).to eq([parent])
@@ -144,6 +168,12 @@ describe 'Objects of the DSL' do
     it 'refuses marshal_dump and as_json on their own, and points to data' do
       expect { response.marshal_dump }.to raise_error(TypeError)
       expect { response.as_json }.to raise_error(TypeError, /response\.data/)
+    end
+
+    it 'refuses to_json, alone and inside another structure' do
+      expect { response.to_json }.to raise_error(TypeError, /response\.data/)
+      expect { JSON.generate([response]) }.to raise_error(TypeError)
+      expect { JSON.generate(result: response) }.to raise_error(TypeError)
     end
 
     it 'does not expose the request and does not show it in inspect' do
