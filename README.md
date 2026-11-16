@@ -505,9 +505,11 @@ after its verb and after how its path ends:
 - A single resource comes out badly: `PATCH /user` becomes `user.update_all`.
   Rename it in the file.
 
-What the command cannot write is left out, with a warning for each operation:
-a path where a parameter is directly followed by a letter, a digit or `_`
-(`/files/{id}_meta`), because the gem reads `:id_meta` as one name.
+What the gem cannot write as a path is left out, with a warning for each path:
+a parameter directly followed by a letter, a digit or `_` (`/files/{id}_meta`),
+because the gem reads `:id_meta` as one name; a segment that starts with `*` and
+a name, which the gem reads as a parameter that spans segments; and an empty
+segment (`/a//b`), because the gem joins two slashes into one.
 
 ### What the command refuses
 
@@ -516,6 +518,8 @@ a path where a parameter is directly followed by a letter, a digit or `_`
   file first. References inside the file are followed.
 - A description whose text would become code in the recipe: `<%` in a value is
   an error that says where, and it is removed from the comments.
+- A YAML description with binary values, with keys that are not plain text, or
+  with aliases that stand for more than ten million values.
 
 The command reads that one file, never uses the network and runs nothing of the
 description.

@@ -85,7 +85,7 @@ classes are built once, by `configure`.
 - A behaviour change comes with its spec, written first.
 - Internal classes live under `ApiRecipes::Internals`, so that `include ApiRecipes` does not shadow an application's own constants. Only `Api`, `Endpoint`, `Response`, `Configuration`, the errors and `VERSION` stay directly under `ApiRecipes`.
 - Ruby 3.3 syntax; the block parameter `it` is not allowed (Ruby 3.4).
-- The code of the commands lives under `ApiRecipes::CLI`, uses only the standard library and is not loaded by `require 'api_recipes'`. `api_recipes import` opens one file, never uses the network, and never turns a mapping or a list of the description into text (`Import.text`): with YAML aliases a small file can describe a huge structure.
+- The code of the commands lives under `ApiRecipes::CLI`, uses only the standard library and is not loaded by `require 'api_recipes'`. `api_recipes import` opens one file, never uses the network, and never turns a mapping or a list of the description into text: every value read from the description goes through `Import.text`, `Import.shown` or `Import.one_line`, never through `to_s` or an interpolation. With YAML aliases a small file can describe a huge structure; `Document::Shape` refuses the largest ones while the text is parsed.
 - `Api` and `Endpoint` have only these public methods. `Api`: `[]`, `with`,
   `definition`, `authorization`, `authorization=`, `basic_auth`, `basic_auth=`,
   `variables`, `variables=`, `inspect`. `Endpoint`: `[]`, `run`, `url`, `with`,
