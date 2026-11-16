@@ -21,7 +21,7 @@ which are data only, and the commands that install them.
   GET, then asks before it writes the
   recipe and `recipes.lock` in `config/api_recipes`, or in the folder given with
   `--to`. `api_recipes install FILE` installs a file. The download is done by
-  `git`, over `https` only, without a working copy.
+  `git`, over `https` or `ssh` only, without a working copy.
 - `api_recipes update NAME` replaces an installed recipe with the one its
   repository has now, after showing what changes in the address, the
   credential, the headers and the verbs.
@@ -31,8 +31,10 @@ which are data only, and the commands that install them.
 - A `*.recipe.yml` given to `apis_files_paths` is still refused; the message now
   says to give it to `recipes_paths`.
 - A private repository of recipes works over `https` with the credentials that
-  `git` already has for its host. When the repository asks for credentials that
-  `git` does not have, the message says so.
+  `git` already has for its host, and over `ssh` with the keys that `ssh`
+  already uses: the address is `user@host:path` or `ssh://user@host/path`.
+  When the repository asks for credentials that `git` does not have, when `ssh`
+  does not know the host or has no key the host accepts, the message says so.
 
 **An endpoint that does not set `timeout`, `on_bad_code` or `mime_type` now
 looks for it up the tree**, as it already did for `verify_with`: in the

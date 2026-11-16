@@ -472,11 +472,11 @@ describe 'Portable recipes' do
       expect { ApiRecipes::CLI::Recipes::Git.new('https://example.test/r').fetch('shop', "1\n--upload-pack=x") }.to raise_error(ArgumentError)
     end
 
-    it 'cannot be anything else than an https address: no other protocol, no option, no command' do
-      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https].freeze)
+    it 'cannot be anything else than an https or ssh address: no other protocol, no option, no command' do
+      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
       expect(Open3).not_to receive(:capture3)
-      [@repository.address, @repository.directory, 'http://example.test/r', 'git://example.test/r', 'ssh://git@example.test/r',
-       'git@example.test:team/r', "ext::sh -c touch% #{marker}", "--upload-pack=touch #{marker}",
+      [@repository.address, @repository.directory, 'http://example.test/r', 'git://example.test/r',
+       "ext::sh -c touch% #{marker}", "--upload-pack=touch #{marker}",
        "https://example.test/$(touch #{marker})", "https://example.test/r;touch #{marker}", "https://example.test/r\n--x"].each do |address|
         code, out, err = run_cli('install', 'shop', '--from', address, '--to', @dir, '--yes')
         expect([code, out]).to eq([2, '']), address
@@ -496,6 +496,21 @@ describe 'Portable recipes' do
       expect(install('--yes').first).to eq(0)
       expect(commands).not_to be_empty
       expect(commands).to all(satisfy { |arguments| arguments[0].is_a?(Hash) && arguments[1] == 'git' && arguments.size > 2 })
+    end
+
+    it 'cannot make ssh run a command or take an option: the user, the host and the path never start with a hyphen' do
+      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
+      expect(Open3).not_to receive(:capture3)
+      ["ssh://-oProxyCommand=touch${IFS}#{marker}/r", "ssh://git@-oProxyCommand=touch${IFS}#{marker}/r",
+       "-oProxyCommand=touch${IFS}#{marker}@example.test:r", "git@-oProxyCommand=touch${IFS}#{marker}:r",
+       "ssh://-oProxyCommand=touch #{marker}/r", 'ssh://-F/tmp/config@example.test/r', "git@example.test:--upload-pack=touch${IFS}#{marker}",
+       'git@example.test:-x', 'ssh://git:secret@example.test/r', "git@example.test:r\n--x", 'ssh://-v/r', 'ssh://-F/r',
+       "ssh://git@example.test/r\n--x"].each do |address|
+        code, out, err = run_cli('install', 'shop', '--from', address, '--to', @dir, '--yes')
+        expect([code, out]).to eq([2, '']), address
+        expect(err).to start_with('--from must '), address
+      end
+      expect(File.exist?(marker)).to eq(false)
     end
   end
 
@@ -533,9 +548,9 @@ describe 'Portable recipes' do
       expect(File.exist?(marker)).to eq(false)
     end
 
-    it 'is reached with https only: git itself refuses any other protocol, even if the check of the address is skipped' do
+    it 'is reached with https and ssh only: git itself refuses any other protocol, even if the check of the address is skipped' do
       @repository.publish('shop', recipe_text)
-      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https].freeze)
+      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
       allow(ApiRecipes::CLI::Recipes::Git).to receive(:address_problem).and_return(nil)
       code, out, err = install('--yes')
       expect([code, out]).to eq([2, ''])
@@ -559,11 +574,14 @@ describe 'Portable recipes' do
 
   describe 'an address with a user name or a password' do
     it 'is refused by install, so that it never reaches recipes.lock, which is versioned' do
+      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
       expect(Open3).not_to receive(:capture3)
       %w[https://alice:s3cret@example.test/r https://token@example.test/r].each do |address|
         code, _out, err = run_cli('install', 'shop', '--from', address, '--to', @dir, '--yes')
         expect([code, err]).to eq([2, "--from must not contain a user name or a password: git takes them from its own configuration\n"])
       end
+      code, _out, err = run_cli('install', 'shop', '--from', 'ssh://alice:s3cret@example.test/r', '--to', @dir, '--yes')
+      expect([code, err]).to eq([2, "--from must not contain a password: ssh takes what it needs from its keys and its agent\n"])
       expect(File.exist?(@dir)).to eq(false)
     end
 
@@ -571,10 +589,15 @@ describe 'Portable recipes' do
       expect(install_text(recipe_text, '--yes').first).to eq(0)
       lock = File.join(@dir, 'recipes.lock')
       File.write(lock, File.read(lock).sub(@repository.address, 'https://alice:s3cret@example.test/r'))
+      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
       expect(Open3).not_to receive(:capture3)
       code, _out, err = run_cli('update', 'shop', '--dir', @dir, '--yes')
       expect(code).to eq(2)
       expect(err).to include('must not contain a user name or a password')
+      File.write(lock, File.read(lock).sub('https://alice:s3cret@example.test/r', 'ssh://alice:s3cret@example.test/r'))
+      code, _out, err = run_cli('update', 'shop', '--dir', @dir, '--yes')
+      expect(code).to eq(2)
+      expect(err).to include('must not contain a password')
     end
   end
 

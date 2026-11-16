@@ -751,16 +751,25 @@ the arguments are wrong, `git` fails or a file cannot be read or written.
 ### Private repositories
 
 A company can keep its recipes in a repository of its own, private, on any Git
-server that speaks `https`: GitHub, GitLab, Bitbucket, Gitea or one you host.
-The repository has the layout of the cookbook, a folder `recipes` with one
-`NAME.recipe.yml` per recipe, and `--from` names it:
+server that speaks `https` or `ssh`: GitHub, GitLab, Bitbucket, Gitea or one
+you host. The repository has the layout of the cookbook, a folder `recipes`
+with one `NAME.recipe.yml` per recipe, and `--from` names it:
 
     $ api_recipes install billing --from https://git.example.com/platform/api-recipes
+    $ api_recipes install billing --from git@git.example.com:platform/api-recipes.git
     $ api_recipes update billing
 
-The command never asks for a user name or a password and never takes them in
-the address: `git` must already have them for that host. Two ways that work on
-a laptop and in CI:
+**Over `ssh`** the address is written as `user@host:path` or as
+`ssh://user@host:port/path`, and `ssh` works as it does for `git clone`: with
+your keys, your agent and your `~/.ssh/config`. A deploy key that can read the
+repository is enough, also in CI. When `ssh` has to ask something, such as the
+passphrase of a key or whether to trust a host it meets for the first time, it
+asks on the terminal; without a terminal it fails, and the message says what
+is missing. An address with a password is refused.
+
+**Over `https`** the command never asks for a user name or a password and
+never takes them in the address: `git` must already have them for that host.
+Two ways that work on a laptop and in CI:
 
     # a credential helper: the one of your system, or a file
     $ git config --global credential.helper store
@@ -770,9 +779,9 @@ a laptop and in CI:
     $ git config --global url."https://ci:${TOKEN}@git.example.com/".insteadOf "https://git.example.com/"
 
 `recipes.lock` records the address as you wrote it, so no credential reaches
-your repository. Only `https` is accepted: an `ssh` address is refused. The
-application needs none of this when it runs: the installed recipes are files of
-your project.
+your repository, and `update` reads it from there: whoever runs `update` needs
+the same access. No other protocol is accepted. The application needs none of
+this when it runs: the installed recipes are files of your project.
 
 ### What `configure` checks
 

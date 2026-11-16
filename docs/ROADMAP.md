@@ -108,7 +108,8 @@ A command turns an OpenAPI description into a recipe file, for example:
 - The content of that repository grows on its own schedule and is not a
   requirement for the release.
 - A company can keep its recipes in a private repository of its own, reached
-  over `https` with the credentials that `git` already has.
+  over `https` with the credentials that `git` already has, or over `ssh` with
+  its keys.
 
 ### Less text for the same API
 

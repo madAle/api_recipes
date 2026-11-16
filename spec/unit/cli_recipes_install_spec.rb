@@ -144,10 +144,11 @@ RSpec.describe 'api_recipes install' do
       expect(git).to have_received(:fetch).with('shop', nil)
     end
 
-    it 'refuses an address that is not https without a user, before running git' do
+    it 'refuses an address that is not https without a user, or ssh without a password, before running git' do
       expect(Open3).not_to receive(:capture3)
-      %w[http://example.test/r ssh://example.test/r git@example.test:r/r https://me:secret@example.test/r /tmp/r].each do |address|
-        stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https].freeze)
+      %w[http://example.test/r example.test:r/r ssh://me:secret@example.test/r git@-example.test:r
+         https://me:secret@example.test/r /tmp/r].each do |address|
+        stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
         code, out, err = install('shop', '--from', address, '--yes')
         expect([code, out]).to eq([2, '']), address
         expect(err).to start_with('--from must '), address

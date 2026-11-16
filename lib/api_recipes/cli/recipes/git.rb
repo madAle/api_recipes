@@ -9,13 +9,25 @@ module ApiRecipes
       # Reads the file of one recipe from a Git repository. Nothing is checked
       # out: the commit is fetched into an empty repository in a temporary
       # folder, and the file is read from there after checking that it is a
-      # regular file. git is run without a shell, and may only use https.
+      # regular file. git is run without a shell, and may only use https and
+      # ssh.
       class Git
-        PROTOCOLS = %w[https].freeze
+        PROTOCOLS = %w[https ssh].freeze
         FOLDER = 'recipes'
         FILE_MODES = %w[100644 100755].freeze
         ADDRESS = %r{\A(?<scheme>[a-z]+)://(?<host>[A-Za-z0-9.-]*)(?::[0-9]{1,5})?(?<path>/[A-Za-z0-9._~+/-]*)?\z}
         WITH_USER = %r{\A[A-Za-z][A-Za-z0-9+.-]*://[^/]*@}
+        # The two ways git writes an ssh address: ssh://[user@]host[:port]/path
+        # and user@host:path. The user, the host and the path never start with
+        # a hyphen, which ssh or git would read as an option, and the short
+        # form needs its user: host:path alone is also how a mistyped https:/
+        # address and a Windows path look.
+        SSH_USER = '[A-Za-z0-9_][A-Za-z0-9._-]*'
+        SSH_HOST = '[A-Za-z0-9][A-Za-z0-9.-]*'
+        SSH_URL = %r{\Assh://(?:#{SSH_USER}@)?#{SSH_HOST}(?::[0-9]{1,5})?/[A-Za-z0-9._~+/-]*\z}
+        SSH_SHORT = %r{\A#{SSH_USER}@#{SSH_HOST}:[A-Za-z0-9._~/][A-Za-z0-9._~+/-]*\z}
+        WITH_PASSWORD = %r{\Assh://[^/@]*:[^/@]*@}
+        ACCEPTED = 'must start with https:// or ssh://, or be written as user@host:path'
         MAX_ADDRESS = 2000
         COMMIT = /\A(?:\h{40}|\h{64})\z/
         # git asks nothing, reads pathspecs as they are written, answers in
@@ -33,20 +45,29 @@ module ApiRecipes
 
         Found = Data.define(:text, :commit)
 
-        # Why the address cannot be used, or nil. An address with a user name
-        # or a password is refused: it would end up in recipes.lock.
+        # Why the address cannot be used, or nil. An https address with a
+        # user name or a password is refused, and so is an ssh one with a
+        # password: they would end up in recipes.lock. The user of an ssh
+        # address is not a secret and is part of it.
         def self.address_problem(address)
           return 'must be text' unless address.is_a?(String)
           return "must be at most #{MAX_ADDRESS} characters" if address.length > MAX_ADDRESS
-          if WITH_USER.match?(address)
+          return nil if ssh?(address)
+          return 'must not contain a password: ssh takes what it needs from its keys and its agent' if WITH_PASSWORD.match?(address)
+          if WITH_USER.match?(address) && !address.start_with?('ssh://')
             return 'must not contain a user name or a password: git takes them from its own configuration'
           end
 
           match = ADDRESS.match(address)
-          return "must start with #{PROTOCOLS.first}://" unless match && PROTOCOLS.include?(match[:scheme])
+          return ACCEPTED unless match && match[:scheme] != 'ssh' && PROTOCOLS.include?(match[:scheme])
           return 'must name a host' if match[:host].empty? && match[:scheme] != 'file'
 
           nil
+        end
+
+        # Whether the address is one of the two ssh forms, and ssh may be used.
+        def self.ssh?(address)
+          PROTOCOLS.include?('ssh') && (SSH_URL.match?(address) || SSH_SHORT.match?(address))
         end
 
         def initialize(address)
@@ -90,10 +111,14 @@ module ApiRecipes
         # What to do about a failure that has a known cause, or nothing.
         def hint(err)
           if err.include?('not allowed')
-            " (git may use only #{PROTOCOLS.first} here: check url.*.insteadOf in your git configuration)"
+            " (git may use only #{PROTOCOLS.join(' and ')} here: check url.*.insteadOf in your git configuration)"
           elsif err.include?('could not read Username') || err.include?('Authentication failed')
             ' (a private repository needs credentials that git already has for its host, such as a credential ' \
               'helper: the command never asks for them)'
+          elsif err.include?('Host key verification failed')
+            ' (ssh does not know this host: connect to it once with ssh, or add its key to known_hosts)'
+          elsif err.include?('Permission denied')
+            ' (ssh has no key that this host accepts for the repository: check the key and the agent with ssh -T)'
           else
             ''
           end

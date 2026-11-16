@@ -10,34 +10,61 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
       end
     end
 
-    it 'refuses every other way to reach a repository' do
-      %w[http://example.test/r git://example.test/r ssh://example.test/r file:///tmp/r ext::sh /tmp/r ./r
-         HTTPS://example.test/r https:/example.test -https://example.test].push('', 'example.test/r', 'https://').each do |address|
-        expect(described_class.address_problem(address)).to match(/must start with https:\/\/|must name a host/), address
+    it 'accepts an ssh address, written as ssh:// or as user@host:path' do
+      %w[ssh://git@example.test/team/recipes.git ssh://example.test/r ssh://git@example.test:2222/r
+         git@github.com:acme/api-recipes.git deploy_1@git.example.test:~me/r git@example.test:/srv/git/r.git].each do |address|
+        expect(described_class.address_problem(address)).to be_nil, address
       end
     end
 
-    it 'refuses a user name or a password, which would end up in the lock' do
-      %w[https://me@example.test/r https://me:secret@example.test/r https://:token@example.test/r git@example.test:r].each do |address|
-        problem = described_class.address_problem(address)
-        expect(problem).not_to be_nil, address
+    it 'refuses every other way to reach a repository' do
+      %w[http://example.test/r git://example.test/r file:///tmp/r ext::sh /tmp/r ./r SSH://example.test/r
+         HTTPS://example.test/r https:/example.test -https://example.test C:/r example.test:r ssh://example.test
+         git+ssh://example.test/r].push('', 'example.test/r', 'https://', 'ssh://').each do |address|
+        expect(described_class.address_problem(address)).to match(/\Amust start with https:\/\/ or ssh:\/\/|must name a host/), address
       end
-      expect(described_class.address_problem('https://me:secret@example.test/r'))
-        .to eq('must not contain a user name or a password: git takes them from its own configuration')
+    end
+
+    it 'refuses a user name or a password in an https address, which would end up in the lock' do
+      %w[https://me@example.test/r https://me:secret@example.test/r https://:token@example.test/r].each do |address|
+        expect(described_class.address_problem(address))
+          .to eq('must not contain a user name or a password: git takes them from its own configuration'), address
+      end
+    end
+
+    it 'refuses a password in an ssh address, and keeps its user' do
+      %w[ssh://me:secret@example.test/r ssh://:secret@example.test/r ssh://me:@example.test/r].each do |address|
+        expect(described_class.address_problem(address))
+          .to eq('must not contain a password: ssh takes what it needs from its keys and its agent'), address
+      end
+      expect(described_class.address_problem('me:secret@example.test:r')).to eq(described_class::ACCEPTED)
+    end
+
+    # ssh reads a host or a user that starts with a hyphen as one of its
+    # options, and -oProxyCommand runs a command.
+    it 'refuses an ssh address with a user, a host or a path that ssh or git would read as an option' do
+      ['ssh://-v/r', "ssh://git@example.test/r\n--x", 'ssh://-oProxyCommand=x/r', 'ssh://git@-oProxyCommand=x/r', 'ssh://-l@example.test/r', '-oProxyCommand=x@example.test:r',
+       'git@-oProxyCommand=x:r', 'git@example.test:-x', 'git@example.test:--upload-pack=x', 'git@example.test:',
+       'ssh://git@example.test/%2Dx', 'ssh://a@b@example.test/r', 'git@example.test:r@x', 'git@example.test:r --x',
+       "git@example.test:r\n--x", 'ssh://git@example.test/r?x', 'ssh://git@example.test:port/r', 'ssh://git@/r',
+       "git@example.test:r\u202E", 'ssh://git@example.test/a b', 'ssh://[::1]/r'].each do |address|
+        expect(described_class.address_problem(address)).to eq(described_class::ACCEPTED), address.inspect
+      end
     end
 
     it 'refuses a query, a fragment, a space, a control character, an option of git and what is not text' do
       ['https://example.test/r?x=1', 'https://example.test/r#x', 'https://example.test/a b', "https://example.test/r\n--upload-pack=x",
        'https://example.test/r --upload-pack=x', 'https://example.test/%2e%2e', "https://example.test/r\u202E"].each do |address|
-        expect(described_class.address_problem(address)).to eq('must start with https://'), address.inspect
+        expect(described_class.address_problem(address)).to eq(described_class::ACCEPTED), address.inspect
       end
       expect(described_class.address_problem(nil)).to eq('must be text')
       expect(described_class.address_problem("https://example.test/#{'a' * 2000}")).to eq('must be at most 2000 characters')
     end
 
     it 'refuses to be built with an address it would not use' do
-      expect { described_class.new('ssh://example.test/r') }
-        .to raise_error(described_class::Failure, 'the address of the repository must start with https://')
+      expect { described_class.new('git://example.test/r') }
+        .to raise_error(described_class::Failure,
+                        'the address of the repository must start with https:// or ssh://, or be written as user@host:path')
     end
   end
 
@@ -170,13 +197,44 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
   end
 
   describe 'the protocols git may use' do
-    it 'are only https: a file address is refused by git itself, even if the check of the address is skipped' do
+    it 'are only https and ssh: a file address is refused by git itself, even if the check of the address is skipped' do
       Dir.mktmpdir do |directory|
         repository = RecipeRepository.new(File.realpath(directory))
         repository.publish('shop', recipe_text)
         allow(described_class).to receive(:address_problem).and_return(nil)
         expect { described_class.new(repository.address).fetch('shop') }
-          .to raise_error(described_class::Failure, /git could not read file:.*not allowed \(git may use only https here: check url\.\*\.insteadOf in your git configuration\)\z/)
+          .to raise_error(described_class::Failure, /git could not read file:.*not allowed \(git may use only https and ssh here: check url\.\*\.insteadOf in your git configuration\)\z/)
+      end
+    end
+
+    it 'gives an ssh address to git as it is written, after --, with ssh among the protocols' do
+      done = instance_double(Process::Status, success?: true)
+      failed = instance_double(Process::Status, success?: false)
+      %w[git@example.test:team/recipes.git ssh://git@example.test:2222/team/recipes.git].each do |address|
+        calls = []
+        allow(Open3).to receive(:capture3) do |*arguments, **_options|
+          calls << arguments
+          arguments.include?('fetch') ? ['', "fatal: stopped here\n".b, failed] : ['', '', done]
+        end
+        expect { described_class.new(address).fetch('shop', '1.0.0') }.to raise_error(described_class::Failure, /stopped here/)
+        fetching = calls.find { |arguments| arguments.include?('fetch') }
+        expect(fetching.last(3)).to eq(['--', address, 'refs/tags/shop-1.0.0'])
+        expect(fetching).to include('protocol.allow=never', 'protocol.https.allow=always', 'protocol.ssh.allow=always')
+        expect(fetching.grep(/\Aprotocol\./).size).to eq(3)
+        expect(fetching.first).to include('GIT_ALLOW_PROTOCOL' => 'https:ssh', 'GIT_TERMINAL_PROMPT' => '0')
+        expect(fetching[1]).to eq('git')
+      end
+    end
+
+    # Should the check of the address ever let one through: git refuses a host
+    # that starts with a hyphen before it starts ssh.
+    it 'do not let git start ssh with a host that is an option, even if the check of the address is skipped' do
+      Dir.mktmpdir do |directory|
+        marker = File.join(directory, 'ran')
+        allow(described_class).to receive(:address_problem).and_return(nil)
+        expect { described_class.new("ssh://-oProxyCommand=touch #{marker}/r").fetch('shop') }
+          .to raise_error(described_class::Failure, /git could not read/)
+        expect(File.exist?(marker)).to eq(false)
       end
     end
   end
@@ -215,6 +273,21 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
           .to raise_error(described_class::Failure, "git could not read https://example.test/r: #{said.strip} " \
                                                     '(a private repository needs credentials that git already has for ' \
                                                     'its host, such as a credential helper: the command never asks for them)')
+      end
+    end
+
+    it 'comes with what to do when ssh does not know the host, or has no key the host accepts' do
+      done = instance_double(Process::Status, success?: true)
+      { "Host key verification failed.\r\nfatal: Could not read from remote repository.\n" =>
+          '(ssh does not know this host: connect to it once with ssh, or add its key to known_hosts)',
+        "git@example.test: Permission denied (publickey).\r\nfatal: Could not read from remote repository.\n" =>
+          '(ssh has no key that this host accepts for the repository: check the key and the agent with ssh -T)' }.each do |said, hint|
+        allow(Open3).to receive(:capture3) do |_environment, _git, *arguments|
+          arguments.include?('fetch') ? ['', said.b, failed] : ['', '', done]
+        end
+        expect { described_class.new('git@example.test:team/r').fetch('shop') }
+          .to raise_error(described_class::Failure,
+                          "git could not read git@example.test:team/r: fatal: Could not read from remote repository. #{hint}")
       end
     end
 

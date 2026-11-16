@@ -52,7 +52,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command |
 | `lib/api_recipes/cli/recipes.rb` | the `install`, `update` and `check` commands for portable recipes |
-| `lib/api_recipes/cli/recipes/git.rb` | reads one file from a Git repository: no working copy, no shell, `https` only |
+| `lib/api_recipes/cli/recipes/git.rb` | reads one file from a Git repository: no working copy, no shell, `https` and `ssh` only |
 | `lib/api_recipes/cli/recipes/summary.rb`, `lock_file.rb` | what `install` and `update` show; the text of `recipes.lock` |
 | `spec/fixtures/openapi` | OpenAPI descriptions for the specs; `SOURCE.md` says where the real one comes from |
 | `spec/unit`, `spec/integration` | specs; integration specs stub HTTP with WebMock |
@@ -101,9 +101,11 @@ classes are built once, by `configure`.
   the lock is compared before the file is parsed. Whatever comes from a recipe
   or from a repository reaches the terminal through `Recipes::Summary.shown`.
   `git` is run without a shell, with the options of `Recipes::Git#transport`,
-  and only after `Git.address_problem`. The specs reach a repository through
-  `file://` because `with_recipe_repository` replaces `Git::PROTOCOLS`: nothing
-  in `lib/` may accept another protocol.
+  and only after `Git.address_problem`: `https` without a user, or `ssh`
+  (`ssh://` and `user@host:path`) with a user, a host and a path that never
+  start with a hyphen. The specs reach a repository through `file://` because
+  `with_recipe_repository` replaces `Git::PROTOCOLS`: nothing in `lib/` may
+  accept another protocol. No spec starts `ssh`.
 - In a spec, write an invisible character as an escape (`"\u202E"`), never as
   the character itself.
 - `Api` and `Endpoint` have only these public methods. `Api`: `[]`, `with`,

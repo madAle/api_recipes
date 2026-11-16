@@ -35,7 +35,8 @@ module ApiRecipes
         install [--version VERSION] [--from URL] [--to DIR] [--yes] NAME|FILE
             Installs the portable recipe called NAME from the cookbook
             (https://github.com/madAle/api_recipes-cookbook) or from the Git repository at URL,
-            which must start with https:// and hold recipes/NAME.recipe.yml. Without --version
+            an https:// or ssh address (ssh://HOST/PATH, USER@HOST:PATH) that holds
+            recipes/NAME.recipe.yml. Without --version
             it takes the recipe at the head of the repository, with it the one at the tag
             NAME-VERSION. Given a FILE, it installs that file. It shows where the requests and
             the credential go, the headers and which calls are not GET, asks, then writes NAME.recipe.yml and
