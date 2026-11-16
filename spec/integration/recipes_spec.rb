@@ -14,7 +14,7 @@ RSpec.describe 'portable recipes in recipes_paths' do
     path = write_recipe(@dir)
     configure_recipes(path)
     stub = stub_request(:get, 'https://shop.example.test/orders/7').with(headers: { 'Authorization' => 'Bearer t' })
-    ApiRecipes.shop.authorization = 'Bearer t'
+    global_values(shop: { authorization: 'Bearer t' })
     ApiRecipes.shop.orders.show(7).run
     expect(stub).to have_been_requested
     expect(ApiRecipes.shop.definition.recipe).to eq(name: 'shop', version: '1.0.0', summary: 'A test api')
@@ -23,7 +23,7 @@ RSpec.describe 'portable recipes in recipes_paths' do
 
   it 'takes the values of its variables from the configuration' do
     text = recipe_text('shop', 'host' => '{tenant}.example.test', 'variables' => { 'tenant' => nil })
-    configure_recipes(write_recipe(@dir, 'shop', text), variables: { shop: { tenant: 'acme' } })
+    configure_recipes(write_recipe(@dir, 'shop', text), values: { shop: { variables: { tenant: 'acme' } } })
     expect(ApiRecipes.shop.orders.show(7).url.to_s).to eq('https://acme.example.test/orders/7')
   end
 

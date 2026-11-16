@@ -25,6 +25,12 @@ module ApiRecipes
         Rule.new(:breaks, /ApiRecipes\.print_urls/, 'use config.print_urls inside ApiRecipes.configure'),
         Rule.new(:breaks, /_aprcps_|set_authorization_for_api|set_basic_auth_for_api|copy_global_authorizations_to_api/,
                  'internal method removed'),
+        Rule.new(:breaks, /\bApiRecipes(\.\w+|\[[^\]]*\])\.(authorization|basic_auth)\s*=(?![=~])/,
+                 'a credential of the whole application is given to ApiRecipes.configure, as ' \
+                 'config.values = { name: { authorization: ... } }: this writer now raises'),
+        Rule.new(:check, /(?<!\bApiRecipes)\.\w+\.(authorization|basic_auth)\s*=(?![=~])/,
+                 'authorization= and basic_auth= now work on an object only: on a class they raise, ' \
+                 'give the credential to `api :name, authorization: ...`, or to with(...) for one request'),
         Rule.new(:check, /url_encode|CGI\.escape|encode_www_form_component/,
                  'path parameters are now encoded by ApiRecipes: remove manual encoding of values passed to endpoints'),
         Rule.new(:check, /\brescue\s*(=>.*)?$|rescue StandardError/,
@@ -43,7 +49,7 @@ module ApiRecipes
         'a / inside a path parameter to cover several segments: use *name or two placeholders',
         'debug logs or print_urls output read from STDOUT: set log_to and log_level',
         'a bare rescue around a call: it now catches the errors of the gem too',
-        'credentials assigned on a class or an instance: they now take effect',
+        'credentials assigned on an instance: they now take effect',
         'the response body read from the message of a verify_with error: read it from error.response',
         'a block passed to run whose return value is used: it is now the Response',
         'apis_configs assigned after the files to discard them: do not assign the files',

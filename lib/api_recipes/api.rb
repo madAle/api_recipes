@@ -31,11 +31,15 @@ module ApiRecipes
       credential && credential.kind == :authorization ? credential.value : nil
     end
 
-    # Sets the credential of the caller's level; nil means "send none". The
-    # writers refuse an api returned by with: its options belong to its chain.
+    # Sets the credential of an object; nil means "send none". Only an object
+    # has writers: what the whole application or a class uses is shared by
+    # every thread, so it is given where the application starts, to
+    # ApiRecipes.configure (config.values) or to `api` in the class. The
+    # writers also refuse an api returned by with: its options belong to its
+    # chain.
     def authorization=(value)
-      unless @context.overrides.empty?
-        raise Error, 'an api returned by with cannot set authorization for the caller: use with(authorization: ...)'
+      if @context.owner.is_a?(Module) || !@context.overrides.empty?
+        raise Error, Internals::LevelSet.refusal(:authorization, @context.owner, @context.definition.name, @context.overrides.empty?)
       end
 
       credential = Internals::Credential.from(:authorization, value)
@@ -48,8 +52,8 @@ module ApiRecipes
     end
 
     def basic_auth=(value)
-      unless @context.overrides.empty?
-        raise Error, 'an api returned by with cannot set basic_auth for the caller: use with(basic_auth: ...)'
+      if @context.owner.is_a?(Module) || !@context.overrides.empty?
+        raise Error, Internals::LevelSet.refusal(:basic_auth, @context.owner, @context.definition.name, @context.overrides.empty?)
       end
 
       credential = Internals::Credential.from(:basic_auth, value)
@@ -62,10 +66,10 @@ module ApiRecipes
       (level && level.variables) || {}
     end
 
-    # Sets the variable values of the caller's level; nil removes them.
+    # Sets the variable values of an object; nil removes them. See authorization=.
     def variables=(values)
-      unless @context.overrides.empty?
-        raise Error, 'an api returned by with cannot set variables for the caller: use with(variables: ...)'
+      if @context.owner.is_a?(Module) || !@context.overrides.empty?
+        raise Error, Internals::LevelSet.refusal(:variables, @context.owner, @context.definition.name, @context.overrides.empty?)
       end
 
       values = Internals::Registry.variable_values(values)

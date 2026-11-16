@@ -13,7 +13,7 @@ module ApiRecipes
       @warned = {}
 
       @methods = [].freeze
-      @variable_names = [].freeze
+      VALUE_KEYS = %i[variables authorization basic_auth].freeze
 
       class << self
         attr_reader :current
@@ -26,23 +26,20 @@ module ApiRecipes
         def install(configuration)
           LOCK.synchronize do
             apis = configuration.load
-            definitions = Compiler.compile_all(apis, configuration.variables)
+            levels = configuration.value_levels
+            definitions = Compiler.compile_all(apis, levels.transform_values(&:variables))
             handles = definitions.transform_values { |definition| Handles.new(definition) }
-            variables = Compiler.normalize(configuration.variables).to_h { |name, values| [name, variable_values(values)] }
             WARNED_LOCK.synchronize { @warned = {} }
             @current = new(configs: Compiler.frozen_copy(apis), definitions: definitions, handles: handles,
                            generation: @current.generation + 1)
             yield if block_given?
             warnings = define_methods(@current.apis) + handles.values.flat_map(&:warnings)
-            (variables.keys - definitions.keys).each do |name|
-              warnings << "variables are given for '#{name}', which is not a configured api"
+            (levels.keys - definitions.keys).each do |name|
+              warnings << "values are given for '#{name}', which is not a configured api"
             end
-            # A name that configure set belongs to the configuration: the next
-            # successful configure applies its variables again or removes them,
-            # so a value assigned directly under such a name is replaced. A value
-            # assigned directly to a name that configure never set is not touched.
-            LevelSet.replace_variables(ApiRecipes, variables, @variable_names - variables.keys)
-            @variable_names = variables.keys.freeze
+            # The level of the whole application holds what this configuration
+            # gives, and nothing else: nothing else can write it.
+            LevelSet.replace_all(ApiRecipes, levels)
             warnings.each { |message| configuration.logger.warn(message) }
           end
         end
@@ -75,7 +72,6 @@ module ApiRecipes
         def reset!
           LOCK.synchronize do
             LevelSet.reset!
-            @variable_names = [].freeze
             define_methods([])
             WARNED_LOCK.synchronize { @warned = {} }
             @current = new(generation: @current.generation + 1)
@@ -87,6 +83,43 @@ module ApiRecipes
         # or nil. Anything else than a Hash or nil raises ConfigurationError.
         def variable_values(values)
           Compiler.resolve_options({ variables: values }, :with_api)[:variables]
+        end
+
+        # values as { api name => Level }: what config.values holds. Raises
+        # ConfigurationError, or InvalidCredential, without showing a value.
+        def value_levels(values)
+          values.each_with_object({}) do |(name, given), levels|
+            unless name.is_a?(Symbol) || (name.is_a?(String) && name.valid_encoding?)
+              raise ConfigurationError.new(['values: the name of an api must be a String or a Symbol'])
+            end
+            key = name.to_sym
+            raise ConfigurationError.new(["values.#{key}: is given twice"]) if levels.key?(key)
+
+            levels[key] = level_from(given, "values.#{key}")
+          end.freeze
+        end
+
+        # The level that given describes: variables, and authorization or
+        # basic_auth. A credential given as nil means "send none".
+        def level_from(given, where)
+          raise ConfigurationError.new(["#{where}: must be a Hash"]) unless given.is_a?(Hash)
+
+          names = Compiler.normalize(given.to_h { |key, _value| [key, nil] }).keys
+          unknown = names - VALUE_KEYS
+          unless unknown.empty?
+            raise ConfigurationError.new(["#{where}: takes #{VALUE_KEYS.join(', ')}, not #{unknown.map(&:inspect).join(', ')}"])
+          end
+          if names.include?(:authorization) && names.include?(:basic_auth)
+            raise ConfigurationError.new(["#{where}: takes authorization or basic_auth, not both"])
+          end
+
+          resolved = Compiler.resolve_options(given, :with_api)
+          kind = (names & %i[authorization basic_auth]).first
+          Level.new(credential: kind && Credential.from(kind, resolved[kind]), variables: resolved[:variables])
+        rescue ConfigurationError => e
+          raise e if e.errors.all? { |problem| problem.start_with?(where) }
+
+          raise ConfigurationError.new(e.errors.map { |problem| "#{where}.#{problem}" })
         end
 
         private

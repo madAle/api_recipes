@@ -116,16 +116,41 @@ api 'github': the credential is bound to "https://api.github.com" but the reques
 or set it to nil to send none
 ```
 
-Set the credential on the class:
+Give the credential where the class declares the API:
 
 ```ruby
 class EnterpriseClient
   include ApiRecipes
-  api :github, host: 'ent.example.test'
+  api :github, host: 'ent.example.test', authorization: "Bearer #{ENV.fetch('ENTERPRISE_TOKEN')}"
+end
+```
+
+### Credentials are given when the application starts
+
+In 2.x the usual line was `ApiRecipes.github.authorization = '...'`, and code
+that served several users assigned it before each call. What `ApiRecipes.github`
+and a class use is shared by every thread of the process, so a request could
+leave with the token of another user. Now `authorization=`, `basic_auth=` and
+`variables=` raise `ApiRecipes::Error` on `ApiRecipes.github` and on a class,
+and the message says where the value goes:
+
+```ruby
+# the whole application: once, in configure
+ApiRecipes.configure do |config|
+  config.values = { github: { authorization: "Bearer #{ENV.fetch('GITHUB_TOKEN')}" } }
 end
 
-EnterpriseClient.github.authorization = "Bearer #{ENV.fetch('ENTERPRISE_TOKEN')}"
+# one class: where it declares the API
+class AdminClient
+  include ApiRecipes
+  api :github, authorization: "Bearer #{ENV.fetch('ADMIN_TOKEN')}"
+end
+
+# one user, one request: the chain, or an object of its own
+ApiRecipes.github.with(authorization: "Bearer #{user.token}").users.run
 ```
+
+The writers still work on an object, as in `client.github.authorization = ...`.
 
 ### `nil` or an empty path parameter
 
@@ -241,13 +266,13 @@ The warnings name the endpoint and never the value. `config.upgrade_warnings = f
 turns them off. Two more effects: a `:` in a value no longer breaks nested
 endpoints, and a suffix after a placeholder, as in `/:name.json`, is kept.
 
-### Credentials on a class or an instance take effect
+### Credentials on an instance take effect
 
-In 2.x `MyClass.github.authorization = '...'` was lost, because every call
-returned a new object. Now it is stored for the class, and an instance can have its
-own. If your code assigned one of them and relied on it having no effect, it now
-sends a credential. The nearest level wins: the chain (`with`), the object, its
-class and ancestors, then `ApiRecipes.github`. Assigning `nil` means "send none".
+In 2.x `client.github.authorization = '...'` was lost, because every call
+returned a new object. Now it is kept for that object. If your code assigned
+one and relied on it having no effect, it now sends a credential. The nearest
+level wins: the chain (`with`), the object, the class that declares the API,
+then the whole application. A credential given as `nil` means "send none".
 
 ### Logging
 
@@ -410,8 +435,9 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   response passed the rule of its endpoint.
 - **`definition`**, `routes` and a safe `inspect` on APIs and endpoints.
 - **Validated configuration**, with every problem reported at once.
-- **`config.variables`**, **`config.upgrade_warnings`** and the logging options
-  described above.
+- **`config.values`**, which gives each API its credential and the values of
+  its variables for the whole application, **`config.upgrade_warnings`** and
+  the logging options described above.
 - **The `api_recipes` command**, with `upgrade`, `import`, `routes`, `install`,
   `update` and `check`.
 - **Portable recipes**: recipes written by others, installed with

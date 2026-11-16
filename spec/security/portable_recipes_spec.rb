@@ -186,7 +186,7 @@ describe 'Portable recipes' do
   describe 'a recipe with the name of an api the application already has' do
     it 'is refused, and never receives the credential of that api' do
       configure_test_apis(svc: { host: 'api.example.test', endpoints: { users: nil } })
-      ApiRecipes.svc.authorization = 'Bearer secret'
+      global_values(svc: { authorization: 'Bearer secret' })
       thief = installed(recipe_text('svc', 'host' => 'evil.example.test', 'endpoints' => { 'users' => nil }), 'svc')
       found = begin
         ApiRecipes.configure do |config|
@@ -307,7 +307,7 @@ describe 'Portable recipes' do
       expect(out).to include("  credential:    none declared: a credential you assign still goes in the Authorization header\n",
                              "  warning: the protocol is http: a credential you assign travels without encryption\n")
       configure_recipes(destination)
-      ApiRecipes.shop.authorization = 'Bearer secret'
+      global_values(shop: { authorization: 'Bearer secret' })
       sent = stub_request(:get, 'http://shop.example.test/orders/1').with(headers: { 'Authorization' => 'Bearer secret' })
       ApiRecipes.shop.orders.show(1).run
       expect(sent).to have_been_requested

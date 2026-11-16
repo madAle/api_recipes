@@ -17,7 +17,7 @@ describe 'Objects of the DSL' do
                           ) }
     )
     stub_request(:any, /\.test/).to_return(status: 200, body: '{"ok":true}', headers: json)
-    ApiRecipes.svc.authorization = 'Bearer SECRET-TOKEN'
+    global_values(svc: { authorization: 'Bearer SECRET-TOKEN' })
   end
 
   def objects
@@ -92,13 +92,20 @@ describe 'Objects of the DSL' do
       config.logger = Logger.new(IO::NULL)
       config.apis_configs = { svc: { host: '{shop}.example.test', variables: { shop: { default: 'SECRET-DEFAULT' } },
                                      default_headers: { 'X-Default' => 'SECRET-HEADER' } } }
-      config.variables = { svc: { shop: 'SECRET-SHOP' } }
+      config.values = { svc: { variables: { shop: 'SECRET-SHOP' }, authorization: 'Bearer SECRET-TOKEN' } }
       shown = [config.inspect, config.to_s, "#{config}", PP.pp(config, +'')]
       expect(shown.join("\n")).not_to include('SECRET')
     end
     configuration = ApiRecipes.configuration
     shown = [configuration.inspect, configuration.to_s, "#{configuration}", PP.pp(configuration, +'')]
     expect(shown.join("\n")).not_to include('SECRET')
+    # What it keeps of the values never shows them, in any form.
+    levels = configuration.value_levels
+    expect(levels.keys).to eq([:svc])
+    kept = [levels.inspect, levels.to_s, PP.pp(levels, +''), YAML.dump(levels), Marshal.dump(levels), levels.to_json]
+    expect(kept.join("\n")).not_to include('SECRET')
+    expect(configuration.instance_variables.flat_map { |name| [configuration.instance_variable_get(name)].flatten }
+                        .grep(String).join("\n")).not_to include('SECRET-TOKEN')
     expect(configuration.inspect).to include('ApiRecipes::Configuration', 'svc')
   end
 

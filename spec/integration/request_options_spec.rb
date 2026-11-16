@@ -123,21 +123,21 @@ describe 'Request options' do
 
     it 'sends the authorization of the global api' do
       configure
-      ApiRecipes.svc.authorization = 'Bearer token'
+      global_values(svc: { authorization: 'Bearer token' })
       ApiRecipes.svc.things.run
       expect(WebMock).to have_requested(:get, url).with(headers: { 'Authorization' => 'Bearer token' })
     end
 
     it 'sends the basic auth of the global api' do
       configure
-      ApiRecipes.svc.basic_auth = { user: 'me', pass: 'secret' }
+      global_values(svc: { basic_auth: { user: 'me', pass: 'secret' } })
       ApiRecipes.svc.things.run
       expect(WebMock).to have_requested(:get, url).with(headers: { 'Authorization' => 'Basic bWU6c2VjcmV0' })
     end
 
     it 'lets a request header replace the authorization of the api' do
       configure
-      ApiRecipes.svc.authorization = 'Bearer global'
+      global_values(svc: { authorization: 'Bearer global' })
       ApiRecipes.svc.things(headers: { 'Authorization' => 'Bearer user' }).run
       expect(WebMock).to have_requested(:get, url).with(headers: { 'Authorization' => 'Bearer user' })
     end

@@ -77,8 +77,13 @@ fails under 90% line coverage.
    own `path`, the arguments and the variables that the `path` uses. `[]` does the same by name, and the generated
    methods call it.
 3. Credentials and variables are not kept on these objects. They live in levels
-   attached to the owner of the call (the module, a class, an instance) and are
-   read, nearest first, when the request is built. `with` adds a level for one chain.
+   and are read, nearest first, when the request is built: the object that
+   makes the call, the class or module that declared the api, the whole
+   application. `with` adds a level for one chain. The last two are shared by
+   every thread, so only the place where the application starts writes them:
+   `config.values` for the application, the options of `api` for a class. The
+   writers of `Api` work on an object and raise on a class, a module and
+   `ApiRecipes.name`.
 4. `run`, or a block, creates a `Internals::Request`, which builds the URL and the http.rb
    client with the default headers and parameters of the api, of `with` and of
    the endpoint, sends the request, checks the outcome (`ok_code`, `on_bad_code`,
@@ -121,6 +126,10 @@ classes are built once, by `configure`.
   protection is removed.
 - Never put a credential, a header, a body or a query string in a log line, an
   error message, `inspect` or `definition`.
+- Nothing writes the level of the application or of a class after the
+  application has started: no writer, no method that a request could call.
+  A value that changes from one request to the next belongs to `with` or to an
+  object.
 - A regular expression that validates a name or a value uses `\A` and `\z`, never
   `^` and `$`.
 - Do not add monkey patches. `logger` and `http` are the only runtime

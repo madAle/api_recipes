@@ -40,6 +40,18 @@ which are data only, and the commands that install them.
   message says so. `install` and `update` say which address they read before
   `git` connects to it.
 
+**The credential and the variables of the whole application and of a class
+are given when the application starts, and nowhere else.**
+`ApiRecipes.github.authorization = ...`, `basic_auth=` and `variables=` now
+raise `ApiRecipes::Error` on `ApiRecipes.github`, on a class and on a module:
+what they hold is shared by every thread, and code that assigned it for each
+user could send the token of one user with the request of another. Give them
+to `config.values = { github: { authorization: ..., variables: { ... } } }`
+inside `ApiRecipes.configure`, and to `api :github, authorization: ...` in a
+class. The writers still work on an object, and `with` gives a value to one
+chain. `config.values` replaces `config.variables`, and a subclass no longer
+has a level of its own: it uses the one of the class that declares the API.
+
 **An endpoint that does not set `timeout`, `on_bad_code` or `mime_type` now
 looks for it up the tree**, as it already did for `verify_with`: in the
 endpoints that contain it, from the nearest, then in the API. The first value

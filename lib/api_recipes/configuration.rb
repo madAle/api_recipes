@@ -10,22 +10,25 @@ module ApiRecipes
 
     attr_accessor :upgrade_warnings
     attr_reader :log_to, :log_level, :print_urls
-    attr_reader :variables
+    # What values= was given, as { api name => Internals::Level }. A level
+    # never shows or serializes its content.
+    attr_reader :value_levels
 
     def initialize
       @sources = []
       @apis_configs = {}
       @apis_files_paths = []
       @recipes_paths = []
-      @variables = {}
+      @value_levels = {}.freeze
       @print_urls = false
       @upgrade_warnings = true
     end
 
     # configure works on a copy: what a setter or the caller can change in
     # place (the list of sources, and the Hashes, Arrays and Strings of
-    # apis_configs, apis_files_paths and variables at every depth) is copied,
-    # so the original stays as it was. The logger of the application is shared.
+    # apis_configs and apis_files_paths at every depth) is copied, so the
+    # original stays as it was. The logger of the application is shared, and
+    # so are the values, which cannot be changed in place.
     def initialize_copy(source)
       super
       @default_logger = nil
@@ -33,7 +36,6 @@ module ApiRecipes
       @apis_configs = deep_copy(@apis_configs)
       @apis_files_paths = deep_copy(@apis_files_paths)
       @recipes_paths = deep_copy(@recipes_paths)
-      @variables = deep_copy(@variables)
     end
 
     # The descriptions of the apis and the variables can hold secrets (header
@@ -73,10 +75,15 @@ module ApiRecipes
       @recipes_paths = paths
     end
 
-    def variables=(variables)
-      raise ArgumentError, 'variables must be an Hash' unless variables.is_a? Hash
+    # The credential and the variable values of each api, for the whole
+    # application: { github: { authorization: '...', variables: { ... } } }.
+    # Each api takes authorization or basic_auth, and variables. They are
+    # checked and copied here, and replace those given before. It is the only
+    # way to give them at this level: see Api#authorization=.
+    def values=(values)
+      raise ArgumentError, 'values must be an Hash' unless values.is_a? Hash
 
-      @variables = variables
+      @value_levels = Internals::Registry.value_levels(values)
     end
 
     # Applies the sources in the order they were assigned and returns the

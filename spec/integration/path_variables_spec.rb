@@ -17,7 +17,7 @@ describe 'Variables in the path of an endpoint' do
   end
 
   it 'fills the variable with the value of the nearest level' do
-    ApiRecipes.shop.variables = { account: 'acme' }
+    global_values(shop: { variables: { account: 'acme' } })
     expect(ApiRecipes.shop.orders.url.to_s).to eq('https://shop.example.test/v1/accounts/acme/orders')
     expect(ApiRecipes.shop.orders.show(7).url.to_s).to eq('https://shop.example.test/v1/accounts/acme/orders/7')
     expect(ApiRecipes.shop.with(variables: { account: 'other' }).orders.show(7).url.to_s)
@@ -29,7 +29,7 @@ describe 'Variables in the path of an endpoint' do
   end
 
   it 'sends the request to the filled path' do
-    ApiRecipes.shop.variables = { account: 'acme' }
+    global_values(shop: { variables: { account: 'acme' } })
     ApiRecipes.shop.orders.show(7).run
     expect(a_request(:get, 'https://shop.example.test/v1/accounts/acme/orders/7')).to have_been_made
   end
@@ -90,9 +90,9 @@ describe 'Variables in the path of an endpoint' do
   end
 
   it 'keeps the path it was built with in the copy that with returns' do
-    ApiRecipes.shop.variables = { account: 'alice' }
+    global_values(shop: { variables: { account: 'alice' } })
     kept = ApiRecipes.shop.orders
-    ApiRecipes.shop.variables = { account: 'bob' }
+    global_values(shop: { variables: { account: 'bob' } })
     expect(kept.url.to_s).to eq('https://shop.example.test/v1/accounts/alice/orders')
     expect(kept.with(timeout: 5).url.to_s).to eq('https://shop.example.test/v1/accounts/alice/orders')
     expect(kept.with(timeout: 5).with(ok_code: 200).show(7).url.to_s).to eq('https://shop.example.test/v1/accounts/alice/orders/7')

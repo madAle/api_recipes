@@ -73,21 +73,24 @@ module ApiRecipes
           end
         end
 
-        # Sets the variables of the levels in values (name => variables) and
-        # removes those of the levels named in cleared, in one replacement of
-        # the set. The credentials are not touched.
-        def replace_variables(owner, values, cleared)
-          WRITES.synchronize do
-            set = live_set(owner)
-            changes = cleared.to_h do |name|
-              level = set&.fetch(name)
-              [name, level && level.variables ? level.with(variables: nil) : level]
-            end.compact
-            values.each do |name, variables|
-              changes[name] = (set&.fetch(name) || Level.new(credential: nil, variables: nil)).with(variables: variables)
-            end
-            store(owner, set, changes) unless changes.empty?
+        # Why a writer of Api refuses: what is the option (:authorization,
+        # :basic_auth, :variables), owner the caller, api the name of the api,
+        # plain false for an api returned by with.
+        def refusal(what, owner, api, plain)
+          return "an api returned by with cannot set #{what} for the caller: use with(#{what}: ...)" unless plain
+
+          if owner.equal?(ApiRecipes)
+            "ApiRecipes.#{api} is shared by the whole application, in every thread: give its #{what} to " \
+              "ApiRecipes.configure, as config.values = { #{api}: { #{what}: ... } }, or use with(#{what}: ...) for one chain"
+          else
+            "a class or a module is shared by all its objects, in every thread: give its #{what} to " \
+              "`api :#{api}, #{what}: ...`, or use an object or with(#{what}: ...) for one chain"
           end
+        end
+
+        # Makes levels (key => Level) the whole set of owner, in one step.
+        def replace_all(owner, levels)
+          WRITES.synchronize { owner.instance_variable_set(IVAR, new(EMPTY.merge(levels), generation)) }
         end
 
         def reset!
@@ -156,32 +159,21 @@ module ApiRecipes
     end
 
     module Levels
-      # Levels that hold a value for one api, nearest first. Those of an object,
-      # a class or a module are the ones written through declaration: the
-      # object, every ancestor of its class (the owner itself for a class or a
-      # module), then the class or module that declared the api when it is not
-      # among them (an object or a class extended with it). A level written
-      # through another declaration is never returned. Last the global level,
-      # by api name. Without a declaration (a global api) only the global level.
+      # Levels that hold a value for one api, nearest first: the one of the
+      # object, written through declaration; the one that declaration gives to
+      # the class or module where `api` was called, which is the only level a
+      # class or a module has; last the global level, by api name. A level of
+      # another declaration is never returned. Without a declaration (a global
+      # api) only the global level.
       def self.chain(owner, api_name, declaration)
         chain = []
         if declaration
-          if owner.is_a?(Module)
-            klass = owner
-          else
-            klass = owner.class
+          unless owner.is_a?(Module)
             level = LevelSet.read(owner, declaration)
             chain << [:instance, level] if level
           end
-          klass.ancestors.each do |mod|
-            level = LevelSet.read(mod, declaration)
-            chain << [:class, level] if level
-          end
-          declared_in = declaration.declared_in
-          unless klass <= declared_in
-            level = LevelSet.read(declared_in, declaration)
-            chain << [:class, level] if level
-          end
+          level = LevelSet.read(declaration.declared_in, declaration)
+          chain << [:class, level] if level
         end
         level = LevelSet.read(ApiRecipes, api_name)
         chain << [:global, level] if level

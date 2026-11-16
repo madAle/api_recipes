@@ -11,7 +11,7 @@ describe 'Logging' do
                                      endpoints: { users: { endpoints: { show: { path: '/:id' } } } } } }
     end
     stub_request(:any, /example\.test/).to_return(status: 200, body: '{"secret":"BODY"}', headers: json)
-    ApiRecipes.svc.authorization = 'TOKEN'
+    global_values(svc: { authorization: 'TOKEN' })
   end
 
   it 'is silent by default' do

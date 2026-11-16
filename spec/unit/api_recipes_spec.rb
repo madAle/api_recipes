@@ -79,7 +79,7 @@ end
       # The last one would also reorder the sources of the previous configuration if they were shared.
       failures = [
         ->(config) { config.apis_files_paths = [File.expand_path('../fixtures/missing.yml', __dir__)] },
-        ->(config) { config.variables[:svc] = 'not a Hash' },
+        ->(config) { config.values = { svc: { variables: { nope: 'x' } } } },
         ->(config) { config.apis_configs = { svc: { bogus: 1 } } }
       ]
       failures.each do |change|
@@ -91,7 +91,7 @@ end
           end
         end.to raise_error(ApiRecipes::ConfigurationError)
         expect(ApiRecipes.configuration).to equal(before)
-        expect([before.logger, before.print_urls, before.variables]).to eq([logger, false, {}])
+        expect([before.logger, before.print_urls, before.value_levels]).to eq([logger, false, {}])
         expect(before.apis_configs.keys).to eq(ApiRecipes.apis)
       end
       ApiRecipes.configure { |config| config.logger = other_logger }
@@ -107,17 +107,17 @@ end
         config.apis_files_paths = [path.dup]
         config.apis_configs = { svc: { host: 'api.example.test', variables: { region: {} },
                                        endpoints: { users: { path: '/people' } } } }
-        config.variables = { svc: { region: 'eu' } }
+        config.values = { svc: { variables: { region: 'eu' } } }
       end
       before = ApiRecipes.configuration
       failures = [
         ->(config) { config.apis_configs[:svc][:bogus] = 1 },
         lambda do |config|
           config.apis_configs[:svc][:endpoints][:users][:path].replace('/evil')
-          config.variables[:svc] = 1
+          config.values = { svc: { variables: { nope: 'x' } } }
         end,
         lambda do |config|
-          config.variables[:svc][:region] = 'us'
+          config.values = { svc: { variables: { region: 'us' } } }
           config.apis_configs[:svc][:host] = 1
         end,
         ->(config) { config.apis_files_paths.first.replace('missing.yml') }
@@ -127,7 +127,8 @@ end
       end
       expect(before.apis_configs).to eq(svc: { host: 'api.example.test', variables: { region: {} },
                                                endpoints: { users: { path: '/people' } } })
-      expect([before.apis_files_paths, before.variables]).to eq([[path], { svc: { region: 'eu' } }])
+      expect(before.apis_files_paths).to eq([path])
+      expect(before.value_levels.transform_values(&:variables)).to eq(svc: { region: 'eu' })
       shared = nil
       ApiRecipes.configure { |config| shared = config.logger }
       expect(shared).to equal(logger)
@@ -207,7 +208,7 @@ end
         ApiRecipes.configure do |config|
           config.logger = Logger.new(IO::NULL)
           config.apis_configs = apis
-          config.variables = { shopify: { shop: 'old' } }
+          config.values = { shopify: { variables: { shop: 'old' } } }
         end
       end
       configurer.report_on_exception = false

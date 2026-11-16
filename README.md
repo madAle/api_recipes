@@ -374,13 +374,23 @@ A variable without a value and without a default raises
 `ApiRecipes::MissingVariable` as soon as it is needed: when the chain reaches
 the `base_url` or the path that uses it, and at the latest when the request is
 built. Give it a value in the way that fits your code. The nearest one wins: the chain (`with`), then the
-object, then its class, then `ApiRecipes.shopify`, then the default of the file.
+object, then the class that declares the API, then the whole application, then
+the default of the file.
+
+For one chain:
 
 ```ruby
 ApiRecipes.shopify.with(variables: { shop: 'acme' }).products.url.to_s
 # => "https://acme.myshopify.com/admin/api/2026-10/products"
+```
 
-ApiRecipes.shopify.variables = { shop: 'acme' }
+For the whole application, when it starts, with `config.values`:
+
+```ruby
+ApiRecipes.configure do |config|
+  config.values = { shopify: { variables: { shop: 'acme' } } }
+end
+
 ApiRecipes.shopify.products.url.to_s
 # => "https://acme.myshopify.com/admin/api/2026-10/products"
 
@@ -429,13 +439,10 @@ Sandbox.sandbox.with(variables: { tenant: 'acme' }).ping.url.to_s
 # => "https://acme.sandbox.example.test/ping"
 ```
 
-Or for everybody, when the application starts:
-
-```ruby
-ApiRecipes.configure do |config|
-  config.variables = { shopify: { shop: 'acme' } }
-end
-```
+`config.values` holds, for each API, its `variables` and its credential
+(`authorization` or `basic_auth`, see [Authorization](#authorization)). A later
+`configure` that assigns `config.values` replaces them all; one that does not
+keeps them.
 
 ApiRecipes never reads the environment for you: if the shop comes from an
 environment variable, read it in your code and pass it in.
@@ -455,9 +462,12 @@ class OrdersController < ApplicationController
 end
 ```
 
-A value assigned on `ApiRecipes.shopify` or on a class is shared by the whole
-process, in every thread, until it is assigned again: keep those two for what
-is the same for every user, and do not assign them while a request is served.
+What `ApiRecipes.shopify` and a class use is shared by the whole process, in
+every thread. That is why it is given only where the application starts, to
+`config.values` and to `api`, and why `ApiRecipes.shopify.variables = ...` and
+`Store.shopify.variables = ...` raise `ApiRecipes::Error`: a value that changes
+while requests are served goes to `with` or to an object. The same holds for
+credentials.
 
 A value is checked for the place where it ends up. In a `host` it can contain
 only letters, digits, dots, hyphens and underscores. In a `base_url` and in a
@@ -469,13 +479,10 @@ A word in braces that is not a variable is written `\{word}` in a path and in
 a `base_url`.
 A name that the API does not declare raises `ApiRecipes::ConfigurationError` at
 every level, so a misspelled name is never ignored.
-`variables` without an assignment returns the values set at the level you call
-it on. Assigning `nil` clears them. At the global level (`ApiRecipes.shopify`)
-that includes the values given with `config.variables`, which are the same level;
-a default declared in the file applies again.
-The values given with `config.variables` are applied again at every `configure`,
-so a value assigned directly with `ApiRecipes.shopify.variables = ...` under the
-same name lasts only until the next `configure`.
+`variables` without an assignment returns the values of the level you call it
+on: those of `config.values` on `ApiRecipes.shopify`, those given to `api` on a
+class, those assigned on an object. On an object, assigning `nil` clears them,
+and a default declared in the file applies again.
 
 ## Loading the configuration
 
@@ -1263,30 +1270,39 @@ nearest to the farthest:
 
 1. the chain, with `with(authorization: ...)` or `with(basic_auth: ...)`
 2. the object that makes the call
-3. its class, then the classes and modules it inherits from
-4. the API of the `ApiRecipes` module
+3. the class or the module that declares the API
+4. the whole application
 
-**A token**, sent as the `Authorization` header, as it is written:
+The last two are shared by every thread of the process, so they are given where
+the application starts and cannot be assigned afterwards. The first two belong
+to the code that created them: they are the place for a credential that changes
+from one request to the next.
+
+**A token for the whole application**, sent as the `Authorization` header, as
+it is written. It goes in `config.values`, with the variables of the API:
 
 ```ruby
-ApiRecipes.github.authorization = "Bearer #{ENV.fetch('GITHUB_TOKEN')}"
+ApiRecipes.configure do |config|
+  config.values = { github: { authorization: "Bearer #{ENV.fetch('GITHUB_TOKEN', 'abc')}" } }
+end
 ```
 
 **Basic auth:**
 
 ```ruby
-ApiRecipes.github.basic_auth = { user: 'me', pass: 'secret' }
+ApiRecipes.configure do |config|
+  config.values = { github: { basic_auth: { user: 'me', pass: 'secret' } } }
+end
 ```
 
-**A different token for one class.** It applies to the class and its instances:
+**A different token for one class.** It applies to the class, to its subclasses
+and to their objects, and it is given where the class declares the API:
 
 ```ruby
 class AdminClient
   include ApiRecipes
-  api :github
+  api :github, authorization: "Bearer #{ENV.fetch('ADMIN_TOKEN', 'admin')}"
 end
-
-AdminClient.github.authorization = "Bearer #{ENV.fetch('ADMIN_TOKEN')}"
 ```
 
 **A different token for one object**, for example one object per user:
@@ -1308,26 +1324,38 @@ end
 ApiRecipes.github.with(authorization: "Bearer #{user.token}").users.repos('octocat').run
 ```
 
-The reader returns what the nearest level assigned:
+The reader returns what the nearest level gives:
 
 ```ruby
-ApiRecipes.github.authorization = 'Bearer abc'
+ApiRecipes.configure do |config|
+  config.values = { github: { authorization: 'Bearer abc' } }
+end
 ApiRecipes.github.authorization
 # => "Bearer abc"
+ApiRecipes.github.with(authorization: 'Bearer of this chain').authorization
+# => "Bearer of this chain"
 ```
 
-**No credential.** Assigning `nil` means "send none" and ends the search: it
-does not fall back to a level farther away. The same goes for
-`with(authorization: nil)`:
+**No credential.** A credential given as `nil` means "send none" and ends the
+search: it does not fall back to a level farther away. It works at every level:
 
 ```ruby
-AdminClient.github.authorization = nil               # this class sends none
-ApiRecipes.github.with(authorization: nil).users.run  # this chain sends none
+ApiRecipes.github.with(authorization: nil).users.run   # this chain sends none
+
+class PublicClient
+  include ApiRecipes
+  api :github, authorization: nil                      # this class sends none
+end
 ```
 
-`authorization=`, `basic_auth=` and `variables=` change the level of the object
-they are called on. They raise on an API that `with` returned: use
-`with(authorization: ...)` there.
+`authorization=`, `basic_auth=` and `variables=` exist for objects only: they
+change the level of the object they are called on. On `ApiRecipes.github` and
+on a class they raise `ApiRecipes::Error`, and the message says where the value
+goes: a class that served two users at once would otherwise send the token of
+one with the request of the other. They also raise on an API that `with`
+returned: use `with(authorization: ...)` there. A token that expires and is
+renewed while the application runs goes to `with`, read from where you keep it
+at every call.
 
 A credential is valid only for the origin it was set for: the scheme, the host
 and the port. If a nearer level changes the destination (its own `host`,
@@ -1339,10 +1367,8 @@ destination:
 ```ruby
 class EnterpriseClient
   include ApiRecipes
-  api :github, host: 'github.example.com'
+  api :github, host: 'github.example.com', authorization: "Bearer #{ENV.fetch('ENTERPRISE_TOKEN', 'enterprise')}"
 end
-
-EnterpriseClient.github.authorization = "Bearer #{ENV.fetch('ENTERPRISE_TOKEN')}"
 ```
 
 An API or an endpoint kept in a variable keeps the destination it was created
@@ -1360,7 +1386,7 @@ restored from a serialized form has no credential.
 
 An API can say where its credential goes with `auth`:
 
-| `auth.type` | The credential assigned with `authorization=` goes |
+| `auth.type` | The credential given as `authorization` goes |
 | --- | --- |
 | none of these, or `none`, `bearer`, `basic` | in the `Authorization` header, as it is written |
 | `header`, with a `name` | in the header called `name` |
@@ -1377,7 +1403,7 @@ weather:
 ```
 
 Basic auth cannot be sent to an API of type `header` or `query`: the request
-raises `ApiRecipes::InvalidCredential`. Assign the value with `authorization=`.
+raises `ApiRecipes::InvalidCredential`. Give the value as `authorization`.
 
 A credential written in `headers:` or in `default_headers` is sent as it is.
 ApiRecipes does not check its origin, so prefer the levels above.
@@ -1451,8 +1477,8 @@ For an API: `name`, `protocol`, `host`, `port`, `base_url`, `timeout`,
 it and on the endpoints above it, without those of the API. A path is shown as
 it is written, with its `:name` and `{name}`. The endpoints that `resource`
 adds are endpoints like the others.
-A definition never holds a credential assigned with `authorization=`,
-`basic_auth=` or `with`, nor the value of a variable. It does return the
+A definition never holds a credential, wherever it was given, nor the value of
+a variable. It does return the
 `default_headers` and the `default_params` as they are configured, so do not
 write a credential there if you pass definitions around; `to_h` and `inspect`
 hide their values.
@@ -1487,10 +1513,12 @@ in it.
 ApiRecipes.configure do |config|
   config.logger = Rails.logger
   config.apis_files_paths = Dir[Rails.root.join('config', 'apis', '*.yml').to_s]
+  config.values = { github: { authorization: "Bearer #{Rails.application.credentials.github_token}" } }
 end
-
-ApiRecipes.github.authorization = "Bearer #{Rails.application.credentials.github_token}"
 ```
+
+A value that depends on the user who is signed in does not go there: see
+[Variables](#variables) for the request of a controller.
 
 ### One host per environment
 
@@ -1656,7 +1684,7 @@ What ApiRecipes does:
   does the `inspect` or the `pp` of an API, an endpoint, a response, a
   definition or the configuration, nor their `to_s`, except that the `to_s` of
   a response is its body, as for the http.rb response. `definition` never holds
-  a credential that was assigned with `authorization=`, `basic_auth=` or `with`.
+  a credential, wherever it was given.
   It does hold the values of `default_headers` and `default_params`, which its
   readers return; its `inspect`, its `to_h` and its JSON show them as
   `[FILTERED]`.

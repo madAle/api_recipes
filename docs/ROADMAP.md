@@ -39,6 +39,11 @@ changes is underneath.
   is made: `auth` says where the credential goes (a header, the query string),
   and `variables` declares `{name}` placeholders for `host`, `base_url` and
   header values, with values taken along the same chain as credentials.
+- The credential and the variables that the whole application or a class uses
+  are shared by every thread, so they are given where the application starts:
+  `config.values` for the application, the options of `api` for a class. The
+  writers `authorization=`, `basic_auth=` and `variables=` work on an object
+  only; `with` gives a value to one chain.
 - `definition` gives a read-only description of an api or of an endpoint, and
   `inspect` never shows a credential.
 - Requests are made with http.rb 6 (`>= 6.0.4, < 7`); http.rb 5 is no longer

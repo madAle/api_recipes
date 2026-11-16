@@ -56,7 +56,7 @@ describe 'HTTP requests' do
 
   it 'sends the authorization set on the global api' do
     stub_request(:get, "#{base_url}/users").to_return(status: 200, body: '[]', headers: json)
-    ApiRecipes.svc.authorization = 'Bearer g'
+    global_values(svc: { authorization: 'Bearer g' })
     ApiRecipes.svc.users.run
     expect(WebMock).to have_requested(:get, "#{base_url}/users").with(headers: { 'Authorization' => 'Bearer g' })
   end

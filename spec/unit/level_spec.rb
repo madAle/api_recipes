@@ -137,7 +137,7 @@ describe ApiRecipes::Internals::Levels do
 
   def values(chain) = chain.map { |kind, level| [kind, level.variables[:n]] }
 
-  it 'walks from the instance to the global api' do
+  it 'goes from the object to the class that declared the api, then to the global api' do
     parent = Class.new
     child = Class.new(parent)
     object = child.new
@@ -148,13 +148,15 @@ describe ApiRecipes::Internals::Levels do
       end
     end
     chain = described_class.chain(object, :svc, declaration)
-    expect(chain.map(&:first)).to eq(%i[instance class class global])
-    expect(chain.map { |_, level| level.variables[:n] }).to eq([0, 1, 2, 3])
-    expect(described_class.chain(child, :svc, declaration).map(&:first)).to eq(%i[class class global])
+    expect(chain.map(&:first)).to eq(%i[instance class global])
+    # The level left on child, which did not declare the api, is not read.
+    expect(chain.map { |_, level| level.variables[:n] }).to eq([0, 2, 3])
+    expect(values(described_class.chain(child, :svc, declaration))).to eq([[:class, 2], [:global, 3]])
+    expect(values(described_class.chain(parent, :svc, declaration))).to eq([[:class, 2], [:global, 3]])
     expect(described_class.chain(ApiRecipes, :svc, nil).map(&:first)).to eq(%i[global])
   end
 
-  it 'returns only the levels written through the declaration, then the one of the module that declared it' do
+  it 'returns only the levels written through the declaration: the one of the object and the one of the module that declared it' do
     declarer = Module.new
     declaration = ApiRecipes::Internals::Declaration.new(declarer, :svc, {}, nil)
     other = ApiRecipes::Internals::Declaration.new(Module.new, :svc, {}, nil)
@@ -166,11 +168,12 @@ describe ApiRecipes::Internals::Levels do
     expect(values(described_class.chain(object, :svc, declaration))).to eq([[:global, 'global']])
     write(declarer, declaration, 'module')
     write(klass, declaration, 'class')
-    expect(values(described_class.chain(object, :svc, declaration)))
-      .to eq([[:class, 'class'], [:class, 'module'], [:global, 'global']])
+    expect(values(described_class.chain(object, :svc, declaration))).to eq([[:class, 'module'], [:global, 'global']])
     klass.include(declarer)
+    write(object, declaration, 'object')
     expect(values(described_class.chain(object, :svc, declaration)))
-      .to eq([[:class, 'class'], [:class, 'module'], [:global, 'global']])
+      .to eq([[:instance, 'object'], [:class, 'module'], [:global, 'global']])
+    expect(values(described_class.chain(klass, :svc, declaration))).to eq([[:class, 'module'], [:global, 'global']])
     expect(values(described_class.chain(object, :svc, nil))).to eq([[:global, 'global']])
   end
 end

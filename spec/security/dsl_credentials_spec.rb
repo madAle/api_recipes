@@ -48,7 +48,7 @@ describe 'Credentials through the DSL' do
   end
 
   it 'lets an instance with no token of its own take the shared one, and never the token of a sibling' do
-    ApiRecipes.svc.authorization = 'Bearer SHARED'
+    global_values(svc: { authorization: 'Bearer SHARED' })
     a = client_class.new
     b = client_class.new
     a.svc.authorization = 'Bearer A'
@@ -72,7 +72,7 @@ describe 'Credentials through the DSL' do
   end
 
   it 'sends no token for a client whose token was set to nil, although a shared one exists' do
-    ApiRecipes.svc.authorization = 'Bearer SHARED'
+    global_values(svc: { authorization: 'Bearer SHARED' })
     client = client_class.new
     client.svc.authorization = nil
     client.svc.users.run
@@ -80,7 +80,7 @@ describe 'Credentials through the DSL' do
   end
 
   it 'does not send a shared token to another host, protocol or port selected with with' do
-    ApiRecipes.svc.authorization = 'Bearer SHARED'
+    global_values(svc: { authorization: 'Bearer SHARED' })
     [{ host: 'evil.test' }, { protocol: 'http' }, { port: 8443 }, { host: 'evil.test', port: 443, protocol: 'https' }].each do |options|
       expect { ApiRecipes.svc.with(options).users.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
       expect { ApiRecipes.svc.users.with(options) }.to raise_error(ApiRecipes::ConfigurationError, /unknown option/)
@@ -96,8 +96,8 @@ describe 'Credentials through the DSL' do
   end
 
   it 'does not send a token to a host a variable selects, when the token was set at a farther level' do
-    ApiRecipes.shop.variables = { shop: 'acme' }
-    ApiRecipes.shop.authorization = 'Bearer SHOP'
+    global_values(shop: { variables: { shop: 'acme' } })
+    global_values(shop: { authorization: 'Bearer SHOP' })
     expect { ApiRecipes.shop.with(variables: { shop: 'evil' }).orders.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
     client = client_class.new
     client.shop.variables = { shop: 'evil' }
@@ -108,13 +108,13 @@ describe 'Credentials through the DSL' do
   end
 
   it 'does not send a token whose own level cannot tell the host a variable selects' do
-    ApiRecipes.shop.authorization = 'Bearer SHOP'
+    global_values(shop: { authorization: 'Bearer SHOP' })
     expect { ApiRecipes.shop.with(variables: { shop: 'evil' }).orders.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
     expect(WebMock).not_to have_requested(:any, /.*/)
   end
 
   it 'does not let a class that changes the host receive the global token' do
-    ApiRecipes.svc.authorization = 'Bearer GLOBAL'
+    global_values(svc: { authorization: 'Bearer GLOBAL' })
     other = Class.new do
       include ApiRecipes
       api :svc, host: 'other.example.test'
@@ -172,11 +172,17 @@ describe 'Credentials through the DSL' do
       ["Bearer SECRET\n", "Bearer\r\nX-Injected: SECRET", "Bearer SECRET\0"].each do |value|
         expect { ApiRecipes.svc.with(authorization: value).users.run }
           .to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
-        expect { ApiRecipes.svc.authorization = value }
-          .to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+        [-> { global_values(svc: { authorization: value }) },
+         -> { new_client_class(svc: { authorization: value }) },
+         -> { new_client_class.new.svc.authorization = value }].each do |giving|
+          expect(&giving).to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+        end
       end
-      expect { ApiRecipes.svc.basic_auth = { user: 'u', pass: "SECRET\n" } }
-        .to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+      [-> { global_values(svc: { basic_auth: { user: 'u', pass: "SECRET\n" } }) },
+       -> { new_client_class(svc: { basic_auth: { user: 'u', pass: "SECRET\n" } }) },
+       -> { new_client_class.new.svc.basic_auth = { user: 'u', pass: "SECRET\n" } }].each do |giving|
+        expect(&giving).to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+      end
       expect(WebMock).not_to have_requested(:any, /.*/)
     end
   end
@@ -184,12 +190,16 @@ describe 'Credentials through the DSL' do
   describe 'a credential that is not valid UTF-8' do
     it 'is refused as an invalid credential, without showing it' do
       value = "Bearer SECRET\xFF"
-      expect { ApiRecipes.svc.authorization = value }
-        .to raise_error(ApiRecipes::InvalidCredential, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      [-> { new_client_class.new.svc.authorization = value }, -> { global_values(svc: { authorization: value }) },
+       -> { new_client_class(svc: { authorization: value }) }].each do |giving|
+        expect(&giving).to raise_error(ApiRecipes::Error, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      end
       expect { ApiRecipes.svc.with(authorization: value).users.run }
         .to raise_error(ApiRecipes::ConfigurationError, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
-      expect { ApiRecipes.svc.basic_auth = { user: 'u', pass: "SECRET\xFF" } }
+      expect { new_client_class.new.svc.basic_auth = { user: 'u', pass: "SECRET\xFF" } }
         .to raise_error(ApiRecipes::InvalidCredential, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      expect { global_values(svc: { basic_auth: { user: 'u', pass: "SECRET\xFF" } }) }
+        .to raise_error(ApiRecipes::Error, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
       expect(WebMock).not_to have_requested(:any, /.*/)
     end
   end
@@ -197,7 +207,7 @@ describe 'Credentials through the DSL' do
   describe 'a credential sent in the query' do
     before do
       configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'query', name: 'key' }, endpoints: { users: nil } })
-      ApiRecipes.svc.authorization = 'SECRET'
+      global_values(svc: { authorization: 'SECRET' })
     end
 
     it 'needs params given as a Hash, and says so without sending anything' do

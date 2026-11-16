@@ -193,9 +193,9 @@ describe ApiRecipes::Configuration do
     end
   end
 
-  it 'has defaults for variables and upgrade_warnings' do
+  it 'has defaults for values and upgrade_warnings' do
     configuration = ApiRecipes::Configuration.new
-    expect(configuration.variables).to eq({})
+    expect(configuration.value_levels).to eq({})
     expect(configuration.upgrade_warnings).to eq(true)
   end
 

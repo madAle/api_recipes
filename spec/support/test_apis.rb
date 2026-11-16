@@ -33,12 +33,27 @@ module TestApis
     end
   end
 
-  # Anonymous class that declares the two test apis.
-  def new_client_class
+  # Gives values to the level of the whole application, as config.values
+  # does, on top of those the example gave before. A credential replaces the
+  # one of the other kind.
+  def global_values(values)
+    @global_values ||= {}
+    values.each do |name, given|
+      kept = @global_values[name.to_sym] || {}
+      kept = kept.except(:authorization, :basic_auth) if given.key?(:authorization) || given.key?(:basic_auth)
+      @global_values[name.to_sym] = kept.merge(given)
+    end
+    given = @global_values
+    ApiRecipes.configure { |config| config.values = given }
+  end
+
+  # Anonymous class that declares the two test apis, with the values and the
+  # options each one is given.
+  def new_client_class(svc: {}, versioned: {})
     Class.new do
       include ApiRecipes
-      api :svc
-      api :versioned
+      api :svc, svc
+      api :versioned, versioned
     end
   end
 
