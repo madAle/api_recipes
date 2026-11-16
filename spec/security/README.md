@@ -23,6 +23,7 @@ Spec files:
 | `dsl_objects_spec.rb` | what `Api`, `Endpoint` and `Response` show, write and let Ruby do |
 | `dsl_logging_spec.rb` | what the logger receives |
 | `configuration_spec.rb` | local files, ERB, YAML, refused configurations |
+| `openapi_import_spec.rb` | `api_recipes import`: a hostile OpenAPI description and the recipe written from it |
 
 ## Values put in the URL and in the headers
 
@@ -89,6 +90,23 @@ have control characters or invalid encoding, a placeholder in `base_url`, a
 host with a character a host cannot have), and the previous configuration
 being kept (`configuration_spec.rb`, `a configuration that is refused before
 anything is built`).
+
+## Importing an OpenAPI description
+
+The description comes from someone else. The recipe written from it is then
+loaded as a local file, where ERB is evaluated.
+
+| Risk | Protection | Spec | Example |
+| --- | --- | --- | --- |
+| The description makes the importer read another file or download something | only a `$ref` inside the file is followed; any other is an error; one file is opened, the network is never used | `openapi_import_spec.rb` | `a $ref never makes the importer open another file or use the network` |
+| A `$ref` that goes round in a circle, or a chain of thousands of them | a circle is an error; so is a chain of more than 64. The schemas, which refer to themselves by design, are never walked | `openapi_import_spec.rb` | `a $ref that goes round in a circle is an error, not an endless loop`, `a $ref that is the first of a very long chain is refused, instead of being followed for minutes` |
+| A title, an `operationId` or a parameter name with line breaks adds keys to the recipe | a comment is one line: control characters, every kind of space and line separator (also U+2028, U+2029 and U+0085) and the characters that hide or reverse text become one space; every name and value is written by the YAML generator; the text is read back and compared with the data before it is returned | `openapi_import_spec.rb` | `free text of the description with line breaks never adds a key to the recipe`, `free text of the description with the line separators of Unicode never adds a key to the recipe`, `free text of the description that hides or reverses text is removed from the comments`, `free text of the description is checked again after writing: a recipe that does not read back as intended is not written` |
+| Text of the description with `<%` becomes code when the recipe is loaded | `<%` and `%>` are removed from comments; in a value they are an error that says where; the text written never contains `<%` | `openapi_import_spec.rb` | `free text of the description with ERB is removed from the comments, and loading the recipe as a file runs nothing`, `free text of the description with ERB split so that removing a part leaves another is still removed`, `a value of the recipe with ERB in ... is refused, and the message says where` (one per place), `a value of the recipe is never built by the importer from a description of ERB in a parameter name` |
+| A value with a line break starts a new line of the recipe | a control character, U+2028 or U+2029 in a name or a value is an error; so are binary data (`!!binary`) and a name longer than 1000 characters, which YAML would not read back | `openapi_import_spec.rb` | `a value of the recipe with a line break is refused`, `a value of the recipe that is binary data, or a name too long for YAML, is refused with a message` |
+| Endpoint names that are not valid | reduced to letters, digits and `_`; the real segment stays in `path` | `openapi_import_spec.rb` | `writes endpoint names made only of letters, digits and underscores` |
+| A YAML description that builds Ruby objects | read with `YAML.safe_load`: plain data and dates only | `openapi_import_spec.rb` | `refuses a description with a Ruby object` |
+| A small YAML description that describes a huge structure through aliases | refused while the text is parsed, before any object is built: aliases that together stand for more than ten million values (counted without expanding them), a key that is not plain text, a nesting deeper than 200 levels. Below that limit an alias is the same object, never a copy, and the importer never turns a mapping or a list into text | `openapi_import_spec.rb` | `refuses a description whose aliases describe more than ten million values`, `refuses a key that is an alias of a huge structure, instead of computing its hash for ever`, `never turns a mapping or a list of the description into text, wherever it is`, `reads a description that says a lot with YAML aliases, within the limit` (guards what must keep working) |
+| A description made to print without end, or to make the command fail with the text of a Ruby exception | at most 100 warnings are shown, then their number; one warning for each path that cannot be written, not for each operation; what the importer did not foresee is answered with one line and exit code 1 | `openapi_import_spec.rb` | `never prints megabytes of warnings`, `answers a defect of its own with a message, never with a stack trace` |
 
 ## What the gem does not do
 

@@ -1,3 +1,18 @@
+## Version 3.0.0.beta2
+
+The second pre-release of 3.0 adds two commands. Nothing changes in the library.
+
+- `api_recipes import FILE` writes a recipe from an OpenAPI 3.0 or 3.1
+  description, YAML or JSON: the address, the variables and the kind of
+  authorization, the tree of endpoints with their path parameters and expected
+  statuses, and a comment beside each endpoint with the operation it comes from.
+  `--name`, `--only`, `--except`, `--server` and `--output` choose the name of
+  the api, the paths, the server and where the recipe goes. The description is
+  one local file: no other file is read, the network is not used and nothing in
+  it is run.
+- `api_recipes routes FILE...` lists the calls that the recipes in a file offer,
+  with the verb and the address.
+
 ## Version 3.0.0.beta1
 
 The first pre-release of 3.0. The DSL is the same, and a YAML file that is valid
