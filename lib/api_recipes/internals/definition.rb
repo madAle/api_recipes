@@ -18,13 +18,18 @@ module ApiRecipes
         end
       end
 
-      # header over the ones of base that have its name, whatever the case:
-      # the name of a header has no case.
+      # The name of a header as http.rb compares it: without case, and with
+      # _ read as -.
+      def self.header_key(name) = name.to_s.downcase.tr('_', '-')
+
+      # added over the headers of base that have the same name. One of the
+      # two is returned as it is when the other is empty.
       def self.over_headers(base, added)
         return base if added.empty?
         return added if base.empty?
 
-        base.reject { |name, _| added.any? { |other, _| other.casecmp?(name) } }.merge(added).freeze
+        names = added.each_key.to_h { |name| [header_key(name), true] }
+        base.reject { |name, _| names.key?(header_key(name)) }.merge(added).freeze
       end
 
       # A definition holds the values of default_headers and default_params.
@@ -126,13 +131,13 @@ module ApiRecipes
 
         NONE = {}.freeze
 
-        # default_headers, default_params: the ones written on this endpoint
-        # and on the endpoints above it, the nearest winning; those of the api
-        # are not among them. header_templates, param_templates: the same,
-        # ready to be filled.
+        # header_templates, param_templates: the headers and the parameters
+        # written on this endpoint and on the endpoints above it, the nearest
+        # winning, ready to be filled; those of the api are not among them. An
+        # endpoint that adds none shares the Hash of the endpoint above it.
         attr_reader :name, :full_name, :path, :full_path, :path_params, :path_variables, :verb, :ok_code, :timeout,
-                    :on_bad_code, :mime_type, :verify_with, :default_headers, :default_params, :header_templates,
-                    :param_templates, :parent, :endpoints, :template
+                    :on_bad_code, :mime_type, :verify_with, :header_templates, :param_templates, :parent,
+                    :endpoints, :template
 
         def initialize(name:, parent:, own:, template:, children:)
           @name = name
@@ -157,9 +162,9 @@ module ApiRecipes
           above = parent.is_a?(Endpoint) ? parent : nil
           @header_templates = Definition.over_headers(above ? above.header_templates : NONE,
                                                       templates(own[:default_headers], :header))
-          @param_templates = (above ? above.param_templates : NONE).merge(templates(own[:default_params], :param)).freeze
-          @default_headers = @header_templates.transform_values(&:to_s).freeze
-          @default_params = @param_templates.transform_values(&:to_s).freeze
+          params = templates(own[:default_params], :param)
+          taken = above ? above.param_templates : NONE
+          @param_templates = params.empty? ? taken : taken.merge(params).freeze
           @endpoints = children.call(self).freeze
           freeze
         end
@@ -167,6 +172,13 @@ module ApiRecipes
         def route?
           @route
         end
+
+        # The headers and the parameters of header_templates and
+        # param_templates as they are written. They are built when asked: a
+        # copy kept on every endpoint would cost as much as the tree is deep.
+        def default_headers = @header_templates.transform_values(&:to_s).freeze
+
+        def default_params = @param_templates.transform_values(&:to_s).freeze
 
         # The value written on this endpoint, or nil. For :verify_with, the
         # value of the nearest endpoint, this one included, that has one.
@@ -191,8 +203,8 @@ module ApiRecipes
             path_params: path_params.dup, path_variables: path_variables.dup, verb: verb, route: route?,
             ok_code: Definition.plain(ok_code),
             timeout: timeout, on_bad_code: on_bad_code, mime_type: mime_type, verify_with: verify_with,
-            default_headers: default_headers.transform_values { '[FILTERED]' },
-            default_params: default_params.transform_values { '[FILTERED]' },
+            default_headers: @header_templates.transform_values { '[FILTERED]' },
+            default_params: @param_templates.transform_values { '[FILTERED]' },
             endpoints: endpoints.transform_values(&:to_h)
           }
         end

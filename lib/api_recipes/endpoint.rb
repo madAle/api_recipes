@@ -14,7 +14,9 @@ module ApiRecipes
 
     # args: the path values, then optionally a Hash of options for http.rb.
     # overrides: the options given to with, for this request only.
-    def initialize(context, definition, parent_path, args, overrides = nil)
+    # path: the path already built, for the copy that with returns: the
+    # variables of a path are read once, when the chain passes there.
+    def initialize(context, definition, parent_path, args, overrides = nil, path = nil)
       @context = context
       @definition = definition
       @parent_path = parent_path
@@ -26,6 +28,10 @@ module ApiRecipes
       count = @options ? args.size - 1 : args.size
       raise PathParamsMismatch.new(definition.full_path, params, args.first(count)) unless count == params.size
 
+      if path
+        @path = path
+        return
+      end
       own = definition.template.expand(args, endpoint: definition.full_name, context: context, &UPGRADE_WARNING)
       if own.empty?
         # A root endpoint with an empty path is the address of the api, which
@@ -69,7 +75,7 @@ module ApiRecipes
         options.each { |key, value| merged.delete(key.to_sym) if value.nil? }
         overrides = merged.freeze
       end
-      self.class.new(@context, @definition, @parent_path, @args, overrides)
+      self.class.new(@context, @definition, @parent_path, @args, overrides, @path)
     end
 
     attr_reader :definition

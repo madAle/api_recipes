@@ -141,6 +141,23 @@ RSpec.describe ApiRecipes::CLI::Recipes::Summary do
                              '  params:        state: open (shop.orders and below)')
   end
 
+  it 'says so when it cuts a name or a value: nothing is left out without a sign' do
+    endpoints = { 'u' => { 'default_headers' => { 'X-Note' => "#{'b' * 100} {account}" } } }
+    lines = summary('shop', 'variables' => { 'account' => { 'default' => 'd' * 61, 'description' => 'e' * 101 } },
+                            'default_params' => { 'q' => "#{'a' * 100}&leak=1", 'n' * 300 => 'delete' },
+                            'endpoints' => endpoints).lines
+    expect(lines).to include("  headers:       X-Note: #{'b' * 100}... (110 characters) (shop.u)",
+                             "  params:        q: #{'a' * 100}... (107 characters)",
+                             "                 #{'n' * 100}... (300 characters): delete",
+                             "  variables:     account: default #{'d' * 60}... (61 characters), #{'e' * 100}... (101 characters)")
+  end
+
+  it 'shows the whole address, also when a default makes it long: where the host ends is at its end' do
+    host = "#{'a.' * 300}evil.example.test"
+    lines = summary('shop', 'host' => '{h}', 'variables' => { 'h' => { 'default' => host } }).lines
+    expect(lines).to include("  with defaults: https://#{host}")
+  end
+
   it 'lists the calls that resource adds and that are not GET' do
     lines = summary('shop', 'endpoints' => { 'orders' => { 'resource' => true } }).lines
     expect(lines.last(5)).to eq(['  calls:         6, of which 4 are not GET:',
@@ -157,21 +174,53 @@ RSpec.describe ApiRecipes::CLI::Recipes::Summary do
   end
 
   describe '#changes_from' do
-    it 'says what changes in the parameters, on the api and on an endpoint' do
+    it 'says what changes in the parameters, on the api and on an endpoint, one line for each' do
       before = summary
-      after = summary('shop', 'default_params' => { 'debug' => 1 })
-      expect(after.changes_from(before)).to eq(['  changes from shop 1.0.0:', '    params: none -> debug: 1'])
+      after = summary('shop', 'default_params' => { 'debug' => 1, 'page' => 2 })
+      expect(after.changes_from(before))
+        .to eq(['  changes from shop 1.0.0:', '    new parameter: debug: 1', '    new parameter: page: 2'])
+      expect(before.changes_from(after))
+        .to eq(['  changes from shop 1.0.0:', '    parameter no longer sent: debug', '    parameter no longer sent: page'])
       endpoints = { 'orders' => { 'default_params' => { 'all' => true } } }
       nested = summary('shop', 'endpoints' => endpoints)
       expect(nested.changes_from(summary('shop', 'endpoints' => { 'orders' => nil })))
-        .to eq(['  changes from shop 1.0.0:', '    params: none -> all: true (shop.orders)'])
+        .to eq(['  changes from shop 1.0.0:', '    new parameter: all: true (shop.orders)'])
+      moved = summary('shop', 'endpoints' => { 'orders' => { 'default_params' => { 'all' => false } } })
+      expect(moved.changes_from(nested)).to eq(['  changes from shop 1.0.0:', '    parameter all (shop.orders): true -> false'])
     end
 
     it 'says what changes in the headers' do
       before = summary
       after = summary('shop', 'default_headers' => { 'X-HTTP-Method-Override' => 'DELETE' })
-      expect(after.changes_from(before)).to eq(['  changes from shop 1.0.0:', '    headers: none -> X-HTTP-Method-Override: DELETE'])
-      expect(before.changes_from(after)).to eq(['  changes from shop 1.0.0:', '    headers: X-HTTP-Method-Override: DELETE -> none'])
+      expect(after.changes_from(before)).to eq(['  changes from shop 1.0.0:', '    new header: X-HTTP-Method-Override: DELETE'])
+      expect(before.changes_from(after)).to eq(['  changes from shop 1.0.0:', '    header no longer sent: X-HTTP-Method-Override'])
+      other = summary('shop', 'default_headers' => { 'X-HTTP-Method-Override' => 'PUT' })
+      expect(other.changes_from(after)).to eq(['  changes from shop 1.0.0:', '    header X-HTTP-Method-Override: DELETE -> PUT'])
+    end
+
+    it 'compares the values as they are, and shows whole the ones that change, however long' do
+      long = 'a' * 150
+      before = summary('shop', 'variables' => { 'account' => nil }, 'default_params' => { 'q' => long },
+                               'endpoints' => { 'u' => { 'default_headers' => { 'X-Note' => long } } })
+      after = summary('shop', 'variables' => { 'account' => nil }, 'default_params' => { 'q' => "#{long}&leak={account}" },
+                              'endpoints' => { 'u' => { 'default_headers' => { 'X-Note' => "#{long} {account}" } } })
+      expect(after.changes_from(before)).to eq(['  changes from shop 1.0.0:',
+                                                "    header X-Note (shop.u): #{long} -> #{long} {account}",
+                                                "    parameter q: #{long} -> #{long}&leak={account}"])
+      # Two values of the same length, that differ after what a row shows.
+      same = %w[safe evil].map { |tail| summary('shop', 'default_params' => { 'q' => "#{long}#{tail}" }) }
+      expect(same[1].changes_from(same[0])).to eq(['  changes from shop 1.0.0:', "    parameter q: #{long}safe -> #{long}evil"])
+      name = 'n' * 600
+      renamed = [summary('shop', 'default_params' => { name => 'harmless' }), summary('shop', 'default_params' => { name => 'delete' })]
+      expect(renamed[1].changes_from(renamed[0])).to eq(['  changes from shop 1.0.0:', "    parameter #{name}: harmless -> delete"])
+    end
+
+    it 'shows whole an address that changes far from its start' do
+      hosts = %w[good evil].map { |word| "#{'a.' * 400}#{word}.example.test" }
+      before, after = hosts.map { |host| summary('shop', 'host' => host) }
+      expect(after.changes_from(before)).to eq(['  changes from shop 1.0.0:',
+                                                "    address: https://#{hosts[0]} -> https://#{hosts[1]}",
+                                                "    with defaults: https://#{hosts[0]} -> https://#{hosts[1]}"])
     end
 
     it 'says so when nothing of what it shows changes' do

@@ -41,7 +41,9 @@ module ApiRecipes
           check_variables(api_name, variables, global)
           # The variables that the options use are those of the global api.
           # Without one yet, the tree compiled at the first use checks them.
-          errors = Compiler.check_options(options, :api, variables: global ? global.variables.keys : :any)
+          auth = global && global.auth
+          errors = Compiler.check_options(options, :api, variables: global ? global.variables.keys : :any,
+                                                         credential_param: auth && auth[:type] == :query ? auth[:name] : nil)
           raise ConfigurationError.new(errors) unless errors.empty?
 
           declaration = new(klass, api_name, Compiler.frozen_copy(options), variables)

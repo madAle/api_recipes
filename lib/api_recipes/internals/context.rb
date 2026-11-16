@@ -258,7 +258,9 @@ module ApiRecipes
           merged[:credential] = Credential.from(key, value)
         elsif value.nil?
           merged.delete(key)
-        elsif %i[default_headers default_params variables].include?(key)
+        elsif key == :default_headers
+          merged[key] = Definition.over_headers(merged[key] || {}, value)
+        elsif %i[default_params variables].include?(key)
           merged[key] = (merged[key] || {}).merge(value).freeze
         else
           merged[key] = value

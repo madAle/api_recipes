@@ -75,11 +75,14 @@ module ApiRecipes
         # scope: :api, :with_api or :with_endpoint. Returns the problems, never raises.
         # variables, for :api only: the names that the options may use beside
         # those they declare; :any when they are not known yet.
-        def check_options(options, scope, variables: [])
+        # credential_param, for :api only: the query parameter that carries
+        # the credential of the api the options are merged with, which they
+        # cannot set unless they give an auth of their own.
+        def check_options(options, scope, variables: [], credential_param: nil)
           raise ArgumentError, "unknown scope '#{scope}'" unless %i[api with_api with_endpoint].include?(scope)
 
           compiler = new
-          compiler.check(options, scope, variables)
+          compiler.check(options, scope, variables, credential_param)
           compiler.errors
         end
 
@@ -134,11 +137,20 @@ module ApiRecipes
 
             merged[key] = if IGNORED_KEY.match?(key.to_s) || !(value.is_a?(Hash) && merged[key].is_a?(Hash))
                             value
+                          elsif key == :default_headers && !endpoints
+                            merge_headers(merged[key], value)
                           else
                             merge(merged[key], value, !endpoints && key == :endpoints)
                           end
           end
           merged
+        end
+
+        # A header of override takes the place of the one of base with its
+        # name, however it is written.
+        def merge_headers(base, override)
+          names = override.each_key.to_h { |name| [Definition.header_key(name), true] }
+          base.reject { |name, _| names.key?(Definition.header_key(name)) }.merge(override)
         end
       end
 
@@ -161,13 +173,13 @@ module ApiRecipes
         end.freeze
       end
 
-      def check(options, scope, variables = [])
+      def check(options, scope, variables = [], credential_param = nil)
         unless options.is_a?(Hash)
           add('', 'options must be a Hash')
           return
         end
         options = normalize(options, '')
-        scope == :api ? api_attrs(nil, options, '', variables) : validate_with(options, scope)
+        scope == :api ? api_attrs(nil, options, '', variables, credential_param) : validate_with(options, scope)
       end
 
       def resolve(options, scope)
@@ -323,7 +335,9 @@ module ApiRecipes
       # ---- api ----
 
       # known: names of variables declared elsewhere, or :any to accept every name.
-      def api_attrs(_name, config, location, known = [])
+      # credential_param: the one of the api these options are merged with,
+      # used when they give no auth.
+      def api_attrs(_name, config, location, known = [], credential_param = nil)
         check_keys(config, API_KEYS, location)
         variables = config[:variables].is_a?(Hash) ? config[:variables] : {}
         declared = known == :any ? nil : variables.keys + known
@@ -339,7 +353,8 @@ module ApiRecipes
         attrs[:verify_with] = option(:verify_with, config, location, :api, declared)
         attrs[:default_headers] = option(:default_headers, config, location, :api, declared)
         attrs[:auth] = option(:auth, config, location, :api, declared)
-        names = Names.new(variables: declared, credential_param: credential_param(attrs[:auth]))
+        credential_param = credential_param(attrs[:auth]) unless config[:auth].nil?
+        names = Names.new(variables: declared, credential_param: credential_param)
         attrs[:default_params] = option(:default_params, config, location, :api, names)
         attrs[:variables] = option(:variables, config, location, :api, declared)
         attrs[:recipe] = option(:recipe, config, location, :api, declared)
@@ -540,26 +555,21 @@ module ApiRecipes
           add(where, 'must be a string')
           return nil
         end
-        string = value.to_s
-        check_variables(string, where, declared)
-        placeholder = false
-        encoded = string.split(VARIABLE_TOKEN).map do |piece|
-          next piece if VARIABLE_TOKEN.match?(piece)
-
-          begin
-            template = PathTemplate.parse(piece)
-            placeholder ||= !template.param_names.empty?
-            template.to_s
-          rescue ArgumentError
-            placeholder = true
-            piece
-          end
-        end.join
-        if placeholder
+        # Read as a path: the same fixed text, {variables} and \{ of the
+        # path of an endpoint, without its placeholders.
+        template = begin
+          PathTemplate.parse(value.to_s)
+        rescue ArgumentError
+          nil
+        end
+        if template.nil? || !template.param_names.empty?
           add(where, 'path placeholders are not allowed here; declare a variable and write {name}')
           return nil
         end
-        encoded.freeze
+        unless declared.nil?
+          (template.variable_names - declared).each { |name| add(where, "unknown variable #{shown(name)}") }
+        end
+        template.to_s.freeze
       end
 
       def headers(value, where, declared)
@@ -567,10 +577,16 @@ module ApiRecipes
           add(where, 'must be a Hash')
           return nil
         end
+        seen = {}
         value.each_with_object({}) do |(name, header), out|
           name = name.to_s
           header_where = join(where, name)
           add(header_where, 'is not a valid header name') unless TOKEN.match?(name)
+          first = seen[Definition.header_key(name)] ||= name
+          unless first.equal?(name)
+            add(header_where, "is given twice, as #{shown(first)} and as #{shown(name)}: the name of a header has " \
+                              'no case, and _ is read as -')
+          end
           unless header.is_a?(String) || header.is_a?(Symbol) || header.is_a?(Numeric)
             add(header_where, 'must be a string')
             next

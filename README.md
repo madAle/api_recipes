@@ -320,10 +320,16 @@ ApiRecipes.billing.invoices.overdue(params: { status: 'paid', page: 2 }).run.uri
 
 On the same name the nearest to the request wins: the API, then
 [`with`](#options-for-one-chain-with), then the endpoints from the farthest to
-the nearest, then the credential, then the `headers:` and `params:` of the
-request. The names of headers are compared without their case. A value can
-contain [variables](#variables). When an API has `default_params`, the
-`params:` of a request must be a Hash.
+the nearest. After them come the credential and what the request gives. For a
+header: the credential, then the `headers:` of the request. For a parameter:
+the `params:` of the request, then the credential when it travels in the query,
+which nothing replaces.
+
+The names of headers are compared as HTTP does, without their case and with
+`_` read as `-`: `accept` on an endpoint replaces the `Accept` of the API. The
+same name written twice in one place is an error. A value can contain
+[variables](#variables). When an API has `default_params`, the `params:` of a
+request must be a Hash.
 
 ## Variables
 
@@ -429,7 +435,8 @@ only letters, digits, dots, hyphens and underscores. In a `base_url` and in a
 `..`. In a header it cannot contain a line break or another control character.
 In a parameter it is encoded like every value of a query string. Anything else
 raises `ApiRecipes::InvalidVariable`.
-A word in braces that is not a variable is written `\{word}` in a path.
+A word in braces that is not a variable is written `\{word}` in a path and in
+a `base_url`.
 A name that the API does not declare raises `ApiRecipes::ConfigurationError` at
 every level, so a misspelled name is never ignored.
 `variables` without an assignment returns the values set at the level you call
@@ -686,15 +693,18 @@ layout.
   writes it and with the defaults of its variables, where the credential goes,
   the headers and the parameters sent with every request, with the endpoint
   for those that only an endpoint adds, the variables to set and every call
-  that is not a GET. It warns when the credential would travel in the query string,
+  that is not a GET. The address is shown whole. A name or a value longer than
+  100 characters is cut and followed by its length, so you know to read it in
+  the file. It warns when the credential would travel in the query string,
   and when the protocol is `http`. Only `y` or `yes` installs; `--yes` installs
   without asking.
 - `--to DIR` installs in another folder. `update` and `check` take it as
   `--dir DIR`.
 - `update NAME` takes the recipe that its repository has now, or the one of
   `--version`, and shows what changes in the address, the credential, the
-  headers, the parameters and the verbs before it replaces the file. It reads
-  the repository from `recipes.lock`, so it needs no `--from`.
+  headers, the parameters and the verbs before it replaces the file. A header
+  or a parameter that changes is shown whole, before and after. It reads the
+  repository from `recipes.lock`, so it needs no `--from`.
 - `check` compares the installed recipes with `recipes.lock`, as `configure`
   does. `check FILE` says whether a file is a valid portable recipe: use it
   while you write one.
@@ -806,7 +816,9 @@ The rules, beyond those of every description:
   in it is what is loaded.
 - At most 1 MiB, 10,000 endpoints, those that `resource` adds among them, 2,000
   characters for a name or a value, and 4,000 characters for the path of an
-  endpoint with the paths above it.
+  endpoint with the paths above it. The headers and parameters written on
+  endpoints are at most 100,000, counting for each endpoint that adds some
+  also those it takes from the endpoints above it.
 - With `auth.type: query`, `default_params` cannot name the parameter of the
   credential.
 - A credential never goes in a recipe: `auth` says where it travels, and the

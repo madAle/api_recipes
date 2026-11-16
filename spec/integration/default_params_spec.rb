@@ -148,11 +148,59 @@ describe 'default_params, and the headers and parameters of an endpoint' do
     end
   end
 
-  describe 'with of the api' do
-    it 'replaces a header of the api whatever the case of its name' do
+  describe 'the name of a header, which has no case and reads _ as -' do
+    def headers_of(api, *path)
+      endpoint = path.reduce(api) { |node, name| node[name] }
+      endpoint.run
+      WebMock::RequestRegistry.instance.requested_signatures.hash.keys.last.headers
+    end
+
+    it 'is replaced by with, and by a second with' do
       ApiRecipes.svc.with(default_headers: { 'ACCEPT' => 'text/csv' }).users.run
       expect(sent('/users', headers: { 'Accept' => 'text/csv', 'X-Api' => 'one' })).to have_been_made
+      api = ApiRecipes.svc.with(default_headers: { 'X-New' => 'a' }).with(default_headers: { 'x_new' => 'b' })
+      expect(headers_of(api, :users)).to include('X-New' => 'b')
     end
+
+    it 'is replaced by the options of a class, on the api and on an endpoint' do
+      klass = Class.new do
+        include ApiRecipes
+        api :svc, default_headers: { 'accept' => 'text/csv' },
+                  endpoints: { issues: { default_headers: { 'ACCEPT' => 'text/html' } } }
+      end
+      expect(headers_of(klass.svc, :users)).to include('Accept' => 'text/csv', 'X-Api' => 'one')
+      expect(headers_of(klass.svc, :issues)).to include('Accept' => 'text/html')
+      expect(klass.svc.definition.default_headers.keys).to eq(%w[X-Api accept])
+    end
+
+    it 'is replaced by an endpoint that writes it with _' do
+      configure_test_apis(svc: { host: 'api.example.test', default_headers: { 'x-api-key' => 'api' },
+                                 endpoints: { users: { default_headers: { 'X_API_KEY' => 'endpoint' } } } })
+      expect(headers_of(ApiRecipes.svc, :users)).to include('X-Api-Key' => 'endpoint')
+    end
+
+    it 'cannot be given twice in one place' do
+      twice = "is given twice, as 'Accept' and as 'accept': the name of a header has no case, and _ is read as -"
+      expect { configure_test_apis(svc: { host: 'h.test', default_headers: { 'Accept' => 'a', 'accept' => 'b' } }) }
+        .to raise_error(ApiRecipes::ConfigurationError) { |e| expect(e.errors).to eq(["svc.default_headers.accept: #{twice}"]) }
+      expect { ApiRecipes.svc.with(default_headers: { 'Accept' => 'a', 'accept' => 'b' }) }
+        .to raise_error(ApiRecipes::ConfigurationError, /default_headers\.accept: is given twice/)
+    end
+  end
+
+  it 'refuses, when the class is declared, default_params that name the parameter of the credential of the api' do
+    configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'query', name: 'key' }, endpoints: { users: nil } })
+    declare = lambda do |options|
+      Class.new do
+        include ApiRecipes
+        api :svc, **options
+      end
+    end
+    expect { declare.call(default_params: { key: 'x' }) }
+      .to raise_error(ApiRecipes::ConfigurationError, /default_params\.key: is the parameter of the credential/)
+    expect { declare.call(endpoints: { users: { default_params: { 'key' => 'x' } } }) }
+      .to raise_error(ApiRecipes::ConfigurationError, /endpoints\.users\.default_params\.key: is the parameter of the credential/)
+    expect { declare.call(auth: { type: 'header', name: 'X-Key' }, default_params: { key: 'x' }) }.not_to raise_error
   end
 
   describe 'with a credential in the query' do

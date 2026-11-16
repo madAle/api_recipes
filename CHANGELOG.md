@@ -51,15 +51,23 @@ what a recipe can hold:
   `default_params` too. `definition` hides the values in `to_h` and `inspect`.
 - `default_headers` and `default_params` can be written on an endpoint: they
   hold for that endpoint and for the ones below it, on top of those of the API.
-- The name of a header is compared without its case when a nearer level
-  replaces it: `with(default_headers: { 'accept' => ... })` replaces the
-  `Accept` of the API and no longer adds a second header.
+- The name of a header is compared as HTTP does, without its case and with
+  `_` read as `-`, wherever a nearer level replaces it: an endpoint, `with` and
+  the options of a class. `with(default_headers: { 'accept' => ... })` replaces
+  the `Accept` of the API and no longer adds a second header. The same name
+  written twice in one `default_headers` is a configuration error.
+- `\{` keeps a brace as text in a `base_url` too.
 - `resource: true` on an endpoint adds the endpoints `show`, `create`,
   `update`, `replace` and `delete` under it; a list adds only the ones it
   names. An endpoint written with one of those names completes the generated
   one.
 - `api_recipes install` and `update` show the parameters sent with every
-  request and the headers and parameters that an endpoint adds.
+  request and the headers and parameters that an endpoint adds. A name or a
+  value that is cut is followed by its length, and the address is shown whole.
+  `update` compares headers and parameters as they are written, and shows one
+  line for each that is new, changed or no longer sent, with the whole values.
+- A recipe can hold at most 100,000 headers and parameters on its endpoints,
+  counting for each endpoint that adds some those of the endpoints above it.
 
 ## Version 3.0.0.beta2
 

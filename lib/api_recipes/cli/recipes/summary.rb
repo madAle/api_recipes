@@ -6,9 +6,22 @@ module ApiRecipes
       # What a recipe does, in the lines shown before it is installed: where
       # the requests go, where the credential goes, what is sent with every
       # request, which calls change something. Every text that comes from the
-      # recipe goes through shown.
+      # recipe goes through shown, and a text that is cut says so: nothing is
+      # left out without a sign.
       class Summary
         LABEL_WIDTH = 15
+        # The characters shown of a name or a value in a row, of a row, and of
+        # a text shown whole: more than a name or a value of a recipe can have.
+        PART = 100
+        ROW = 500
+        WHOLE = 5_000
+
+        # A header or a parameter sent with every request. where: the name of
+        # the endpoint that adds it, nil for the api; below: whether that
+        # endpoint has others below it, which take it too.
+        Sent = Data.define(:name, :value, :where, :below) do
+          def key = [name, where]
+        end
 
         # value as it can be printed: one line, without control and format
         # characters, with one space where it has several, at most limit
@@ -33,7 +46,7 @@ module ApiRecipes
           rows = [['summary', meta[:summary]], ['homepage', meta[:homepage]], ['from', @origin], ['address', address]]
           rows << ['with defaults', filled_address] unless filled_address == address
           rows << ['credential', credential]
-          [title] + rows.reject { |_, text| text.nil? }.flat_map { |label, text| rows_for(label, [text]) } +
+          [title] + rows.reject { |_, text| text.nil? }.flat_map { |label, text| rows_for(label, [text], WHOLE) } +
             rows_for('headers', headers) + rows_for('params', params) + rows_for('variables', variables) + calls
         end
 
@@ -42,7 +55,7 @@ module ApiRecipes
           found = []
           auth = @api.auth || {}
           if auth[:type] == :query
-            found << "the credential travels in the address, as the query parameter #{shown(auth[:name])}: " \
+            found << "the credential travels in the address, as the query parameter #{clip(auth[:name], PART)}: " \
                      'addresses are written in logs and kept by proxies'
           end
           found << 'the protocol is http: a credential you assign travels without encryption' if @api.protocol == 'http'
@@ -75,10 +88,23 @@ module ApiRecipes
 
         # The headers sent with every request, as "Name: value", then those
         # that an endpoint adds, with the endpoint.
-        def headers = sent_always(@api.default_headers, :default_headers)
+        def headers = sent(:headers).map { |one| sent_row(one) }
 
         # The query parameters sent with every request, in the same form.
-        def params = sent_always(@api.default_params, :default_params)
+        def params = sent(:params).map { |one| sent_row(one) }
+
+        # The headers (:headers) or the parameters (:params) of the api and
+        # of its endpoints, as they are written.
+        def sent(kind)
+          key = kind == :headers ? :default_headers : :default_params
+          found = @api.public_send(key).map { |name, value| Sent.new(name.to_s, value.to_s, nil, false) }
+          each_endpoint do |node|
+            (node.own(key) || {}).each do |name, value|
+              found << Sent.new(name.to_s, value.to_s, node.full_name, !node.endpoints.empty?)
+            end
+          end
+          found
+        end
 
         # Each call that is not a GET, as [verb, call, path].
         def changing_calls
@@ -97,30 +123,49 @@ module ApiRecipes
         def changes_from(previous)
           return ['  it replaces a file that is not a valid recipe'] if previous.nil?
 
-          found = [%w[address address], ['with defaults', 'filled_address'], %w[credential credential],
-                   %w[headers headers], %w[params params]].filter_map do |label, reader|
+          found = [%w[address address], ['with defaults', 'filled_address'], %w[credential credential]].filter_map do |label, reader|
             before = previous.public_send(reader)
             after = public_send(reader)
-            "    #{label}: #{changed(before)} -> #{changed(after)}" unless before == after
+            "    #{label}: #{clip(before, WHOLE)} -> #{clip(after, WHOLE)}" unless before == after
           end
+          found.concat(sent_changes('header', previous.sent(:headers), sent(:headers)))
+          found.concat(sent_changes('parameter', previous.sent(:params), sent(:params)))
           found.concat(verb_changes(previous.verbs))
           found << '    no change in the address, the credential, the headers, the parameters or the verbs' if found.empty?
-          ["  changes from #{shown(previous.title, 100)}:"] + found
+          ["  changes from #{clip(previous.title, PART)}:"] + found
         end
 
         private
 
-        def shown(value, limit = 200) = self.class.shown(value, limit)
+        # text as it can be printed, with at most limit characters; when it
+        # has more, the ones shown are followed by how many it has.
+        def clip(text, limit)
+          whole = self.class.shown(text, WHOLE + 1)
+          whole.length > limit ? "#{whole[0, limit]}... (#{whole.length > WHOLE ? "more than #{WHOLE}" : whole.length} characters)" : whole
+        end
 
-        # of_api: the headers or the parameters of the api. key: the option
-        # that gives them to an endpoint, for itself and for those below it.
-        def sent_always(of_api, key)
-          found = of_api.map { |name, value| "#{name}: #{shown(value, 100)}" }
-          each_endpoint do |node|
-            where = "#{shown(node.full_name, 100)}#{' and below' unless node.endpoints.empty?}"
-            (node.own(key) || {}).each { |name, value| found << "#{shown(name, 100)}: #{shown(value, 100)} (#{where})" }
+        def sent_row(one) = "#{clip(one.name, PART)}: #{clip(one.value, PART)}#{place(one, PART)}"
+
+        def place(one, limit)
+          one.where ? " (#{clip(one.where, limit)}#{' and below' if one.below})" : ''
+        end
+
+        # What changes between two lists of headers or of parameters, a line
+        # for each one, compared as they are written and shown whole.
+        def sent_changes(word, before, after)
+          old = before.to_h { |one| [one.key, one] }
+          found = after.filter_map do |one|
+            was = old[one.key]
+            if was.nil?
+              "    new #{word}: #{clip(one.name, WHOLE)}: #{clip(one.value, WHOLE)}#{place(one, WHOLE)}"
+            elsif was.value != one.value
+              "    #{word} #{clip(one.name, WHOLE)}#{place(one, WHOLE)}: #{clip(was.value, WHOLE)} -> #{clip(one.value, WHOLE)}"
+            end
           end
-          found
+          kept = after.to_h { |one| [one.key, true] }
+          found + before.reject { |one| kept.key?(one.key) }.map do |one|
+            "    #{word} no longer sent: #{clip(one.name, WHOLE)}#{place(one, WHOLE)}"
+          end
         end
 
         def each_endpoint(level = @api.endpoints, &block)
@@ -130,15 +175,10 @@ module ApiRecipes
           end
         end
 
-        def changed(value)
-          value = value.empty? ? 'none' : value.join(', ') if value.is_a?(Array)
-          shown(value, 500)
-        end
-
         # One row for each item: the label beside the first, the others below it.
-        def rows_for(label, items)
+        def rows_for(label, items, limit = ROW)
           items.each_with_index.map do |item, index|
-            "  #{(index.zero? ? "#{label}:" : '').ljust(LABEL_WIDTH)}#{shown(item, 500)}"
+            "  #{(index.zero? ? "#{label}:" : '').ljust(LABEL_WIDTH)}#{clip(item, limit)}"
           end
         end
 
@@ -146,9 +186,9 @@ module ApiRecipes
           after = verbs
           found = after.filter_map do |call, verb|
             if !before.key?(call)
-              "    new call that is not a GET: #{verb} #{shown(call)}" unless verb == 'GET'
+              "    new call that is not a GET: #{verb} #{clip(call, WHOLE)}" unless verb == 'GET'
             elsif before[call] != verb
-              "    #{shown(call)}: #{before[call]} -> #{verb}"
+              "    #{clip(call, WHOLE)}: #{before[call]} -> #{verb}"
             end
           end
           added = (after.keys - before.keys).size
@@ -165,8 +205,8 @@ module ApiRecipes
         # One line for each variable: its default, or that it must be set.
         def variables
           @api.variables.map do |name, spec|
-            state = spec[:default] ? "default #{shown(spec[:default], 60)}" : 'to be set'
-            "#{name}: #{state}#{", #{shown(spec[:description], 100)}" if spec[:description]}"
+            state = spec[:default] ? "default #{clip(spec[:default], 60)}" : 'to be set'
+            "#{clip(name, PART)}: #{state}#{", #{clip(spec[:description], PART)}" if spec[:description]}"
           end
         end
 
@@ -175,11 +215,10 @@ module ApiRecipes
           changing = changing_calls
           return rows_for('calls', ["#{total}, all GET"]) if changing.empty?
 
-          widths = [0, 1].map { |column| changing.map { |call| shown(call[column]).length }.max }
+          changing = changing.map { |verb, call, path| [verb, clip(call, ROW), clip(path, WHOLE)] }
+          widths = [0, 1].map { |column| changing.map { |call| call[column].length }.max }
           rows_for('calls', ["#{total}, of which #{changing.size} #{changing.size == 1 ? 'is' : 'are'} not GET:"]) +
-            changing.map do |verb, call, path|
-              "    #{verb.ljust(widths[0])}  #{shown(call).ljust(widths[1])}  #{shown(path)}"
-            end
+            changing.map { |verb, call, path| "    #{verb.ljust(widths[0])}  #{call.ljust(widths[1])}  #{path}" }
         end
       end
     end

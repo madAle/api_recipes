@@ -119,6 +119,14 @@ describe ApiRecipes::Internals::Compiler do
     expect(input.keys).to eq(['a'])
   end
 
+  it 'keeps a brace written with a backslash in base_url as text, as in a path' do
+    expect(compile(base_url: 'a\{b').base_url).to eq('a%7Bb')
+    api = compile(base_url: 'v1/\{x}/{y}', variables: { y: {} })
+    expect(api.base_url).to eq('v1/%7Bx%7D/{y}')
+    expect(api.base_url_template.names).to eq(%i[y])
+    expect(problems(base_url: 'v1/{x}')).to eq(["svc.base_url: unknown variable 'x'"])
+  end
+
   it 'encodes the fixed text of base_url and keeps its variables' do
     api = compile(base_url: 'my api/{version}', variables: { version: {} })
     expect(api.base_url).to eq('my%20api/{version}')

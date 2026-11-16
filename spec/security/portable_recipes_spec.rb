@@ -115,6 +115,30 @@ describe 'Portable recipes' do
         expect(Timeout.timeout(10) { run_cli('check', path).first }).to eq(1)
       end
     end
+
+    it 'cannot cost much more than its size with headers and parameters that every endpoint below would keep' do
+      params = (1..400).to_h { |number| ["p#{number}", number] }
+      children = (1..300).to_h { |number| ["c#{number}", { 'default_params' => { 'own' => number } }] }
+      path = installed(recipe_text('shop', 'endpoints' => { 'top' => { 'default_params' => params, 'endpoints' => children } }))
+      found = Timeout.timeout(10) { configure_problems(path) }
+      expect(found.size).to eq(1)
+      expect(found.first).to end_with('its endpoints hold 120700 headers and parameters, counting for each endpoint those of ' \
+                                      'the endpoints above it: a recipe has at most 100000')
+      expect(run_cli('check', path).first).to eq(1)
+
+      # Within the limit the cost follows the size: an endpoint that adds
+      # nothing shares what it takes, and names are compared through an index.
+      shared = (1..4000).to_h { |number| ["c#{number}", nil] }
+      many = (1..4000).to_h { |number| ["p#{number}", number] }
+      headers = ->(prefix) { (1..10_000).to_h { |number| ["#{prefix}-#{number}", 'v'] } }
+      [recipe_text('shop', 'endpoints' => { 'top' => { 'default_params' => many, 'endpoints' => shared } }),
+       recipe_text('shop', 'endpoints' => { 'top' => { 'default_headers' => headers.call('X-A'), 'endpoints' => {
+         'one' => { 'default_headers' => headers.call('X-B') }
+       } } })].each do |text|
+        path = installed(text)
+        expect(Timeout.timeout(5) { configure_problems(path) }).to eq([])
+      end
+    end
   end
 
   describe 'a variable of the recipe' do
@@ -296,7 +320,7 @@ describe 'Portable recipes' do
       code, out, = run_cli('update', 'shop', '--dir', @dir, input: "n\n")
       expect(code).to eq(1)
       expect(out).to include("  headers:       X-HTTP-Method-Override: DELETE\n",
-                             "    headers: none -> X-HTTP-Method-Override: DELETE\n")
+                             "    new header: X-HTTP-Method-Override: DELETE\n")
     end
 
     it 'cannot be given rows of its own by a long text: several spaces are shown as one, and each variable has its line' do
@@ -338,8 +362,24 @@ describe 'Portable recipes' do
       expect(code).to eq(1)
       expect(out).to include("  headers:       X-HTTP-Method-Override: DELETE (shop.orders and below)\n",
                              "  params:        debug: 1\n                 _method: delete (shop.orders.show)\n",
-                             "    headers: none -> X-HTTP-Method-Override: DELETE (shop.orders and below)\n",
-                             "    params: none -> debug: 1, _method: delete (shop.orders.show)\n")
+                             "    new header: X-HTTP-Method-Override: DELETE (shop.orders and below)\n",
+                             "    new parameter: debug: 1\n    new parameter: _method: delete (shop.orders.show)\n")
+    end
+
+    it 'never hides the end of a value: a cut is marked, and update compares and shows the whole values that change' do
+      long = 'a' * 150
+      text = lambda do |tail, version|
+        recipe_text('shop', 'variables' => { 'account' => nil }, 'default_params' => { 'q' => "#{long}#{tail}" },
+                            recipe: { 'version' => version })
+      end
+      code, out, = install_text(text.call('', '1.0.0'), '--yes')
+      expect(code).to eq(0)
+      expect(out).to include("  params:        q: #{'a' * 100}... (150 characters)\n")
+      @repository.publish('shop', text.call('&leak={account}', '1.0.1'))
+      _code, out, = run_cli('update', 'shop', '--dir', @dir, input: "n\n")
+      expect(out).to include("  params:        q: #{'a' * 100}... (165 characters)\n",
+                             "    parameter q: #{long} -> #{long}&leak={account}\n")
+      expect(out).not_to include('no change')
     end
 
     it 'lists the calls that resource adds and that are not GET' do

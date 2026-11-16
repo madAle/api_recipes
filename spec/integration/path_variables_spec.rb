@@ -89,6 +89,15 @@ describe 'Variables in the path of an endpoint' do
     end.to raise_error(ApiRecipes::ConfigurationError, /endpoints\.users\.path: unknown variable 'tenant'/)
   end
 
+  it 'keeps the path it was built with in the copy that with returns' do
+    ApiRecipes.shop.variables = { account: 'alice' }
+    kept = ApiRecipes.shop.orders
+    ApiRecipes.shop.variables = { account: 'bob' }
+    expect(kept.url.to_s).to eq('https://shop.example.test/v1/accounts/alice/orders')
+    expect(kept.with(timeout: 5).url.to_s).to eq('https://shop.example.test/v1/accounts/alice/orders')
+    expect(kept.with(timeout: 5).with(ok_code: 200).show(7).url.to_s).to eq('https://shop.example.test/v1/accounts/alice/orders/7')
+  end
+
   it 'keeps a brace written with a backslash as text' do
     configure_test_apis(lit: { host: 'h.test', endpoints: { odd: { path: '/a/\{b}' } } })
     expect(ApiRecipes.lit.odd.url.to_s).to eq('https://h.test/a/%7Bb%7D')

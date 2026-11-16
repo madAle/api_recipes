@@ -6,6 +6,20 @@ describe 'ApiRecipes::Internals::Definition' do
       endpoints: { users: { endpoints: { show: { path: '/:id' } } }, group: { route: false, endpoints: { ping: {} } } })
   end
 
+  it 'shares the headers and the parameters an endpoint takes from the one above it when it adds none' do
+    tree = ApiRecipes::Internals::Compiler.compile(:svc, host: 'h.test', endpoints: {
+      top: { default_headers: { 'X-A' => '1' }, default_params: { a: 1 },
+             endpoints: { plain: { endpoints: { deeper: nil } }, own: { default_params: { b: 2 } } } }
+    })
+    top = tree.endpoints[:top]
+    deeper = top.endpoints[:plain].endpoints[:deeper]
+    expect(deeper.header_templates).to equal(top.header_templates)
+    expect(deeper.param_templates).to equal(top.param_templates)
+    expect(top.endpoints[:own].header_templates).to equal(top.header_templates)
+    expect(top.endpoints[:own].default_params).to eq('a' => '1', 'b' => '2')
+    expect(tree.endpoints[:top].instance_variables).not_to include(:@default_headers, :@default_params)
+  end
+
   it 'lists the routes' do
     expect(api.routes.map(&:to_a)).to eq([
       ['svc.users', :get, 'https://api.example.test/users'],

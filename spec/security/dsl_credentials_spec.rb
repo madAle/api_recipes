@@ -217,7 +217,7 @@ describe 'Credentials through the DSL' do
       end
     end
 
-    it 'is the only parameter with its name, and the last, when with or a class give one with that name' do
+    it 'is the only parameter with its name, and the last, when with gives one with that name' do
       klass = Class.new do
         include ApiRecipes
         api :svc

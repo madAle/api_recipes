@@ -21,6 +21,8 @@ module ApiRecipes
       MAX_LENGTH = 2_000
       MAX_ENDPOINTS = 10_000
       MAX_PATH = 4_000
+      MAX_SENT = 100_000
+      SENT_KEYS = %w[default_headers default_params].freeze
       WHOLE_HOST = /\A\{[A-Za-z_]\w*\}\z/
       FIXED_END = /\A\.[A-Za-z0-9]/
 
@@ -164,7 +166,10 @@ module ApiRecipes
       def size_problems(options)
         count = 0
         longest = 0
-        walk = lambda do |endpoints, above|
+        held = 0
+        # taken: how many headers and how many parameters the endpoints above
+        # give. An endpoint that adds some holds them with its own.
+        walk = lambda do |endpoints, above, taken|
           next unless endpoints.is_a?(Hash)
 
           endpoints.each do |name, child|
@@ -174,16 +179,25 @@ module ApiRecipes
             longest = length if length > longest
             next unless child.is_a?(Hash)
 
+            given = SENT_KEYS.each_with_index.map do |key, index|
+              added = child[key].is_a?(Hash) ? child[key].size : 0
+              held += taken[index] + added unless added.zero?
+              taken[index] + added
+            end
             written = child['endpoints']
             generated(child['resource'], written).each do |path|
               count += 1
               longest = [longest, length + path.length + 1].max
             end
-            walk.call(written, length)
+            walk.call(written, length, given)
           end
         end
-        walk.call(options['endpoints'], options['base_url'].to_s.length)
+        walk.call(options['endpoints'], options['base_url'].to_s.length, [0, 0])
         problems = []
+        if held > MAX_SENT
+          problems << "its endpoints hold #{held} headers and parameters, counting for each endpoint those of the " \
+                      "endpoints above it: a recipe has at most #{MAX_SENT}"
+        end
         problems << "has #{count} endpoints: a recipe has at most #{MAX_ENDPOINTS}" if count > MAX_ENDPOINTS
         problems << "the path of an endpoint, with the paths above it, has at most #{MAX_PATH} characters" if longest > MAX_PATH
         problems
