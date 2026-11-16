@@ -5,7 +5,7 @@ Version 3.0 keeps the way you use the gem: the YAML files, `ApiRecipes.configure
 `ApiRecipes.github.users.show('octocat').run` work as before. A YAML file that
 is valid for 2.x needs no change, apart from what part 2 describes: options and
 values that 2.x accepted without checking them, a placeholder in `base_url` and a
-`{word}` in a header value. What changes is how the gem behaves around them: it
+`{word}` in a header value or in a path. What changes is how the gem behaves around them: it
 checks more, it refuses more, and a few results are different.
 
 This guide has six parts:
@@ -92,6 +92,10 @@ configuration in place. Four things are worth knowing:
   `variables: { template: { default: '{id}' } }` with the header value
   `'{template}'`. Braces around anything else, such as a JSON value, are sent
   as they are.
+- A word in braces in the `path` of an endpoint, such as `/items/{id}`, is now a
+  variable too, and one that is not declared is an error. In 2.x the braces were
+  sent as text. If you meant a value that changes at every call, write a
+  placeholder, `/items/:id`. To keep the braces as text, write `\{id}`.
 - A file that is missing, empty, not valid YAML or not valid UTF-8 raises
   `ApiRecipes::RecipeFileError`, which names the file. Files are read with
   `YAML.safe_load`: plain values, symbols and aliases are accepted, and nothing
@@ -388,8 +392,14 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   stored: `ApiRecipes.github.with(host: 'github.example.com')`.
 - **Credentials along a chain**: the chain, the object, the class and its
   ancestors, then `ApiRecipes.github`. A credential is bound to its origin.
-- **`variables`**: `{name}` placeholders in `host`, `base_url` and the values of
-  `default_headers`, with values given at any of those levels.
+- **`variables`**: `{name}` placeholders in `host`, `base_url`, the `path` of an
+  endpoint and the values of `default_headers` and `default_params`, with
+  values given at any of those levels.
+- **`default_params`**: query parameters sent with every request, as
+  `default_headers` does for headers. Both can be written on an endpoint, for
+  that endpoint and the ones below it.
+- **`resource`**: `resource: true` on an endpoint adds `show`, `create`,
+  `update`, `replace` and `delete` under it.
 - **`auth`**: says where the credential goes: the `Authorization` header, a header
   of your choice or a query parameter.
 - **`ok_code`** accepts a list of statuses, and `response.success?` tells whether a

@@ -203,11 +203,55 @@ ApiRecipes.github.repos('rails', 'rails').contents('lib/rails.rb').url.to_s
 A `*name` placeholder works only at the start of a segment, and a `:` that must
 stay in the path is written `\:`.
 
+A `{name}` in a path is a [variable](#variables): a value that holds for the
+whole client and is set once, where a `:name` changes at every call.
+
 ### Endpoints that only group others
 
 With `route: no` an endpoint exists only to hold nested endpoints. `search` above
 is not callable, `search.repositories` is. Calling `run` on it raises
 `ApiRecipes::NoRouteExists`.
+
+### REST resources
+
+When an endpoint is a REST resource, `resource: true` adds the usual endpoints
+under it, so you do not write them one by one:
+
+```yaml
+billing:
+  host: billing.example.test
+  endpoints:
+    invoices:
+      resource: true
+```
+
+| Call | Request |
+| --- | --- |
+| `invoices` | `GET /invoices`: the endpoint itself, as always |
+| `invoices.show(id)` | `GET /invoices/:id` |
+| `invoices.create` | `POST /invoices` |
+| `invoices.update(id)` | `PATCH /invoices/:id` |
+| `invoices.replace(id)` | `PUT /invoices/:id` |
+| `invoices.delete(id)` | `DELETE /invoices/:id` |
+
+```ruby
+ApiRecipes.billing.invoices.show(42).url.to_s
+# => "https://billing.example.test/invoices/42"
+
+ApiRecipes.billing.invoices.delete(42).inspect
+# => "#<ApiRecipes::Endpoint billing.invoices.delete DELETE https://billing.example.test/invoices/42>"
+```
+
+- A list adds only some of them: `resource: [show, create]`.
+- An endpoint written under `endpoints` with one of those names completes the
+  generated one: its options win and the others stay. `show: { path: /:number }`
+  changes the placeholder, `delete: { ok_code: 204 }` adds the expected status.
+- The other endpoints written by hand come after the generated ones.
+- `resource` only adds endpoints. The options of the endpoint itself stay its
+  own: `route: no` when the list cannot be called, `path` to change the path of
+  all of them.
+- A verb is never read from a name: an endpoint called `delete` that you write
+  by hand is a GET until you give it `verb: delete`.
 
 ### Settings for the whole API
 
@@ -238,10 +282,54 @@ for a value that changes, use a [variable](#variables).
 
 All options are listed in the [options reference](#options-reference).
 
+### Headers and parameters sent with every request
+
+`default_headers` are sent with every request, and `default_params` are added
+to every query string. Both can also be written on an endpoint: there they hold
+for that endpoint and for the ones below it, on top of those of the API.
+
+```yaml
+billing:
+  host: billing.example.test
+  default_headers:
+    Accept: application/json
+  default_params:
+    locale: en
+  endpoints:
+    invoices:
+      endpoints:
+        show:
+          path: /:id
+        overdue:                        # GET /invoices?locale=en&status=overdue
+          path: ''
+          default_params:
+            status: overdue
+        pdf:                            # GET /invoices/:id/pdf with Accept: application/pdf
+          path: /:id/pdf
+          default_headers:
+            Accept: application/pdf
+```
+
+```ruby
+ApiRecipes.billing.invoices.overdue.run.uri.to_s
+# => "https://billing.example.test/invoices?locale=en&status=overdue"
+
+ApiRecipes.billing.invoices.overdue(params: { status: 'paid', page: 2 }).run.uri.to_s
+# => "https://billing.example.test/invoices?locale=en&status=paid&page=2"
+```
+
+On the same name the nearest to the request wins: the API, then
+[`with`](#options-for-one-chain-with), then the endpoints from the farthest to
+the nearest, then the credential, then the `headers:` and `params:` of the
+request. The names of headers are compared without their case. A value can
+contain [variables](#variables). When an API has `default_params`, the
+`params:` of a request must be a Hash.
+
 ## Variables
 
-A variable is a `{name}` placeholder in the `host`, the `base_url` or the value
-of a header. Use it for what changes from one account or one environment to the
+A variable is a `{name}` placeholder in the `host`, the `base_url`, the `path`
+of an endpoint, or the value of a header or of a parameter sent with every
+request. Use it for what changes from one account or one environment to the
 next, such as the address of a shop. Declare the variables of the API, with an
 optional `default` and `description`:
 
@@ -252,6 +340,8 @@ shopify:
       description: the part of the shop address before .myshopify.com
     api_version:
       default: '2026-10'
+    location:
+      description: the id of the location this client works for
   host: '{shop}.myshopify.com'
   base_url: admin/api/{api_version}
   auth:
@@ -259,11 +349,14 @@ shopify:
     name: X-Shopify-Access-Token
   endpoints:
     products:
+    inventory:
+      path: /locations/{location}/inventory_levels
 ```
 
 A variable without a value and without a default raises
-`ApiRecipes::MissingVariable` when the request is built. Give it a value in the
-way that fits your code. The nearest one wins: the chain (`with`), then the
+`ApiRecipes::MissingVariable` as soon as it is needed: when the chain reaches
+the `base_url` or the path that uses it, and at the latest when the request is
+built. Give it a value in the way that fits your code. The nearest one wins: the chain (`with`), then the
 object, then its class, then `ApiRecipes.shopify`, then the default of the file.
 
 ```ruby
@@ -276,6 +369,14 @@ ApiRecipes.shopify.products.url.to_s
 
 ApiRecipes.shopify.with(variables: { api_version: '2027-01' }).products.url.to_s
 # => "https://acme.myshopify.com/admin/api/2027-01/products"
+```
+
+In a path, a `:name` is an argument of the method and a `{name}` is a variable.
+The location is set once, and no call has to repeat it:
+
+```ruby
+ApiRecipes.shopify.with(variables: { shop: 'acme', location: 7 }).inventory.url.to_s
+# => "https://acme.myshopify.com/admin/api/2026-10/locations/7/inventory_levels"
 ```
 
 For one class, or for the objects of a class:
@@ -323,9 +424,12 @@ ApiRecipes never reads the environment for you: if the shop comes from an
 environment variable, read it in your code and pass it in.
 
 A value is checked for the place where it ends up. In a `host` it can contain
-only letters, digits, dots, hyphens and underscores. In a `base_url` it is
-encoded like a path parameter. In a header it cannot contain a line break or
-another control character. Anything else raises `ApiRecipes::InvalidVariable`.
+only letters, digits, dots, hyphens and underscores. In a `base_url` and in a
+`path` it is encoded like a path parameter, and it cannot be empty, `.` or
+`..`. In a header it cannot contain a line break or another control character.
+In a parameter it is encoded like every value of a query string. Anything else
+raises `ApiRecipes::InvalidVariable`.
+A word in braces that is not a variable is written `\{word}` in a path.
 A name that the API does not declare raises `ApiRecipes::ConfigurationError` at
 every level, so a misspelled name is never ignored.
 `variables` without an assignment returns the values set at the level you call
@@ -576,19 +680,21 @@ layout.
 
 - `install NAME` reads `recipes/NAME.recipe.yml` from the repository. `--from`
   names another repository: an `https://` address, without a user name or a
-  password. A private repository works when `git` already has the credentials
-  for its host. The `git` command of your machine does the download.
+  password. The `git` command of your machine does the download. For a
+  repository of your company, see [private repositories](#private-repositories).
 - Before writing, `install` shows the address the requests go to, as the recipe
   writes it and with the defaults of its variables, where the credential goes,
-  the headers sent with every request, the variables to set and every call that
-  is not a GET. It warns when the credential would travel in the query string,
+  the headers and the parameters sent with every request, with the endpoint
+  for those that only an endpoint adds, the variables to set and every call
+  that is not a GET. It warns when the credential would travel in the query string,
   and when the protocol is `http`. Only `y` or `yes` installs; `--yes` installs
   without asking.
 - `--to DIR` installs in another folder. `update` and `check` take it as
   `--dir DIR`.
 - `update NAME` takes the recipe that its repository has now, or the one of
   `--version`, and shows what changes in the address, the credential, the
-  headers and the verbs before it replaces the file.
+  headers, the parameters and the verbs before it replaces the file. It reads
+  the repository from `recipes.lock`, so it needs no `--from`.
 - `check` compares the installed recipes with `recipes.lock`, as `configure`
   does. `check FILE` says whether a file is a valid portable recipe: use it
   while you write one.
@@ -601,6 +707,32 @@ layout.
 Exit codes: 0 when the work is done or there was nothing to do; 1 when a recipe
 is not valid, is not found, does not match the lock or the answer is no; 2 when
 the arguments are wrong, `git` fails or a file cannot be read or written.
+
+### Private repositories
+
+A company can keep its recipes in a repository of its own, private, on any Git
+server that speaks `https`: GitHub, GitLab, Bitbucket, Gitea or one you host.
+The repository has the layout of the cookbook, a folder `recipes` with one
+`NAME.recipe.yml` per recipe, and `--from` names it:
+
+    $ api_recipes install billing --from https://git.example.com/platform/api-recipes
+    $ api_recipes update billing
+
+The command never asks for a user name or a password and never takes them in
+the address: `git` must already have them for that host. Two ways that work on
+a laptop and in CI:
+
+    # a credential helper: the one of your system, or a file
+    $ git config --global credential.helper store
+    $ git ls-remote https://git.example.com/platform/api-recipes    # asks once, then remembers
+
+    # or a token that git adds by itself to the addresses of that host
+    $ git config --global url."https://ci:${TOKEN}@git.example.com/".insteadOf "https://git.example.com/"
+
+`recipes.lock` records the address as you wrote it, so no credential reaches
+your repository. Only `https` is accepted: an `ssh` address is refused. The
+application needs none of this when it runs: the installed recipes are files of
+your project.
 
 ### What `configure` checks
 
@@ -672,8 +804,11 @@ The rules, beyond those of every description:
   breaks inside a value, no invisible or direction-changing characters. The
   same holds for the rest of the file, comments included: what a person reads
   in it is what is loaded.
-- At most 1 MiB, 10,000 endpoints, 2,000 characters for a name or a value, and
-  4,000 characters for the path of an endpoint with the paths above it.
+- At most 1 MiB, 10,000 endpoints, those that `resource` adds among them, 2,000
+  characters for a name or a value, and 4,000 characters for the path of an
+  endpoint with the paths above it.
+- With `auth.type: query`, `default_params` cannot name the parameter of the
+  credential.
 - A credential never goes in a recipe: `auth` says where it travels, and the
   application assigns it.
 
@@ -806,6 +941,10 @@ They are the options of
 | `headers:` | extra headers for this request only |
 | `follow:` | follow redirects: `true`, or a Hash with `strict`, `max_hops` and `on_redirect` |
 
+The [`default_params`](#headers-and-parameters-sent-with-every-request) of the
+API and of the endpoint come first in the query string; a parameter given here
+replaces the one with the same name.
+
 ```ruby
 # GET /search/repositories?q=api%20language:ruby&per_page=5
 ApiRecipes.github.search.repositories(params: { q: 'api language:ruby', per_page: 5 }).run
@@ -856,8 +995,8 @@ ApiRecipes.github.with(host: 'github.example.com').users.show('octocat').url.to_
 ```
 
 On an API, `with` takes `protocol`, `host`, `port`, `base_url`, `timeout`,
-`on_bad_code`, `mime_type`, `verify_with`, `default_headers`, `variables`,
-`authorization` and `basic_auth`. The values are checked like the ones in a file,
+`on_bad_code`, `mime_type`, `verify_with`, `default_headers`, `default_params`,
+`variables`, `authorization` and `basic_auth`. The values are checked like the ones in a file,
 and an option that is not in this list raises `ApiRecipes::ConfigurationError`.
 
 On an endpoint, `with` takes `timeout`, `on_bad_code`, `ok_code`, `mime_type` and
@@ -868,7 +1007,8 @@ ApiRecipes.github.users.show('octocat').with(timeout: 10, ok_code: [200, 304]).r
 ```
 
 Giving an option as `nil` drops the value given before it in the same chain.
-`default_headers` given to `with` are added to the ones already configured:
+`default_headers` and `default_params` given to `with` are added to the ones
+already configured:
 
 ```ruby
 ApiRecipes.github.with(default_headers: { 'X-Request-Id' => 'abc123' }).users.run
@@ -1243,14 +1383,20 @@ ApiRecipes.github.users.show('octocat').definition.full_path
 ```
 
 For an API: `name`, `protocol`, `host`, `port`, `base_url`, `timeout`,
-`on_bad_code`, `mime_type`, `verify_with`, `default_headers`, `auth`,
-`variables`, `endpoints`, `routes` and `to_h`. For an endpoint: `name`,
-`full_name`, `path`, `full_path`, `path_params`, `verb`, `route?`, `ok_code`,
-`timeout`, `on_bad_code`, `mime_type`, `verify_with`, `parent`, `endpoints` and
-`to_h`. A definition never holds a credential assigned with `authorization=`,
+`on_bad_code`, `mime_type`, `verify_with`, `default_headers`, `default_params`,
+`auth`, `variables`, `endpoints`, `routes` and `to_h`. For an endpoint: `name`,
+`full_name`, `path`, `full_path`, `path_params`, `path_variables`, `verb`,
+`route?`, `ok_code`, `timeout`, `on_bad_code`, `mime_type`, `verify_with`,
+`default_headers`, `default_params`, `parent`, `endpoints` and `to_h`. The
+`default_headers` and `default_params` of an endpoint are the ones written on
+it and on the endpoints above it, without those of the API. A path is shown as
+it is written, with its `:name` and `{name}`. The endpoints that `resource`
+adds are endpoints like the others.
+A definition never holds a credential assigned with `authorization=`,
 `basic_auth=` or `with`, nor the value of a variable. It does return the
-`default_headers` as they are configured, so do not write a credential there if
-you pass definitions around; `to_h` and `inspect` hide the values of the headers.
+`default_headers` and the `default_params` as they are configured, so do not
+write a credential there if you pass definitions around; `to_h` and `inspect`
+hide their values.
 
 `routes` lists every endpoint that can be called, with the call that reaches it:
 
@@ -1413,8 +1559,12 @@ What ApiRecipes does:
 
 - **Path parameters** are encoded one by one. A value cannot add a segment, a
   query string or a fragment. `nil`, an empty value, `.` and `..` are refused.
-- **Variables** are checked for the place where they end up: a host, a path or a
-  header.
+- **Variables** are checked for the place where they end up: a host, a path, a
+  header or a query parameter. In a path a value is one encoded segment, like a
+  path parameter.
+- **Parameters sent with every request** cannot take the place of the
+  credential: with `auth.type: query`, `default_params` that name its parameter
+  are refused, and the credential is always the only parameter with its name.
 - **Credentials** are sent only to the origin they were set for, and a request
   that would send one elsewhere raises. A value with a control character is
   refused, so a credential cannot add a header.
@@ -1433,8 +1583,9 @@ What ApiRecipes does:
   text, comments included, holds only visible characters. It is loaded only if
   it matches the checksum in `recipes.lock`.
 - **`api_recipes install` and `update`** show where the requests and the
-  credential go, the headers sent with every request and which calls are not
-  GET, before they write. They read one
+  credential go, the headers and the parameters sent with every request, those
+  that an endpoint adds, and which calls are not GET, the ones that `resource`
+  adds among them, before they write. They read one
   file from the repository without checking it out, only over `https`, and run
   `git` without a shell. An address with a user name or a password is refused,
   so it cannot end up in `recipes.lock`.
@@ -1444,8 +1595,9 @@ What ApiRecipes does:
   definition or the configuration, nor their `to_s`, except that the `to_s` of
   a response is its body, as for the http.rb response. `definition` never holds
   a credential that was assigned with `authorization=`, `basic_auth=` or `with`.
-  It does hold the values of `default_headers`, which its readers return; its
-  `inspect`, its `to_h` and its JSON show them as `[FILTERED]`.
+  It does hold the values of `default_headers` and `default_params`, which its
+  readers return; its `inspect`, its `to_h` and its JSON show them as
+  `[FILTERED]`.
 - **Serialization.** An API, an endpoint and a response refuse `Marshal.dump`,
   `YAML.dump`, `as_json` and `to_json`, and raise `TypeError`: serialize
   `response.data` or `response.body.to_s` instead. A definition refuses
@@ -1501,6 +1653,7 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `base_url` | none | prefix of every path, for example `api/v1`; can contain `{variables}` |
 | `timeout` | `3` | seconds allowed for the whole request |
 | `default_headers` | none | headers sent with every request; a value can contain `{variables}` |
+| `default_params` | none | query parameters sent with every request; a value is text, a number or a boolean, and can contain `{variables}` |
 | `on_bad_code` | `raise` | `raise` or `ignore` when the response is not a success |
 | `mime_type` | from the response | content type used by `response.data` |
 | `verify_with` | none | method that decides whether a response is a success |
@@ -1512,7 +1665,7 @@ Every protection has an example in [`spec/security`](spec/security); its
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `path` | the endpoint name | segment added to the parent path; `''` adds nothing |
+| `path` | the endpoint name | segment added to the parent path; `''` adds nothing; can contain `:name` and `*name` placeholders and `{variables}` |
 | `verb` | `get` | HTTP verb |
 | `route` | `yes` | `no` makes the endpoint a group that cannot be called |
 | `ok_code` | any 2xx | the status, or the list of statuses, accepted as a success |
@@ -1520,10 +1673,14 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `on_bad_code` | the API value | `raise` or `ignore` |
 | `mime_type` | the API value | content type used by `response.data` |
 | `verify_with` | the API or parent value | method that decides whether a response is a success |
+| `default_headers` | none | headers added to those of the API, for this endpoint and the ones below it |
+| `default_params` | none | query parameters added to those of the API, for this endpoint and the ones below it |
+| `resource` | `no` | `yes` adds the endpoints `show`, `create`, `update`, `replace` and `delete`; a list adds only the ones it names |
 | `endpoints` | none | nested endpoints |
 
 An endpoint takes `timeout`, `on_bad_code` and `mime_type` from the API, not from
-the endpoint that contains it.
+the endpoint that contains it. `verify_with`, `default_headers` and
+`default_params` go down to the endpoints below it.
 
 ## Good to know
 

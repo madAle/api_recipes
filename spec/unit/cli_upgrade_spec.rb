@@ -67,6 +67,7 @@ describe 'api_recipes upgrade' do
                            'response.to_s returns the body',
                            'a credential that is not a String',
                            'a {word} in a value of default_headers',
+                           'a {word} in the path of an endpoint',
                            'without it the request raises InvalidUrl')
   end
 

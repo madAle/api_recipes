@@ -34,7 +34,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/response.rb` | wraps the http.rb response and adds `data`, `success?`, `fill` |
 | `lib/api_recipes/errors.rb` | error classes, all under `ApiRecipes::Error` |
 | `lib/api_recipes/internals/definition.rb` | the immutable tree that `definition` returns |
-| `lib/api_recipes/internals/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once |
+| `lib/api_recipes/internals/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once; expands `resource` into endpoints |
 | `lib/api_recipes/internals/path_template.rb`, `template.rb` | the `path` of an endpoint, and `{variable}` strings, with their encoding rules |
 | `lib/api_recipes/internals/handles.rb` | generates the subclasses of `Api` and `Endpoint` with one method per child |
 | `lib/api_recipes/internals/context.rb` | which tree, which owner and which `with` options a chain uses; resolves values |
@@ -74,13 +74,14 @@ fails under 90% line coverage.
    in a class or a module defines the same method on it and on its instances.
 2. That method returns an `Api`. Each endpoint method returns a new `Endpoint`
    that knows its node of the tree and its path, built from the parent path, its
-   own `path` and the arguments. `[]` does the same by name, and the generated
+   own `path`, the arguments and the variables that the `path` uses. `[]` does the same by name, and the generated
    methods call it.
 3. Credentials and variables are not kept on these objects. They live in levels
    attached to the owner of the call (the module, a class, an instance) and are
    read, nearest first, when the request is built. `with` adds a level for one chain.
 4. `run`, or a block, creates a `Internals::Request`, which builds the URL and the http.rb
-   client, sends the request, checks the outcome (`ok_code`, `on_bad_code`,
+   client with the default headers and parameters of the api, of `with` and of
+   the endpoint, sends the request, checks the outcome (`ok_code`, `on_bad_code`,
    `verify_with`) and returns a `Response`.
 
 Objects of the chain are created again at every step. The tree and the generated

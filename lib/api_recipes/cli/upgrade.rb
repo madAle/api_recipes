@@ -63,6 +63,7 @@ module ApiRecipes
         'response.to_s returns the body, as the http.rb response does: it was the default text of the object',
         'a credential that is not a String, such as a Symbol or a number: it raises InvalidCredential, convert it with to_s',
         'a {word} in a value of default_headers in a configuration given as a Hash: it is now a variable and must be declared',
+        'a {word} in the path of an endpoint in a configuration given as a Hash: it is now a variable and must be declared; to keep the braces as text write \\{word}',
         'respond_to? on a response now tells the truth: it answers true for the methods the response forwards and false for the others',
         'serializing an Api, an Endpoint or a Response raises TypeError: serialize response.data or response.body.to_s',
         'a class that includes ApiRecipes and uses a top-level constant named Error, Internals, VERSION or like a new error class of the gem (such as ConfigurationError or InvalidUrl): it now finds the gem\'s constant first, write ::Name in that class; Route and Settings no longer exist, so a top-level Route or Settings is found again'

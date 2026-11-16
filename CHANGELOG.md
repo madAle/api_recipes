@@ -30,6 +30,36 @@ which are data only, and the commands that install them.
 - `api_recipes routes` also reads a portable recipe.
 - A `*.recipe.yml` given to `apis_files_paths` is still refused; the message now
   says to give it to `recipes_paths`.
+- A private repository of recipes works over `https` with the credentials that
+  `git` already has for its host. When the repository asks for credentials that
+  `git` does not have, the message says so.
+
+It also adds three ways of describing an API with less text. They are part of
+what a recipe can hold:
+
+- A `{name}` in the `path` of an endpoint is a variable of the API, as in
+  `host` and `base_url`: `/accounts/{account}/orders`. Its value is encoded as
+  one segment, and `.`, `..` and an empty value raise
+  `ApiRecipes::InvalidVariable`. `definition` has `path_variables`.
+  **A word in braces in a path was text in the previous pre-releases and in
+  2.x: it is now a variable, and one that is not declared is a configuration
+  error. Write `\{word}` to keep the braces as text.**
+- `default_params` sends query parameters with every request, as
+  `default_headers` does for headers. A value can contain variables. The
+  `params:` of a request win on the same name. With `auth.type: query` the
+  parameter of the credential cannot be set there. `with` takes
+  `default_params` too. `definition` hides the values in `to_h` and `inspect`.
+- `default_headers` and `default_params` can be written on an endpoint: they
+  hold for that endpoint and for the ones below it, on top of those of the API.
+- The name of a header is compared without its case when a nearer level
+  replaces it: `with(default_headers: { 'accept' => ... })` replaces the
+  `Accept` of the API and no longer adds a second header.
+- `resource: true` on an endpoint adds the endpoints `show`, `create`,
+  `update`, `replace` and `delete` under it; a list adds only the ones it
+  names. An endpoint written with one of those names completes the generated
+  one.
+- `api_recipes install` and `update` show the parameters sent with every
+  request and the headers and parameters that an endpoint adds.
 
 ## Version 3.0.0.beta2
 

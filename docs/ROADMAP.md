@@ -11,7 +11,7 @@ stable line until `3.0.0` is final.
 | --- | --- |
 | `3.0.0.beta1` | the new core, the fixes that change behaviour and the upgrade guide |
 | `3.0.0.beta2` | the OpenAPI importer |
-| `3.0.0.beta3` | portable recipes and a command to install them |
+| `3.0.0.beta3` | portable recipes and a command to install them; variables in paths, `default_params` and `resource` |
 | `3.0.0` | all of the above, after real use |
 
 A part that is not mature when the others are ships marked as experimental
@@ -107,6 +107,21 @@ A command turns an OpenAPI description into a recipe file, for example:
   the configuration.
 - The content of that repository grows on its own schedule and is not a
   requirement for the release.
+- A company can keep its recipes in a private repository of its own, reached
+  over `https` with the credentials that `git` already has.
+
+### Less text for the same API
+
+Three additions arrive with portable recipes, because they are part of what a
+recipe can hold.
+
+- A `{name}` variable in the `path` of an endpoint, for a value that holds for
+  the whole client: `/accounts/{account}/orders`.
+- `default_params`, the query parameters sent with every request, and
+  `default_headers` and `default_params` on an endpoint, for that endpoint and
+  the ones below it.
+- `resource: true`, which adds the endpoints of a REST resource (`show`,
+  `create`, `update`, `replace`, `delete`) under an endpoint.
 
 ## Later
 
