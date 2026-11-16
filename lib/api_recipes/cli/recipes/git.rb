@@ -84,7 +84,8 @@ module ApiRecipes
           if version && err.include?("couldn't find remote ref")
             raise NotFound, "version #{version} of #{name} is not in #{@address}: there is no tag #{name}-#{version}"
           end
-          raise Failure, "git could not read #{@address}: #{last_line(err)}"
+          hint = err.include?('not allowed') ? " (git may use only #{PROTOCOLS.first} here: check url.*.insteadOf in your git configuration)" : ''
+          raise Failure, "git could not read #{@address}: #{reason(err)}#{hint}"
         end
 
         # Only the protocols of PROTOCOLS, whatever the configuration of git
@@ -115,7 +116,7 @@ module ApiRecipes
         # The output of a git command that must succeed.
         def git(*arguments)
           out, err, status = run(*arguments)
-          raise Failure, "git failed (#{arguments.find { |argument| !argument.start_with?('-') }}): #{last_line(err)}" unless status.success?
+          raise Failure, "git failed (#{arguments.find { |argument| !argument.start_with?('-') }}): #{reason(err)}" unless status.success?
 
           out
         end
@@ -127,9 +128,11 @@ module ApiRecipes
           raise Failure, 'git was not found: install git, or install the recipe from a file'
         end
 
-        # What git said last, as one line that can be printed.
-        def last_line(text)
-          line = text.to_s.dup.force_encoding(Encoding::UTF_8).scrub('?').lines.map(&:strip).reject(&:empty?).last
+        # Why git failed, as one line that can be printed: the line where it
+        # says fatal or error, or the last one.
+        def reason(text)
+          lines = text.to_s.dup.force_encoding(Encoding::UTF_8).scrub('?').lines.map(&:strip).reject(&:empty?)
+          line = lines.reverse.find { |one| one.start_with?('fatal:', 'error:') } || lines.last
           line ? Summary.shown(line) : 'it gave no reason'
         end
       end

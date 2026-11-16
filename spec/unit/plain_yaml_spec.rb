@@ -126,4 +126,25 @@ RSpec.describe ApiRecipes::Internals::PlainYaml do
       expect(described_class.label("caf\xE9")).to eq('caf?')
     end
   end
+
+  describe 'the text of the file' do
+    it 'cannot hold a line break that is not a new line: the parser would start a line where a reader sees none' do
+      { 0x2028 => 'line separator', 0x2029 => 'paragraph separator', 0x85 => 'next line' }.each_key do |code|
+        text = "a: 1 # only a#{[code].pack('U')}b: 2\n"
+        refused(text, 'line 1: contains a character that is not printed (a control or a format character, ' \
+                      'or a line break that is not a new line)')
+      end
+      refused("a: 1 # only a\rb: 2\n", /\Aline 1: contains a character that is not printed/)
+    end
+
+    it 'cannot hold a control or a format character, in a comment either, and says the line' do
+      [0x202E, 0x2066, 0x200B, 0xFEFF, 0xE0041, 0x1B, 0x00].each do |code|
+        refused("a: 1\nb: 2 # hidden#{[code].pack('U')}\n", /\Aline 2: contains a character that is not printed/)
+      end
+    end
+
+    it 'can end its lines with a carriage return and a new line, and hold tabs' do
+      expect(load("a: 1\r\nb: 2 #\tcomment\r\n")).to eq('a' => 1, 'b' => 2)
+    end
+  end
 end

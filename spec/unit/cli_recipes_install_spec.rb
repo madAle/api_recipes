@@ -80,7 +80,7 @@ RSpec.describe 'api_recipes install' do
       @repository.publish('shop', recipe_text('shop', 'protocol' => 'http', 'auth' => { 'type' => 'query', 'name' => 'key' }))
       _code, out, = from_repository
       expect(out).to include("  warning: the credential travels in the address, as the query parameter key",
-                             "  warning: the protocol is http: the credential travels without encryption\nInstall shop")
+                             "  warning: the protocol is http: a credential you assign travels without encryption\nInstall shop")
     end
 
     it 'installs the version asked for, at the commit of its tag' do
@@ -242,7 +242,7 @@ RSpec.describe 'api_recipes install' do
       File.write(destination, recipe_text('shop', 'timeout' => 10))
       _code, out, = from_repository
       expect(out).to include("  #{destination} was changed after it was installed: those changes will be lost\n",
-                             "    no change in the address, the credential or the verbs\n")
+                             "    no change in the address, the credential, the headers or the verbs\n")
     end
 
     it 'says when it replaces a file that is not a valid recipe' do
@@ -323,6 +323,34 @@ RSpec.describe 'api_recipes install' do
       code, _out, err = from_repository('--yes')
       expect([code, err]).to eq([2, "could not write (EACCES): check the folder and its recipes.lock\n"])
       expect(Dir.children(@dir)).to eq([])
+    end
+
+    it 'never deletes a file it did not create, even one with the name of its temporary file' do
+      FileUtils.mkdir_p(@dir)
+      mine = "#{destination}.#{Process.pid}.tmp"
+      File.write(mine, 'mine')
+      code, _out, err = from_repository('--yes')
+      expect([code, err]).to eq([2, "could not write (EEXIST): check the folder and its recipes.lock\n"])
+      expect(File.read(mine)).to eq('mine')
+    end
+
+    it 'writes the bytes of the recipe as they are, also when its lines end with a carriage return and a new line' do
+      text = recipe_text.gsub("\n", "\r\n")
+      @repository.git('config', 'core.autocrlf', 'false')
+      @repository.publish('shop', text)
+      expect(from_repository('--yes').first).to eq(0)
+      expect(File.binread(destination)).to eq(text.b)
+      expect(run_cli('check', '--dir', @dir).first).to eq(0)
+    end
+
+    it 'exits with 2 when the lock or the installed recipe is there and cannot be read' do
+      expect(from_repository('--yes').first).to eq(0)
+      [File.join(@dir, 'recipes.lock'), destination].each do |unreadable|
+        allow(File).to receive(:readable?).and_call_original
+        allow(File).to receive(:readable?).with(unreadable).and_return(false)
+        expect(from_repository('--yes')).to eq([2, '', "#{unreadable}: cannot be read\n"])
+        RSpec::Mocks.space.proxy_for(File).reset
+      end
     end
 
     it 'leaves the lock as it was when the recipe cannot be put in its place' do

@@ -25,7 +25,7 @@ RSpec.describe 'api_recipes check' do
       expect(err.lines.map(&:chomp)).to eq([
         "#{path}: warning: the credential travels in the address, as the query parameter key: " \
         'addresses are written in logs and kept by proxies',
-        "#{path}: warning: the protocol is http: the credential travels without encryption"
+        "#{path}: warning: the protocol is http: a credential you assign travels without encryption"
       ])
     end
 
@@ -159,5 +159,25 @@ RSpec.describe 'api_recipes check' do
     code, _out, err = run_cli('check', '--nope')
     expect(code).to eq(2)
     expect(err).to include('invalid option: --nope')
+  end
+
+  it 'exits with 2 when the lock or an installed recipe is there and cannot be read' do
+    path = write_recipe(@dir)
+    lock = File.join(@dir, 'recipes.lock')
+    [lock, path].each do |unreadable|
+      allow(File).to receive(:readable?).and_call_original
+      allow(File).to receive(:readable?).with(unreadable).and_return(false)
+      expect(run_cli('check', '--dir', @dir)).to eq([2, '', "#{unreadable}: cannot be read\n"])
+      RSpec::Mocks.space.proxy_for(File).reset
+    end
+  end
+
+  it 'answers an argument that is not valid text with a message, for every command' do
+    %w[check install update routes upgrade import].each do |command|
+      out = StringIO.new
+      err = StringIO.new
+      code = ApiRecipes::CLI.run([command, "bad\xFF".dup.force_encoding(Encoding::UTF_8)], out: out, err: err)
+      expect([code, out.string, err.string]).to eq([2, '', "the arguments must be valid text in the encoding of the terminal\n"])
+    end
   end
 end

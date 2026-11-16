@@ -92,6 +92,26 @@ describe 'Portable recipes' do
       expect(Psych::Parser).not_to receive(:new)
       expect(configure_problems(path)).to eq(["#{path}: is larger than 1048576 bytes"])
     end
+
+    it 'cannot cost much more than its size: names, values, paths and the number of endpoints have a limit' do
+      children = (1..4000).to_h { |number| ["c#{number}", nil] }
+      long_path = recipe_text('shop', 'endpoints' => { 'top' => { 'path' => "/#{'p' * 80_000}", 'endpoints' => children } })
+      deep = (1..40).reduce({ 'leaf' => { 'endpoints' => children } }) do |inner, number|
+        { "level#{number}" => { 'path' => "/#{'s' * 1900}", 'endpoints' => inner } }
+      end
+      many = (1..20_000).to_h { |number| ["e#{number}", nil] }
+      texts = [long_path, recipe_text('shop', 'endpoints' => deep), recipe_text('shop', 'endpoints' => many)]
+      reasons = ['a name or a value of a recipe has at most 2000 characters',
+                 'the path of an endpoint, with the paths above it, has at most 4000 characters',
+                 'has 20000 endpoints: a recipe has at most 10000']
+      texts.zip(reasons).each do |text, reason|
+        path = installed(text)
+        found = Timeout.timeout(10) { configure_problems(path) }
+        expect(found.size).to eq(1)
+        expect(found.first).to end_with(reason)
+        expect(Timeout.timeout(10) { run_cli('check', path).first }).to eq(1)
+      end
+    end
   end
 
   describe 'a variable of the recipe' do
@@ -237,9 +257,59 @@ describe 'Portable recipes' do
 
     it 'says when the credential travels without encryption, in install and in check' do
       text = recipe_text('shop', 'protocol' => 'http')
-      warning = 'warning: the protocol is http: the credential travels without encryption'
+      warning = 'warning: the protocol is http: a credential you assign travels without encryption'
       expect(install_text(text, '--yes')[1]).to include("  #{warning}")
       expect(run_cli('check', destination)[2]).to include(warning)
+    end
+
+    it 'says so also when the recipe declares that the api takes no credential: one that the application assigns is sent' do
+      text = recipe_text('shop', 'protocol' => 'http', 'auth' => { 'type' => 'none' })
+      _code, out, = install_text(text, '--yes')
+      expect(out).to include("  credential:    none declared: a credential you assign still goes in the Authorization header\n",
+                             "  warning: the protocol is http: a credential you assign travels without encryption\n")
+      configure_recipes(destination)
+      ApiRecipes.shop.authorization = 'Bearer secret'
+      sent = stub_request(:get, 'http://shop.example.test/orders/1').with(headers: { 'Authorization' => 'Bearer secret' })
+      ApiRecipes.shop.orders.show(1).run
+      expect(sent).to have_been_requested
+    end
+
+    it 'shows the headers sent with every request, and update shows the ones that change' do
+      expect(install_text(recipe_text, '--yes').first).to eq(0)
+      @repository.publish('shop', recipe_text('shop', 'default_headers' => { 'X-HTTP-Method-Override' => 'DELETE' },
+                                                      recipe: { 'version' => '1.0.1' }))
+      code, out, = run_cli('update', 'shop', '--dir', @dir, input: "n\n")
+      expect(code).to eq(1)
+      expect(out).to include("  headers:       X-HTTP-Method-Override: DELETE\n",
+                             "    headers: none -> X-HTTP-Method-Override: DELETE\n")
+    end
+
+    it 'cannot be given rows of its own by a long text: several spaces are shown as one, and each variable has its line' do
+      fake = "A test api#{' ' * 64}address:       https://safe.example.test"
+      variables = (1..12).to_h { |number| ["v#{number}", { 'description' => 'd' * 100, 'default' => 'x' }] }
+              .merge('tenant' => { 'default' => 'attacker' })
+      text = recipe_text('shop', 'host' => '{tenant}.example.test', 'variables' => variables, recipe: { 'summary' => fake })
+      _code, out, = install_text(text)
+      expect(out).to include("  summary:       A test api address: https://safe.example.test\n",
+                             "                 tenant: default attacker\n")
+      expect(out).not_to match(/ {3}address:/)
+    end
+
+    it 'cannot differ from what a person reads in the file: a line break that is not a new line is refused, in a comment too' do
+      separator = [0x2028].pack('U')
+      hidden = recipe_text.sub("  host: shop.example.test\n", "  # the host is shop.example.test#{separator}  host: evil.example.test\n")
+      expect(hidden.lines.grep(/host/).size).to eq(1)
+      expect(YAML.safe_load(hidden)['shop']['host']).to eq('evil.example.test')
+      with_verb = recipe_text.sub("        show:\n", "        show: # read only#{separator}          verb: delete\n")
+      expect(YAML.safe_load(with_verb)['shop']['endpoints']['orders']['endpoints']['show']['verb']).to eq('delete')
+      [hidden, with_verb, "#{recipe_text}# right#{[0x202E].pack('U')}to left\n"].each do |text|
+        code, out, err = install_text(text, '--yes')
+        expect([code, out]).to eq([1, ''])
+        expect(err).to match(/\Ashop in .*: line \d+: contains a character that is not printed/)
+        path = installed(text)
+        expect(run_cli('check', path).first).to eq(1)
+        expect(configure_problems(path).first).to include('contains a character that is not printed')
+      end
     end
 
     it 'lists every call that is not a GET, whatever its name' do
@@ -313,6 +383,16 @@ describe 'Portable recipes' do
       expect(File.exist?(marker)).to eq(false)
     end
 
+    it 'cannot pass an option to git after a new line: the whole name is checked, not its first line' do
+      expect(install_text(recipe_text, '--yes').first).to eq(0)
+      expect(Open3).not_to receive(:capture3)
+      code, out, err = run_cli('update', "shop\n--upload-pack=touch #{marker}", '--dir', @dir, '--yes')
+      expect([code, out]).to eq([2, ''])
+      expect(err).to end_with("is not the name of a recipe\n")
+      expect { ApiRecipes::CLI::Recipes::Git.new('https://example.test/r').fetch("shop\n--upload-pack=x") }.to raise_error(ArgumentError)
+      expect { ApiRecipes::CLI::Recipes::Git.new('https://example.test/r').fetch('shop', "1\n--upload-pack=x") }.to raise_error(ArgumentError)
+    end
+
     it 'cannot be anything else than an https address: no other protocol, no option, no command' do
       stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https].freeze)
       expect(Open3).not_to receive(:capture3)
@@ -360,10 +440,17 @@ describe 'Portable recipes' do
     it 'never gets a working copy: nothing of the repository is written on disk outside a temporary folder that is removed' do
       @repository.commit('recipes/hook.sh', "#!/bin/sh\ntouch #{marker}\n")
       @repository.publish('shop', recipe_text)
-      before = Dir.children(Dir.tmpdir).grep(/\Aapi_recipes/)
+      folders = []
+      allow(Dir).to receive(:mktmpdir).and_wrap_original do |original, *arguments, &given|
+        original.call(*arguments) do |folder|
+          folders << folder
+          given.call(folder)
+        end
+      end
       expect(install('--yes').first).to eq(0)
       expect(Dir.children(@dir).sort).to eq(%w[recipes.lock shop.recipe.yml])
-      expect(Dir.children(Dir.tmpdir).grep(/\Aapi_recipes/)).to eq(before)
+      expect(folders.size).to eq(1)
+      expect(File.exist?(folders.first)).to eq(false)
       expect(File.exist?(marker)).to eq(false)
     end
 

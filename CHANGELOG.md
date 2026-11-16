@@ -6,7 +6,8 @@ which are data only, and the commands that install them.
 - `config.recipes_paths` loads the installed recipes. A file there is called
   `NAME.recipe.yml`, holds one api with the key `recipe` (its `name` and
   `version`), is never evaluated with ERB and is read as plain YAML: no anchors,
-  aliases, tags or merge keys, no key given twice, only visible text. It cannot
+  aliases, tags or merge keys, no key given twice, only visible text, comments
+  included, and limits on its size. It cannot
   carry `verify_with`, cannot take the name of an api that another source
   defines, and a variable of its `host` cannot decide where the host ends.
 - Every file of `recipes_paths` must match the checksum that the `recipes.lock`
@@ -16,13 +17,14 @@ which are data only, and the commands that install them.
   [cookbook](https://github.com/madAle/api_recipes-cookbook), or from the Git
   repository given with `--from`, at the head or at the tag `NAME-VERSION` given
   with `--version`. It shows the address, where the credential goes, the
-  variables and every call that is not a GET, then asks before it writes the
+  headers sent with every request, the variables and every call that is not a
+  GET, then asks before it writes the
   recipe and `recipes.lock` in `config/api_recipes`, or in the folder given with
   `--to`. `api_recipes install FILE` installs a file. The download is done by
   `git`, over `https` only, without a working copy.
 - `api_recipes update NAME` replaces an installed recipe with the one its
-  repository has now, after showing what changes in the address, the credential
-  and the verbs.
+  repository has now, after showing what changes in the address, the
+  credential, the headers and the verbs.
 - `api_recipes check` compares the installed recipes with `recipes.lock`;
   `api_recipes check FILE` says whether a file is a valid portable recipe.
 - `api_recipes routes` also reads a portable recipe.

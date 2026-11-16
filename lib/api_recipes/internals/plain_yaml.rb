@@ -6,15 +6,19 @@ module ApiRecipes
   module Internals
     # Reads YAML that is only data: mappings with text keys, lists, text,
     # numbers, booleans. What lets a small text say more than it shows, or say
-    # one thing to a reader and another to the parser, is refused while the
-    # text is parsed, before any object is built: anchors and aliases, tags,
-    # the merge key, a key given twice, a key that is not text, a second
+    # one thing to a reader and another to the parser, is refused before any
+    # object is built: characters that are not printed, anchors and aliases,
+    # tags, the merge key, a key given twice, a key that is not text, a second
     # document, a deep nesting.
     module PlainYaml
       MAX_DEPTH = 100
       # Control and format characters, line and paragraph separators, what is
       # not assigned: what a terminal does not print as it is.
       UNPRINTABLE = /[\p{C}\p{Zl}\p{Zp}]/
+      # The same in the text of a file, where a new line and a tab are at home:
+      # a comment is text that a person reads too, and the parser takes other
+      # characters than a new line as the end of a line.
+      HIDDEN = /[\p{Zl}\p{Zp}]|[\p{C}&&[^\n\r\t]]|\r(?!\n)/
 
       class Refused < Error; end
 
@@ -104,6 +108,12 @@ module ApiRecipes
         def load(text, max_bytes:)
           raise Refused, "is larger than #{max_bytes} bytes" if text.bytesize > max_bytes
           raise Refused, 'is not valid UTF-8' unless text.encoding == Encoding::UTF_8 && text.valid_encoding?
+
+          hidden = text.index(HIDDEN)
+          if hidden
+            raise Refused, "line #{text[0, hidden].count("\n") + 1}: contains a character that is not printed " \
+                           '(a control or a format character, or a line break that is not a new line)'
+          end
 
           Psych::Parser.new(Shape.new).parse(text)
           Psych.safe_load(text, aliases: false)

@@ -62,20 +62,75 @@ RSpec.describe ApiRecipes::Internals::Recipe do
     end
 
     it 'refuses a name or a value, at any depth, with a character that is not printed' do
-      message = /: contains a character that is not printed \(a control or a format character\): a recipe holds visible text only\z/
+      rlo = [0x202E].pack('U')
       [
         recipe_text('shop', recipe: { 'summary' => "two\nlines" }),
-        recipe_text('shop', recipe: { 'summary' => "right\u202Eto left" }),
-        recipe_text('shop', 'endpoints' => { "sh\u200Bow" => nil }),
+        recipe_text('shop', recipe: { 'summary' => "right#{rlo}to left" }),
+        recipe_text('shop', 'endpoints' => { "sh#{[0x200B].pack('U')}ow" => nil }),
         recipe_text('shop', 'endpoints' => { 'show' => { 'path' => "/a\tb" } }),
-        recipe_text('shop', 'variables' => { 'tenant' => { 'description' => "line\u2028separator" } }),
+        recipe_text('shop', 'variables' => { 'tenant' => { 'description' => "line#{[0x2028].pack('U')}separator" } }),
         recipe_text('shop', 'x-notes' => ['fine', { 'deep' => "bell\a" }]),
-        recipe_text("sh\u00ADop")
+        recipe_text("sh#{[0xAD].pack('U')}op")
       ].each do |text|
-        expect(problems(text)).to match([message]), text
+        expect(problems(text)).to match([/contains a character that is not printed/]), text
       end
-      expect(problems(recipe_text('shop', recipe: { 'summary' => "right\u202Eto left" })).first).to start_with('right?to left: ')
-      expect(problems(recipe_text('shop', recipe: { 'summary' => 'Caffè, 日本語 and a non-breaking space' }))).to eq([])
+      expect(problems(recipe_text('shop', recipe: { 'summary' => 'Caffè, 日本語' }))).to eq([])
+    end
+
+    it 'refuses such a character also when the text writes it as an escape, and says the value' do
+      text = recipe_text.sub('summary: A test api', "summary: \"right#{92.chr}u202Eto left\"")
+      expect(text).to be_ascii_only
+      expect(problems(text)).to eq(['right?to left: contains a character that is not printed (a control or a format character): ' \
+                                    'a recipe holds visible text only'])
+      expect(problems(recipe_text.sub('    orders:', '    "or\tders":')).first).to start_with('or?ders: contains a character')
+    end
+
+    it 'refuses such a character in a comment, where it would show a reader one thing and load another' do
+      separator = [0x2028].pack('U')
+      hidden = recipe_text.sub("  host: shop.example.test\n", "  # the host is shop.example.test#{separator}  host: evil.example.test\n")
+      expect(YAML.safe_load(hidden)['shop']['host']).to eq('evil.example.test')
+      expect(hidden.lines.grep(/host/).size).to eq(1)
+      expect(problems(hidden)).to eq(['line 9: contains a character that is not printed (a control or a format character, ' \
+                                      'or a line break that is not a new line)'])
+      expect(problems("#{recipe_text}# right#{[0x202E].pack('U')}to left\n").size).to eq(1)
+      expect(problems(recipe_text.sub("  host:", "  # note\r  timeout: 99\n  host:")).size).to eq(1)
+      expect(problems("#{[0xFEFF].pack('U')}#{recipe_text}")).to match([/\Aline 1: contains a character that is not printed/])
+    end
+
+    it 'accepts lines that end with a carriage return and a new line, and tabs in a comment' do
+      expect(problems(recipe_text.gsub("\n", "\r\n"))).to eq([])
+      expect(problems("#{recipe_text}#\ta comment\twith tabs\n")).to eq([])
+    end
+
+    it 'refuses a name or a value longer than 2000 characters' do
+      expect(problems(recipe_text('shop', 'endpoints' => { 'show' => { 'path' => "/#{'a' * 2000}" } })))
+        .to eq(["/#{'a' * 39}...: a name or a value of a recipe has at most 2000 characters"])
+      expect(problems(recipe_text('shop', 'endpoints' => { 'a' * 2001 => nil })).size).to eq(1)
+      expect(problems(recipe_text('shop', 'endpoints' => { 'show' => { 'path' => "/#{'a' * 1999}" } }))).to eq([])
+    end
+
+    it 'refuses more than 10000 endpoints, and a path that with the paths above it is longer than 4000 characters' do
+      many = (1..10_001).to_h { |number| ["e#{number}", nil] }
+      expect(problems(recipe_text('shop', 'endpoints' => many))).to eq(['has 10001 endpoints: a recipe has at most 10000'])
+      expect(problems(recipe_text('shop', 'endpoints' => many.first(10_000).to_h))).to eq([])
+      deep = { 'a' => { 'path' => "/#{'a' * 1500}", 'endpoints' => { 'b' => { 'path' => "/#{'b' * 1500}", 'endpoints' => {
+        'c' => { 'path' => "/#{'c' * 1500}" }
+      } } } } }
+      expect(problems(recipe_text('shop', 'endpoints' => deep)))
+        .to eq(['the path of an endpoint, with the paths above it, has at most 4000 characters'])
+      expect(problems(recipe_text('shop', 'base_url' => 'v' * 1990, 'endpoints' => { 'a' => { 'path' => "/#{'a' * 1990}", 'endpoints' => {
+        'b' => { 'path' => "/#{'b' * 100}" }
+      } } }))).to eq(['the path of an endpoint, with the paths above it, has at most 4000 characters'])
+    end
+
+    it 'answers at once to a recipe made to cost much more than its size' do
+      children = (1..4000).to_h { |number| ["c#{number}", nil] }
+      text = recipe_text('shop', 'endpoints' => { 'top' => { 'path' => "/#{'p' * 1900}", 'endpoints' => {
+        'mid' => { 'path' => "/#{'q' * 1900}", 'endpoints' => children }
+      } } })
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(problems(text)).to eq([])
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 3
     end
 
     it 'refuses a name that is not made of lowercase letters, digits, - and _' do
@@ -197,6 +252,7 @@ RSpec.describe ApiRecipes::Internals::Recipe do
     it 'never reads more than the limit' do
       path = File.join(@dir, 'big.recipe.yml')
       File.write(path, 'x' * (described_class::MAX_BYTES + 10))
+      expect_any_instance_of(File).to receive(:read).with(described_class::MAX_BYTES + 1).and_call_original
       expect { described_class.read(path) }.to raise_error(ApiRecipes::RecipeFileError, /is larger than 1048576 bytes/)
     end
 

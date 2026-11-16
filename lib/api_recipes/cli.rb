@@ -38,14 +38,14 @@ module ApiRecipes
             which must start with https:// and hold recipes/NAME.recipe.yml. Without --version
             it takes the recipe at the head of the repository, with it the one at the tag
             NAME-VERSION. Given a FILE, it installs that file. It shows where the requests and
-            the credential go and which calls are not GET, asks, then writes NAME.recipe.yml and
+            the credential go, the headers and which calls are not GET, asks, then writes NAME.recipe.yml and
             recipes.lock in DIR (config/api_recipes). --yes installs without asking.
             Exits with 1 if the recipe is not valid, is not found or the answer is no, 2 if the
             arguments are wrong, git failed or something could not be read or written.
         update [--version VERSION] [--dir DIR] [--yes] NAME
             Replaces the recipe NAME installed in DIR with the one its repository has now, or
-            has at VERSION, after showing what changes in the address, the credential and the
-            verbs. Same exit codes as install.
+            has at VERSION, after showing what changes in the address, the credential, the
+            headers and the verbs. Same exit codes as install.
         check [--dir DIR] [FILE]...
             Checks that each FILE is a valid portable recipe. Without a FILE, checks that the
             recipes installed in DIR (config/api_recipes) are the ones written in its
@@ -62,6 +62,11 @@ module ApiRecipes
       # Returns the exit code.
       def run(argv, out: $stdout, err: $stderr, input: $stdin)
         command, *args = argv
+        unless argv.all?(&:valid_encoding?)
+          err.puts 'the arguments must be valid text in the encoding of the terminal'
+          return 2
+        end
+
         case command
         when '--version', '-v'
           out.puts ApiRecipes::VERSION

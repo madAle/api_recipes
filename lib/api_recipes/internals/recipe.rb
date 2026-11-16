@@ -17,6 +17,10 @@ module ApiRecipes
       KEYS = %w[name version format summary homepage].freeze
       HOMEPAGE = %r{\Ahttps?://[!-~]+\z}
       MAX_TEXT = 200
+      # What keeps the cost of compiling a recipe in proportion to its size.
+      MAX_LENGTH = 2_000
+      MAX_ENDPOINTS = 10_000
+      MAX_PATH = 4_000
       WHOLE_HOST = /\A\{[A-Za-z_]\w*\}\z/
       FIXED_END = /\A\.[A-Za-z0-9]/
 
@@ -108,14 +112,11 @@ module ApiRecipes
         @sha256 = self.class.digest(text)
         refuse('contains <%: a recipe is never evaluated with ERB, and must not hold text that ERB would run') if text.include?('<%')
         data = plain_data(text)
-        hidden = unprintable(data)
-        if hidden
-          refuse("#{PlainYaml.label(hidden)}: contains a character that is not printed (a control or a format character): " \
-                 'a recipe holds visible text only')
-        end
+        refused = text_problem(data)
+        refuse(refused) if refused
         name, options = one_api(data)
         problems = name_problems(name, file_name) + recipe_problems(name, options['recipe']) +
-                   verify_with_problems(name, options) + host_problems(options['host'])
+                   verify_with_problems(name, options) + host_problems(options['host']) + size_problems(options)
         refuse(problems) unless problems.empty?
 
         @name = name
@@ -141,14 +142,43 @@ module ApiRecipes
         refuse(e.message)
       end
 
-      # The first name or value, at any depth, with a character that a
-      # terminal does not show as it is; nil when there is none.
-      def unprintable(value)
+      # Why the first name or value, at any depth, that is not short visible
+      # text is refused; nil when every one is.
+      def text_problem(value)
         case value
-        when String then value.match?(PlainYaml::UNPRINTABLE) ? value : nil
-        when Array then value.each { |item| (found = unprintable(item)) && (return found) } && nil
-        when Hash then value.each { |key, item| (found = unprintable(key) || unprintable(item)) && (return found) } && nil
+        when String
+          if value.match?(PlainYaml::UNPRINTABLE)
+            "#{PlainYaml.label(value)}: contains a character that is not printed (a control or a format character): " \
+              'a recipe holds visible text only'
+          elsif value.length > MAX_LENGTH
+            "#{PlainYaml.label(value)}...: a name or a value of a recipe has at most #{MAX_LENGTH} characters"
+          end
+        when Array then value.each { |item| (found = text_problem(item)) && (return found) } && nil
+        when Hash then value.each { |key, item| (found = text_problem(key) || text_problem(item)) && (return found) } && nil
         end
+      end
+
+      # The endpoints are counted, and the path of each is measured with the
+      # paths above it: every endpoint keeps its whole path.
+      def size_problems(options)
+        count = 0
+        longest = 0
+        walk = lambda do |endpoints, above|
+          next unless endpoints.is_a?(Hash)
+
+          endpoints.each do |name, child|
+            count += 1
+            own = child.is_a?(Hash) && child['path'].is_a?(String) ? child['path'] : name
+            length = above + own.length + 1
+            longest = length if length > longest
+            walk.call(child['endpoints'], length) if child.is_a?(Hash)
+          end
+        end
+        walk.call(options['endpoints'], options['base_url'].to_s.length)
+        problems = []
+        problems << "has #{count} endpoints: a recipe has at most #{MAX_ENDPOINTS}" if count > MAX_ENDPOINTS
+        problems << "the path of an endpoint, with the paths above it, has at most #{MAX_PATH} characters" if longest > MAX_PATH
+        problems
       end
 
       def one_api(data)

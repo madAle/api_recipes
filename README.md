@@ -536,9 +536,10 @@ it writes anything, and you load it with `recipes_paths`.
     github 1.0.0
       summary:       GitHub REST API, users, repositories, issues and pull requests
       homepage:      https://docs.github.com/en/rest
-      from:          https://github.com/madAle/api_recipes-cookbook, commit 4126a6563bf5
+      from:          https://github.com/madAle/api_recipes-cookbook, commit a4e8dd017d05
       address:       https://api.github.com
       credential:    in the Authorization header
+      headers:       Accept: application/vnd.github+json
       calls:         14, of which 2 are not GET:
         POST  github.repos.issues(owner, repo).create                         /repos/:owner/:repo/issues
         POST  github.repos.issues(owner, repo).comments(issue_number).create  /repos/:owner/:repo/issues/:issue_number/comments
@@ -579,14 +580,15 @@ layout.
   for its host. The `git` command of your machine does the download.
 - Before writing, `install` shows the address the requests go to, as the recipe
   writes it and with the defaults of its variables, where the credential goes,
-  the variables to set and every call that is not a GET. It warns when the
-  credential would travel in the query string or over `http`. Only `y` or `yes`
-  installs; `--yes` installs without asking.
+  the headers sent with every request, the variables to set and every call that
+  is not a GET. It warns when the credential would travel in the query string,
+  and when the protocol is `http`. Only `y` or `yes` installs; `--yes` installs
+  without asking.
 - `--to DIR` installs in another folder. `update` and `check` take it as
   `--dir DIR`.
 - `update NAME` takes the recipe that its repository has now, or the one of
-  `--version`, and shows what changes in the address, the credential and the
-  verbs before it replaces the file.
+  `--version`, and shows what changes in the address, the credential, the
+  headers and the verbs before it replaces the file.
 - `check` compares the installed recipes with `recipes.lock`, as `configure`
   does. `check FILE` says whether a file is a valid portable recipe: use it
   while you write one.
@@ -665,9 +667,13 @@ The rules, beyond those of every description:
   `s3.{region}.example.com` are accepted, `api.example.{tld}` is not.
 - No `verify_with`, no ERB, and no `<%` anywhere in the file.
 - Plain YAML: no anchors, aliases, tags or merge keys, no key given twice, keys
-  that are text (quote `'on'`, `'no'` and numbers), at most 1 MiB.
+  that are text (quote `'on'`, `'no'` and numbers).
 - Every name and every value is visible text: no control characters, no line
-  breaks inside a value, no invisible or direction-changing characters.
+  breaks inside a value, no invisible or direction-changing characters. The
+  same holds for the rest of the file, comments included: what a person reads
+  in it is what is loaded.
+- At most 1 MiB, 10,000 endpoints, 2,000 characters for a name or a value, and
+  4,000 characters for the path of an endpoint with the paths above it.
 - A credential never goes in a recipe: `auth` says where it travels, and the
   application assigns it.
 
@@ -1423,10 +1429,12 @@ What ApiRecipes does:
 - **Portable recipes** are data only. A file of `recipes_paths` is never
   evaluated with ERB and is read as plain YAML, without anchors, aliases or
   tags. It cannot carry `verify_with`, cannot take the name of an API you
-  already have, and cannot let a variable decide where its host ends. It is
-  loaded only if it matches the checksum in `recipes.lock`.
+  already have, and cannot let a variable decide where its host ends. Its
+  text, comments included, holds only visible characters. It is loaded only if
+  it matches the checksum in `recipes.lock`.
 - **`api_recipes install` and `update`** show where the requests and the
-  credential go, and which calls are not GET, before they write. They read one
+  credential go, the headers sent with every request and which calls are not
+  GET, before they write. They read one
   file from the repository without checking it out, only over `https`, and run
   `git` without a shell. An address with a user name or a password is refused,
   so it cannot end up in `recipes.lock`.

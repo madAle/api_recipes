@@ -62,7 +62,7 @@ RSpec.describe 'api_recipes update' do
     installed
     @repository.publish('shop', recipe_text('shop', 'timeout' => 9, recipe: { 'version' => '1.0.1' }))
     _code, out, = update('--yes')
-    expect(out).to include("  changes from shop 1.0.0:\n    no change in the address, the credential or the verbs\n")
+    expect(out).to include("  changes from shop 1.0.0:\n    no change in the address, the credential, the headers or the verbs\n")
   end
 
   it 'does nothing when the repository has the same recipe' do
@@ -110,6 +110,20 @@ RSpec.describe 'api_recipes update' do
     path = write_recipe(File.dirname(@dir), lock: false)
     expect(run_cli('install', path, '--to', @dir, '--yes').first).to eq(0)
     expect(update).to eq([1, '', "shop was installed from a file: install the new file with `api_recipes install FILE`\n"])
+  end
+
+  it 'takes the whole argument as the name: a name followed by a new line and something else is not a name' do
+    installed
+    expect(Open3).not_to receive(:capture3)
+    expect(run_cli('update', "shop\n--upload-pack=x", '--dir', @dir)).to eq([2, '', "shop?--upload-pack=x is not the name of a recipe\n"])
+  end
+
+  it 'exits with 2 when the lock is there and cannot be read' do
+    installed
+    lock = File.join(@dir, 'recipes.lock')
+    allow(File).to receive(:readable?).and_call_original
+    allow(File).to receive(:readable?).with(lock).and_return(false)
+    expect(update).to eq([2, '', "#{lock}: cannot be read\n"])
   end
 
   it 'refuses a name that is not the name of a recipe' do

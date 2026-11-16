@@ -141,7 +141,10 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
       expect(calls.map(&:first)).to all(include('GIT_TERMINAL_PROMPT' => '0', 'GIT_ALLOW_PROTOCOL' => 'https:file', 'GIT_DIR' => nil))
       fetching = calls.find { |arguments| arguments.include?('fetch') }
       expect(fetching.last(3)).to eq(['--', @repository.address, 'HEAD'])
-      expect(fetching).to include('protocol.allow=never', 'http.followRedirects=false', '--no-recurse-submodules', '--depth')
+      expect(fetching).to include('protocol.allow=never', 'http.followRedirects=false', 'transfer.fsckObjects=true',
+                                  '--no-recurse-submodules', '--no-tags', '--depth')
+      expect(calls.find { |arguments| arguments.include?('init') }).to include('--bare', '--template=')
+      expect(calls.find { |arguments| arguments.include?('ls-tree') }.last(2)).to eq(['--', 'recipes/shop.recipe.yml'])
     end
 
     it 'uses its own empty repository, whatever GIT_DIR says, and leaves nothing behind' do
@@ -173,7 +176,7 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
         repository.publish('shop', recipe_text)
         allow(described_class).to receive(:address_problem).and_return(nil)
         expect { described_class.new(repository.address).fetch('shop') }
-          .to raise_error(described_class::Failure, /git could not read file:.*not allowed/)
+          .to raise_error(described_class::Failure, /git could not read file:.*not allowed \(git may use only https here: check url\.\*\.insteadOf in your git configuration\)\z/)
       end
     end
   end
@@ -181,10 +184,18 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
   describe 'what git says' do
     let(:failed) { instance_double(Process::Status, success?: false) }
 
-    it 'is shown as one line, without control and format characters' do
-      allow(Open3).to receive(:capture3).and_return(['', "fatal: first\nremote: bad\e[31m\u202Etext\n\n".b, failed])
+    it 'is shown as one line, without control and format characters: the line where git says fatal or error' do
+      hidden = [0x202E].pack('U')
+      said = "remote: noise\nfatal: bad\e[31m#{hidden}text\nhint: try again\n\n"
+      allow(Open3).to receive(:capture3).and_return(['', said.b, failed])
       expect { described_class.new('https://example.test/r').fetch('shop') }
-        .to raise_error(described_class::Failure, 'git failed (init): remote: bad?[31m?text')
+        .to raise_error(described_class::Failure, 'git failed (init): fatal: bad?[31m?text')
+    end
+
+    it 'is its last line when no line says fatal or error' do
+      allow(Open3).to receive(:capture3).and_return(['', "remote: first\nremote: last\n".b, failed])
+      expect { described_class.new('https://example.test/r').fetch('shop') }
+        .to raise_error(described_class::Failure, 'git failed (init): remote: last')
     end
 
     it 'is not needed to fail' do

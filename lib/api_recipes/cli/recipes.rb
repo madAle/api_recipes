@@ -63,6 +63,7 @@ module ApiRecipes
         guarded do
           raise Stop.new(2, "#{Summary.shown(name, 80)} is not the name of a recipe") unless Recipe::NAME.match?(name)
 
+          readable!(File.join(directory, RecipeLock::FILE_NAME))
           entry = RecipeLock.read(directory)[name]
           raise Stop.new(1, "#{name} is not installed in #{directory}") if entry.nil?
           if entry.source.nil?
@@ -131,6 +132,7 @@ module ApiRecipes
         end
         raise Stop.new(2, "#{directory} is not a folder") if File.exist?(directory) && !File.directory?(directory)
 
+        [destination, lock_path].each { |path| readable!(path) }
         lock = RecipeLock.read(directory)
         entry = RecipeLock::Entry.new(version: recipe.version, source: incoming.source, commit: incoming.commit,
                                       sha256: recipe.sha256)
@@ -183,13 +185,24 @@ module ApiRecipes
         raise Stop.new(1, 'nothing was written') unless %w[y yes].include?(answer)
       end
 
-      # The new content takes the place of the file in one step.
+      # The new content takes the place of the file in one step. The bytes are
+      # written as they are, on every system: the checksum is of the bytes.
       def write(path, text)
         temporary = "#{path}.#{Process.pid}.tmp"
-        File.open(temporary, File::WRONLY | File::CREAT | File::EXCL, 0o644) { |file| file.write(text) }
-        File.rename(temporary, path)
-      ensure
-        File.delete(temporary) if temporary && File.exist?(temporary)
+        file = File.open(temporary, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644)
+        begin
+          file.write(text)
+          file.close
+          File.rename(temporary, path)
+        ensure
+          file.close unless file.closed?
+          File.delete(temporary) if File.exist?(temporary)
+        end
+      end
+
+      # A file that is there and cannot be read stops the command with 2.
+      def readable!(path)
+        raise Stop.new(2, "#{path}: cannot be read") if File.exist?(path) && !File.readable?(path)
       end
 
       def check_file(file)
@@ -218,6 +231,7 @@ module ApiRecipes
           return 2
         end
 
+        readable!(File.join(directory, RecipeLock::FILE_NAME))
         lock = RecipeLock.read(directory)
         names = Dir.children(directory).select { |name| name.end_with?(Recipe::SUFFIX) }.sort
         codes = names.map { |name| check_installed(File.join(directory, name), name.delete_suffix(Recipe::SUFFIX), lock) }
@@ -227,6 +241,9 @@ module ApiRecipes
         end
         @out.puts "no recipes in #{directory}" if codes.empty?
         codes.max || 0
+      rescue Stop => e
+        @err.puts e.message
+        e.code
       rescue ConfigurationError => e
         e.errors.each { |problem| @err.puts problem }
         1
@@ -236,6 +253,11 @@ module ApiRecipes
       end
 
       def check_installed(file, name, lock)
+        unless File.readable?(file)
+          @err.puts "#{file}: cannot be read"
+          return 2
+        end
+
         text, = Recipe.read_text(file)
         problem = lock.problem_for(name, Recipe.digest(text))
         if problem
