@@ -38,7 +38,7 @@ module ApiRecipes
     # writers also refuse an api returned by with: its options belong to its
     # chain.
     def authorization=(value)
-      if @context.owner.is_a?(Module) || !@context.overrides.empty?
+      if Module === @context.owner || !@context.overrides.empty?
         raise Error, Internals::LevelSet.refusal(:authorization, @context.owner, @context.definition.name, @context.overrides.empty?)
       end
 
@@ -52,7 +52,7 @@ module ApiRecipes
     end
 
     def basic_auth=(value)
-      if @context.owner.is_a?(Module) || !@context.overrides.empty?
+      if Module === @context.owner || !@context.overrides.empty?
         raise Error, Internals::LevelSet.refusal(:basic_auth, @context.owner, @context.definition.name, @context.overrides.empty?)
       end
 
@@ -62,13 +62,13 @@ module ApiRecipes
 
     # The variable values of the caller's level.
     def variables
-      level = Internals::LevelSet.read(@context.owner, @context.level_key)
+      level = @context.own_level
       (level && level.variables) || {}
     end
 
     # Sets the variable values of an object; nil removes them. See authorization=.
     def variables=(values)
-      if @context.owner.is_a?(Module) || !@context.overrides.empty?
+      if Module === @context.owner || !@context.overrides.empty?
         raise Error, Internals::LevelSet.refusal(:variables, @context.owner, @context.definition.name, @context.overrides.empty?)
       end
 

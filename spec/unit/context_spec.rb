@@ -19,7 +19,7 @@ describe ApiRecipes::Internals::Context do
   end
 
   def assign(owner, **changes)
-    ApiRecipes::Internals::LevelSet.write(owner, declaration_for(owner) || :svc) { |level| level.with(**changes) }
+    write_level(owner, declaration_for(owner) || :svc) { |level| level.with(**changes) }
   end
 
   it 'refuses serialization, because the options of with can hold header values' do
@@ -75,7 +75,7 @@ describe ApiRecipes::Internals::Context do
 
   it 'keeps exactly the values the compiler resolved' do
     options = { mime_type: (+"caf\xE9").force_encoding('ISO-8859-1'), host: 'h.test'.encode('ISO-8859-1'),
-                variables: { shop: ['a'] }, base_url: 'x y', verify_with: 'check', 'x-note' => 1 }
+                variables: { shop: +'a' }, base_url: 'x y', verify_with: 'check', 'x-note' => 1 }
     overrides = context.with(options).overrides
     expect(overrides).to eq(ApiRecipes::Internals::Compiler.resolve_options(options, :with_api))
     expect(overrides.values_at(:mime_type, :host).map(&:encoding)).to eq([Encoding::UTF_8, Encoding::UTF_8])
@@ -87,7 +87,7 @@ describe ApiRecipes::Internals::Context do
     api = ApiRecipes::Internals::Compiler.compile(:svc, host: '{shop}.h.test', default_headers: { 'Accept' => 'a' },
                                              variables: { shop: { default: 'main' } })
     ctx = described_class.new(definition: api, owner: ApiRecipes, global_definition: api)
-    ApiRecipes::Internals::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('T')) }
+    write_level(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('T')) }
     expect(ctx.with(default_headers: { 'X' => '1' }).with(default_headers: nil).headers).to eq('Accept' => 'a')
     expect(ctx.with(variables: { shop: 'other' }).with('variables' => nil).origin).to eq('https://main.h.test')
     expect(ctx.with(timeout: 9).with('timeout' => nil).setting(:timeout)).to eq(3)
@@ -98,7 +98,7 @@ describe ApiRecipes::Internals::Context do
   end
 
   it 'reads the names of the options as the compiler does, whatever their encoding' do
-    ApiRecipes::Internals::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('T')) }
+    write_level(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('T')) }
     expect(context.with('timeout'.encode('UTF-16LE') => 1).setting(:timeout)).to eq(1)
     expect(context.credential).not_to be_nil
     expect(context.with('authorization'.encode('UTF-16LE') => nil).credential).to be_nil
@@ -107,7 +107,7 @@ describe ApiRecipes::Internals::Context do
   it 'is not changed by the caller after with' do
     host = +'a.h.test'
     shop = +'acme'
-    list = ['x']
+    list = +'x'
     headers = { 'X' => +'1' }
     ctx = context.with(host: host, variables: { shop: shop, zone: list }, default_headers: headers)
     host.replace('evil.test')
@@ -116,8 +116,29 @@ describe ApiRecipes::Internals::Context do
     headers['X'].replace('2')
     headers['Y'] = '3'
     expect(ctx.origin).to eq('https://a.h.test')
-    expect(ctx.overrides[:variables]).to eq(shop: 'acme', zone: ['x'])
+    expect(ctx.overrides[:variables]).to eq(shop: 'acme', zone: 'x')
     expect(ctx.headers).to eq('X' => '1')
+  end
+
+  # A request reads the registry once: the levels it took and the tree it
+  # binds their credentials to come from the same configuration, also when
+  # another configure ends before the request has finished building.
+  it 'binds a credential to the configuration its levels were read from' do
+    configure = lambda do |host, token|
+      ApiRecipes.configure do |config|
+        config.logger = Logger.new(IO::NULL)
+        config.apis_configs = { svc: { host: host, endpoints: { users: nil } } }
+        config.values = { svc: { authorization: token } }
+      end
+    end
+    configure.call('old.h.test', 'Bearer OLD')
+    held = ApiRecipes.svc.instance_variable_get(:@context)
+    chain = held.levels
+    configure.call('new.h.test', 'Bearer NEW')
+    expect(chain.registry).not_to equal(ApiRecipes::Internals::Registry.current)
+    expect(held.credential(chain: chain).value).to eq('Bearer OLD')
+    expect(held.origin(chain: chain)).to eq('https://old.h.test')
+    expect { held.credential }.to raise_error(ApiRecipes::CredentialOriginMismatch)
   end
 
   it 'takes the declared defaults of the global level from the global definition' do

@@ -419,8 +419,8 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   `ApiRecipes.github[:users][:show, 'octocat']`, whatever the name.
 - **`with`**: options for one chain or one request, without changing anything
   stored: `ApiRecipes.github.with(host: 'github.example.com')`.
-- **Credentials along a chain**: the chain, the object, the class and its
-  ancestors, then `ApiRecipes.github`. A credential is bound to its origin.
+- **Credentials along a chain**: the chain, the object, the class that declares
+  the API, then the whole application. A credential is bound to its origin.
 - **`variables`**: `{name}` placeholders in `host`, `base_url`, the `path` of an
   endpoint and the values of `default_headers` and `default_params`, with
   values given at any of those levels.

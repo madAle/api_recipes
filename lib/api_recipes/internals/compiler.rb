@@ -684,7 +684,9 @@ module ApiRecipes
           return nil
         end
         value.each_key { |name| add(join(where, name), 'is not a valid variable name') unless VARIABLE_NAME.match?(name.to_s) }
-        deep_freeze(value)
+        # Kept as text: an object that changes later would move the host after
+        # the values were given.
+        value.to_h { |name, item| [name, variable_text(item, join(where, name))] }.freeze
       end
 
       def recipe(value, where)

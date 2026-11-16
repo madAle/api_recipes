@@ -49,8 +49,11 @@ user could send the token of one user with the request of another. Give them
 to `config.values = { github: { authorization: ..., variables: { ... } } }`
 inside `ApiRecipes.configure`, and to `api :github, authorization: ...` in a
 class. The writers still work on an object, and `with` gives a value to one
-chain. `config.values` replaces `config.variables`, and a subclass no longer
-has a level of its own: it uses the one of the class that declares the API.
+chain. `config.values` replaces `config.variables` and is assigned inside the
+block of `configure` only; a `configure` changes the descriptions and those
+values in one step. A subclass no longer has a level of its own: it uses the
+one of the class that declares the API. The value of a variable is a String, a
+Symbol or a number, kept as text: any other object is a configuration error.
 
 **An endpoint that does not set `timeout`, `on_bad_code` or `mime_type` now
 looks for it up the tree**, as it already did for `verify_with`: in the

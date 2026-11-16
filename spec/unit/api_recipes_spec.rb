@@ -91,7 +91,7 @@ end
           end
         end.to raise_error(ApiRecipes::ConfigurationError)
         expect(ApiRecipes.configuration).to equal(before)
-        expect([before.logger, before.print_urls, before.value_levels]).to eq([logger, false, {}])
+        expect([before.logger, before.print_urls, ApiRecipes::Internals::Registry.current.levels]).to eq([logger, false, {}])
         expect(before.apis_configs.keys).to eq(ApiRecipes.apis)
       end
       ApiRecipes.configure { |config| config.logger = other_logger }
@@ -128,7 +128,7 @@ end
       expect(before.apis_configs).to eq(svc: { host: 'api.example.test', variables: { region: {} },
                                                endpoints: { users: { path: '/people' } } })
       expect(before.apis_files_paths).to eq([path])
-      expect(before.value_levels.transform_values(&:variables)).to eq(svc: { region: 'eu' })
+      expect(ApiRecipes::Internals::Registry.current.levels.transform_values(&:variables)).to eq(svc: { region: 'eu' })
       shared = nil
       ApiRecipes.configure { |config| shared = config.logger }
       expect(shared).to equal(logger)

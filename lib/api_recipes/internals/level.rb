@@ -30,10 +30,9 @@ module ApiRecipes
     end
 
     # Immutable map key => Level. It is stored in the instance variable
-    # @__api_recipes of its owner (an instance, a class, a module or the
-    # ApiRecipes module) and is replaced, never changed. The key of a level
-    # written through a declaration is that Declaration, compared by identity;
-    # the key of the global level is the api name. It never writes its content
+    # @__api_recipes of its owner, an object, and is replaced, never changed.
+    # The key of a level is the Declaration it was written through, compared
+    # by identity. It never writes its content
     # when serialized: a rebuilt LevelSet is sealed and answers "no credential"
     # for every key.
     class LevelSet
@@ -56,7 +55,11 @@ module ApiRecipes
           set.fetch(key.is_a?(String) ? key.to_sym : key)
         end
 
+        # Only an object has a set: the level of a class or a module is the
+        # one of its declaration, and the level of the application is in the
+        # registry. Both are given when the application starts.
         def write(owner, key)
+          raise Error, 'a level is written on an object, not on a class or a module' if Module === owner
           if owner.frozen?
             raise Error, 'cannot assign credentials or variables on a frozen object. ' \
                          'Use with(...) to get a modified copy instead'
@@ -86,11 +89,6 @@ module ApiRecipes
             "a class or a module is shared by all its objects, in every thread: give its #{what} to " \
               "`api :#{api}, #{what}: ...`, or use an object or with(#{what}: ...) for one chain"
           end
-        end
-
-        # Makes levels (key => Level) the whole set of owner, in one step.
-        def replace_all(owner, levels)
-          WRITES.synchronize { owner.instance_variable_set(IVAR, new(EMPTY.merge(levels), generation)) }
         end
 
         def reset!
@@ -159,25 +157,46 @@ module ApiRecipes
     end
 
     module Levels
+      # The levels of one request, nearest first, as [kind, level] pairs, with
+      # the registry the global one was read from: a request takes the tree in
+      # force and the values of the application from the same registry.
+      class Chain < Array
+        attr_reader :registry
+
+        def initialize(entries, registry)
+          super(entries)
+          @registry = registry
+          freeze
+        end
+      end
+
       # Levels that hold a value for one api, nearest first: the one of the
       # object, written through declaration; the one that declaration gives to
       # the class or module where `api` was called, which is the only level a
-      # class or a module has; last the global level, by api name. A level of
-      # another declaration is never returned. Without a declaration (a global
-      # api) only the global level.
+      # class or a module has; last the level of the application, by api name,
+      # which the registry in force holds. A level of another declaration is
+      # never returned. Without a declaration (a global api) only the last one.
       def self.chain(owner, api_name, declaration)
-        chain = []
+        registry = Registry.current
+        entries = []
         if declaration
-          unless owner.is_a?(Module)
+          unless Module === owner
             level = LevelSet.read(owner, declaration)
-            chain << [:instance, level] if level
+            entries << [:instance, level] if level
           end
-          level = LevelSet.read(declaration.declared_in, declaration)
-          chain << [:class, level] if level
+          level = declaration.level
+          entries << [:class, level] if level
         end
-        level = LevelSet.read(ApiRecipes, api_name)
-        chain << [:global, level] if level
-        chain
+        level = registry.level(api_name)
+        entries << [:global, level] if level
+        Chain.new(entries, registry)
+      end
+
+      # The level of owner alone: what the readers of an api show.
+      def self.own(owner, api_name, declaration)
+        return LevelSet.read(owner, declaration) unless Module === owner
+
+        declaration ? declaration.level : Registry.current.level(api_name)
       end
     end
   end

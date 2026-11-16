@@ -148,10 +148,14 @@ describe 'Credentials, variables and class trees through the DSL' do
     it 'says what is wrong with the values, with the name of the api and without a value' do
       problems = {
         { shopify: 'SECRET' } => ['values.shopify: must be a Hash'],
-        { shopify: { token: 'SECRET' } } => ['values.shopify: takes variables, authorization, basic_auth, not :token'],
+        { shopify: { token: 'SECRET' } } => ['values.shopify: takes variables, authorization and basic_auth, and nothing else'],
         { shopify: { authorization: 'SECRET', basic_auth: { user: 'u', pass: 'SECRET' } } } =>
           ['values.shopify: takes authorization or basic_auth, not both'],
         { shopify: { variables: 'SECRET' } } => ['values.shopify.variables: must be a Hash'],
+        { shopify: { 'SECRET-AS-A-KEY' => true } } => ['values.shopify: takes variables, authorization and basic_auth, and nothing else'],
+        { shopify: { authorization: 'SECRET', 'authorization' => 'SECRET' } } => ['values.shopify: authorization is given twice'],
+        { "shop\nINJECTED" => {} } => ['values.shop?INJECTED: is not the name of an api'],
+        { shopify: { variables: { shop: Object.new } } } => ['values.shopify.variables.shop: must be a string'],
         { shopify: { variables: { shpo: 'SECRET' } } } => ["shopify.variables: unknown variable 'shpo' (declared: shop)"]
       }
       problems.each do |values, expected|

@@ -54,6 +54,9 @@ module ApiRecipes
       # reads them once and passes them as chain to the methods below.
       def levels = Levels.chain(@owner, @definition.name, @declaration)
 
+      # The level of the owner alone, or nil.
+      def own_level = Levels.own(@owner, @definition.name, @declaration)
+
       # The value of an option, from the nearest place that has one.
       def setting(key, endpoint = nil, endpoint_overrides = nil)
         if endpoint
@@ -233,7 +236,8 @@ module ApiRecipes
       # every other level of the chain was written through the declaration in
       # use, whose tree that is.
       def check_origin(chain, index, destination)
-        bound = origin_from(definition_in_force(chain[index].first), chain, index, with: false)
+        registry = chain.respond_to?(:registry) ? chain.registry : Registry.current
+        bound = origin_from(definition_in_force(chain[index].first, registry), chain, index, with: false)
         return if bound && destination && bound.casecmp?(destination)
 
         raise CredentialOriginMismatch.new(@definition.name, bound, destination)
@@ -243,9 +247,9 @@ module ApiRecipes
       # configure still holds the tree it was created with, and so its
       # destination, while the levels are read when the request is sent: their
       # credentials are bound to the origin that the configuration in force
-      # gives them. nil when that configuration no longer has the api.
-      def definition_in_force(kind)
-        registry = Registry.current
+      # gives them. nil when that configuration no longer has the api. registry
+      # is the one the levels of the request were read from.
+      def definition_in_force(kind, registry)
         return definition_for(kind) if @generation.nil? || @generation == registry.generation
         return registry.definitions[@definition.name] if kind == :global || @declaration.nil?
 

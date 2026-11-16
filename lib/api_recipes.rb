@@ -43,7 +43,7 @@ module ApiRecipes
 
     draft = configuration.dup
     yield draft
-    Internals::Registry.install(draft) { @configuration = draft }
+    Internals::Registry.install(draft) { @configuration = draft.close_draft }
     nil
   end
 
@@ -59,8 +59,9 @@ module ApiRecipes
 
   def self.apis = Internals::Registry.current.apis
 
-  # Removes the global apis and their methods, the configuration and every
-  # credential and variable value.
+  # Removes the global apis and their methods, the configuration, the values
+  # of the application and those assigned to objects. What a class gives to
+  # `api` is part of its code and stays.
   def self.reset!
     Internals::Registry.reset! { @configuration = nil }
     nil

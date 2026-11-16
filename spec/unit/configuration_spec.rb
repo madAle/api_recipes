@@ -195,7 +195,10 @@ describe ApiRecipes::Configuration do
 
   it 'has defaults for values and upgrade_warnings' do
     configuration = ApiRecipes::Configuration.new
-    expect(configuration.value_levels).to eq({})
+    expect(configuration.value_levels).to be_nil
+    expect { configuration.values = { svc: { authorization: 'Bearer x' } } }
+      .to raise_error(ApiRecipes::Error, 'values are given inside the block of ApiRecipes.configure, as config.values = { ... }')
+    expect(configuration.value_levels).to be_nil
     expect(configuration.upgrade_warnings).to eq(true)
   end
 

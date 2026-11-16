@@ -10,8 +10,10 @@ module ApiRecipes
 
     attr_accessor :upgrade_warnings
     attr_reader :log_to, :log_level, :print_urls
-    # What values= was given, as { api name => Internals::Level }. A level
-    # never shows or serializes its content.
+    # What values= was given inside this call of configure, as
+    # { api name => Internals::Level }, or nil. A level never shows or
+    # serializes its content. Once the configuration is in force the values
+    # are those of the registry, and this is nil again.
     attr_reader :value_levels
 
     def initialize
@@ -19,7 +21,8 @@ module ApiRecipes
       @apis_configs = {}
       @apis_files_paths = []
       @recipes_paths = []
-      @value_levels = {}.freeze
+      @value_levels = nil
+      @draft = false
       @print_urls = false
       @upgrade_warnings = true
     end
@@ -27,8 +30,8 @@ module ApiRecipes
     # configure works on a copy: what a setter or the caller can change in
     # place (the list of sources, and the Hashes, Arrays and Strings of
     # apis_configs and apis_files_paths at every depth) is copied, so the
-    # original stays as it was. The logger of the application is shared, and
-    # so are the values, which cannot be changed in place.
+    # original stays as it was. The logger of the application is shared. The
+    # copy is the draft that configure yields, the only one that takes values.
     def initialize_copy(source)
       super
       @default_logger = nil
@@ -36,6 +39,15 @@ module ApiRecipes
       @apis_configs = deep_copy(@apis_configs)
       @apis_files_paths = deep_copy(@apis_files_paths)
       @recipes_paths = deep_copy(@recipes_paths)
+      @value_levels = nil
+      @draft = true
+    end
+
+    # Called by configure when the draft becomes the configuration in force.
+    def close_draft
+      @draft = false
+      @value_levels = nil
+      self
     end
 
     # The descriptions of the apis and the variables can hold secrets (header
@@ -79,8 +91,12 @@ module ApiRecipes
     # application: { github: { authorization: '...', variables: { ... } } }.
     # Each api takes authorization or basic_auth, and variables. They are
     # checked and copied here, and replace those given before. It is the only
-    # way to give them at this level: see Api#authorization=.
+    # way to give them at this level, and it works only inside the block of
+    # configure: see Api#authorization=.
     def values=(values)
+      unless @draft
+        raise Error, 'values are given inside the block of ApiRecipes.configure, as config.values = { ... }'
+      end
       raise ArgumentError, 'values must be an Hash' unless values.is_a? Hash
 
       @value_levels = Internals::Registry.value_levels(values)

@@ -15,7 +15,7 @@ describe 'Credentials' do
 
   def assign(owner, value)
     credential = ApiRecipes::Internals::Credential.from(:authorization, value)
-    ApiRecipes::Internals::LevelSet.write(owner, declaration_for(owner) || :svc) { |l| l.with(credential: credential) }
+    write_level(owner, declaration_for(owner) || :svc) { |l| l.with(credential: credential) }
   end
 
   # The helper of TestApis, with the levels of owner read through the declaration.
@@ -103,7 +103,7 @@ describe 'Credentials' do
     config = base.merge(host: '{shop}.example.test', variables: { shop: { default: 'api' } })
     object = Class.new(klass).new
     assign(klass, 'Bearer class')
-    ApiRecipes::Internals::LevelSet.write(object, declaration) { |l| l.with(variables: { shop: 'other' }.freeze) }
+    write_level(object, declaration) { |l| l.with(variables: { shop: 'other' }.freeze) }
     expect { new_request(config, %i[users], owner: object).perform }
       .to raise_error(ApiRecipes::CredentialOriginMismatch, /other\.example\.test/)
     expect(WebMock).not_to have_requested(:any, /example\.test/)
@@ -118,7 +118,14 @@ describe 'Credentials' do
     child = Class.new(klass)
     mixin = Module.new
     child.include(mixin)
-    [child, mixin, child.singleton_class].each { |owner| assign(owner, 'Bearer STRAY') }
+    stray = ApiRecipes::Internals::Credential.from(:authorization, 'Bearer STRAY')
+    level = ApiRecipes::Internals::Level.new(credential: stray, variables: nil)
+    sets = ApiRecipes::Internals::LevelSet
+    [child, mixin, child.singleton_class].each do |owner|
+      expect { sets.write(owner, declaration) { level } }.to raise_error(ApiRecipes::Error, /on an object, not on a class or a module/)
+      # Even a set put there by force is not looked at.
+      owner.instance_variable_set(sets::IVAR, sets.new({ declaration => level }.compare_by_identity, sets.generation))
+    end
     [child, child.new].each { |owner| new_request(base, %i[users], owner: owner).perform }
     expect(WebMock).to sent_without_authorization.twice
     assign(klass, 'Bearer class')

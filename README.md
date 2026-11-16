@@ -469,7 +469,8 @@ every thread. That is why it is given only where the application starts, to
 while requests are served goes to `with` or to an object. The same holds for
 credentials.
 
-A value is checked for the place where it ends up. In a `host` it can contain
+The value of a variable is a String, a Symbol or a number, and is kept as
+text. A value is checked for the place where it ends up. In a `host` it can contain
 only letters, digits, dots, hyphens and underscores. In a `base_url` and in a
 `path` it is encoded like a path parameter, and it cannot be empty, `.` or
 `..`. In a header it cannot contain a line break or another control character.
@@ -1274,9 +1275,10 @@ nearest to the farthest:
 4. the whole application
 
 The last two are shared by every thread of the process, so they are given where
-the application starts and cannot be assigned afterwards. The first two belong
-to the code that created them: they are the place for a credential that changes
-from one request to the next.
+the application starts and cannot be assigned afterwards. A chain and an object
+are seen only by the code that holds them: they are the place for a credential
+that changes from one request to the next, as long as the object is not itself
+kept where every request finds it.
 
 **A token for the whole application**, sent as the `Authorization` header, as
 it is written. It goes in `config.values`, with the variables of the API:
@@ -1631,8 +1633,9 @@ end
 ```
 
 If your tests configure ApiRecipes themselves, `ApiRecipes.reset!` removes the
-global configuration, the API methods defined on the module and every credential
-and variable value that was assigned, so each example can start clean:
+global configuration, the API methods defined on the module, the values of the
+application and those assigned to objects, so each example can start clean.
+What a class gives to `api` is part of its code and stays:
 
 ```ruby
 RSpec.configure do |config|
@@ -1652,6 +1655,13 @@ What ApiRecipes does:
 - **Parameters sent with every request** cannot take the place of the
   credential: with `auth.type: query`, `default_params` that name its parameter
   are refused, and the credential is always the only parameter with its name.
+- **Shared values.** The credential and the variables that the whole
+  application or a class uses are read by every thread. They are given only
+  where the application starts, to `config.values` and to `api`: on
+  `ApiRecipes.github` and on a class the writers raise, so code that serves
+  several users cannot leave the token of one of them where the request of
+  another finds it. A `configure` changes the descriptions and those values in
+  one step.
 - **Credentials** are sent only to the origin they were set for, and a request
   that would send one elsewhere raises. A value with a control character is
   refused, so a credential cannot add a header.
@@ -1704,6 +1714,9 @@ What stays with your application:
   variable that is the entire host. Check it against a list of hosts you know. A
   variable that is only a part of a host, like the shop name in
   `{shop}.myshopify.com`, is the intended use.
+- An object that every request reaches, such as a client kept in a constant or
+  memoized on a class, is as shared as a class: do not assign the credential or
+  the variables of one user on it. Use `with`, or an object made for the request.
 - `response.original_response` is the raw http.rb response, and it gives access
   to the request that was sent, headers included. Do not log or serialize it.
 - ERB in a configuration file runs code. Load only files you trust.
@@ -1726,7 +1739,7 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `apis_files_paths` | Array of YAML files, evaluated with ERB |
 | `apis_configs` | Hash of API descriptions |
 | `recipes_paths` | Array of installed portable recipes (`NAME.recipe.yml`), read as data only and checked against `recipes.lock` |
-| `variables` | Hash of default variable values, as `{ api_name: { variable: value } }` |
+| `values` | for each API, its credential and the values of its variables for the whole application, as `{ api_name: { authorization: '...', variables: { name: value } } }`; `basic_auth` in place of `authorization` |
 | `logger` | a Logger to use |
 | `log_to` | path or IO for the default logger (default: STDERR) |
 | `log_level` | level of the default logger (default: the `LOG_LEVEL` variable, or warn) |

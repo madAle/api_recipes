@@ -255,6 +255,19 @@ describe 'Levels written through one declaration of an api' do
       end
     end
 
+    it 'does not send what an object wrote through one declaration with a request that another declaration serves' do
+      good = good_module
+      evil = evil_module
+      klass = Class.new
+      klass.define_method(:good_svc, good.instance_method(:svc))
+      klass.define_method(:evil_svc, evil.instance_method(:svc))
+      object = klass.new
+      object.good_svc.authorization = 'Bearer OBJECT'
+      expect(outcome { object.good_svc.users.run }).to eq([['good.example.test', 'Bearer OBJECT']])
+      expect(outcome { object.evil_svc.users.run }).to eq([['evil.test', nil]])
+      expect(object.evil_svc.authorization).to be_nil
+    end
+
     it 'creates no singleton class for an object that reaches a module declaration through a copied method' do
       good = good_module(authorization: 'Bearer MODULE')
       klass = Class.new

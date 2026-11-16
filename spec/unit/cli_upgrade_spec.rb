@@ -50,15 +50,20 @@ describe 'api_recipes upgrade' do
         client.github.basic_auth = credentials
         if ApiRecipes.github.authorization == expected
         ApiRecipes.github.with(authorization: token).users.run
+        ApiRecipes.github.authorization ||= ENV['TOKEN']
+        ApiRecipes::github.basic_auth={ user: 'u', pass: 'p' }
       RUBY
       code, out, = run('upgrade', dir)
       expect(code).to eq(1)
+      expect(out).to match(/a\.rb:7: \[breaks\] a credential of the whole application/)
+      expect(out).to match(/a\.rb:8: \[breaks\] a credential of the whole application/)
+      expect(out).to include('a credential assigned through a variable that holds the api')
       expect(out).to match(/a\.rb:1: \[breaks\] a credential of the whole application is given to ApiRecipes\.configure/)
       expect(out).to match(/a\.rb:2: \[breaks\] a credential of the whole application/)
       expect(out).to match(/a\.rb:3: \[check\] authorization= and basic_auth= now work on an object only/)
       expect(out).to match(/a\.rb:4: \[check\] authorization= and basic_auth= now work on an object only/)
       expect(out).not_to match(/a\.rb:[56]:/)
-      expect(out).to include('4 findings')
+      expect(out).to include('6 findings')
       expect(out).not_to include('SECRET')
     end
   end

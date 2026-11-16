@@ -80,10 +80,12 @@ fails under 90% line coverage.
    and are read, nearest first, when the request is built: the object that
    makes the call, the class or module that declared the api, the whole
    application. `with` adds a level for one chain. The last two are shared by
-   every thread, so only the place where the application starts writes them:
-   `config.values` for the application, the options of `api` for a class. The
-   writers of `Api` work on an object and raise on a class, a module and
-   `ApiRecipes.name`.
+   every thread, so only the place where the application starts gives them:
+   `config.values` for the application, kept in the registry that `configure`
+   swaps in together with the trees; the options of `api` for a class, kept in
+   its `Declaration`. Only the level of an object is stored on its owner
+   (`LevelSet`). The writers of `Api` work on an object and raise on a class,
+   a module and `ApiRecipes.name`.
 4. `run`, or a block, creates a `Internals::Request`, which builds the URL and the http.rb
    client with the default headers and parameters of the api, of `with` and of
    the endpoint, sends the request, checks the outcome (`ok_code`, `on_bad_code`,
@@ -129,7 +131,9 @@ classes are built once, by `configure`.
 - Nothing writes the level of the application or of a class after the
   application has started: no writer, no method that a request could call.
   A value that changes from one request to the next belongs to `with` or to an
-  object.
+  object. A request reads the registry once and takes the tree and the values
+  of the application from it: do not read `Registry.current` twice for one
+  request. Values of variables are kept as frozen text.
 - A regular expression that validates a name or a value uses `\A` and `\z`, never
   `^` and `$`.
 - Do not add monkey patches. `logger` and `http` are the only runtime

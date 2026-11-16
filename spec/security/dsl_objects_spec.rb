@@ -87,6 +87,21 @@ describe 'Objects of the DSL' do
     expect { Marshal.dump(ApiRecipes.svc.users.definition) }.to raise_error(TypeError)
   end
 
+  # Every String that object holds in its instance variables, through Hashes
+  # and Arrays at any depth: what a dump of it would write as plain text.
+  def plain_texts(object)
+    walk = lambda do |value|
+      case value
+      when String then [value]
+      when Symbol then [value.to_s]
+      when Hash then value.flat_map { |key, item| walk.call(key) + walk.call(item) }
+      when Array then value.flat_map(&walk)
+      else []
+      end
+    end
+    object.instance_variables.flat_map { |name| walk.call(object.instance_variable_get(name)) }
+  end
+
   it 'shows no header and no variable value when the configuration is printed' do
     ApiRecipes.configure do |config|
       config.logger = Logger.new(IO::NULL)
@@ -95,17 +110,25 @@ describe 'Objects of the DSL' do
       config.values = { svc: { variables: { shop: 'SECRET-SHOP' }, authorization: 'Bearer SECRET-TOKEN' } }
       shown = [config.inspect, config.to_s, "#{config}", PP.pp(config, +'')]
       expect(shown.join("\n")).not_to include('SECRET')
+      # What it keeps of the values while the block runs never shows them, in
+      # any form, and it keeps no other copy of what it was given.
+      levels = config.value_levels
+      expect(levels.keys).to eq([:svc])
+      kept = [levels.inspect, levels.to_s, PP.pp(levels, +''), YAML.dump(levels), Marshal.dump(levels), levels.to_json]
+      expect(kept.join("\n")).not_to include('SECRET')
+      expect(plain_texts(config).join("\n")).not_to include('SECRET-TOKEN', 'SECRET-SHOP')
     end
     configuration = ApiRecipes.configuration
     shown = [configuration.inspect, configuration.to_s, "#{configuration}", PP.pp(configuration, +'')]
     expect(shown.join("\n")).not_to include('SECRET')
-    # What it keeps of the values never shows them, in any form.
-    levels = configuration.value_levels
-    expect(levels.keys).to eq([:svc])
-    kept = [levels.inspect, levels.to_s, PP.pp(levels, +''), YAML.dump(levels), Marshal.dump(levels), levels.to_json]
-    expect(kept.join("\n")).not_to include('SECRET')
-    expect(configuration.instance_variables.flat_map { |name| [configuration.instance_variable_get(name)].flatten }
-                        .grep(String).join("\n")).not_to include('SECRET-TOKEN')
+    # Once in force it keeps none of the values: the registry holds them, as levels.
+    expect(configuration.value_levels).to be_nil
+    expect(plain_texts(configuration).join("\n")).not_to include('SECRET-TOKEN', 'SECRET-SHOP')
+    registry = ApiRecipes::Internals::Registry.current
+    held = [registry.inspect, registry.to_s, PP.pp(registry, +''), registry.levels.inspect, YAML.dump(registry.levels),
+            Marshal.dump(registry.levels), registry.levels.to_json]
+    expect(held.join("\n")).not_to include('SECRET-TOKEN', 'SECRET-SHOP')
+    expect(ApiRecipes.svc.authorization).to eq('Bearer SECRET-TOKEN')
     expect(configuration.inspect).to include('ApiRecipes::Configuration', 'svc')
   end
 

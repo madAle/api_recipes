@@ -47,6 +47,29 @@ module TestApis
     ApiRecipes.configure { |config| config.values = given }
   end
 
+  # For the specs that work below the DSL. Changes a level as the block says:
+  # the one of the application (owner ApiRecipes, key the api name), which the
+  # registry holds; the one of the class or module of a declaration (key the
+  # Declaration); or the one of an object, written through the Declaration.
+  def write_level(owner, key, &block)
+    internals = ApiRecipes::Internals
+    empty = internals::Level.new(credential: nil, variables: nil)
+    if owner.equal?(ApiRecipes)
+      registry = internals::Registry.current
+      levels = registry.levels.merge(key.to_sym => block.call(registry.level(key.to_sym) || empty))
+      internals::Registry.instance_variable_set(
+        :@current, internals::Registry.new(configs: registry.configs, definitions: registry.definitions,
+                                           handles: registry.handles, levels: levels, generation: registry.generation)
+      )
+    elsif owner.is_a?(Module)
+      raise ArgumentError, 'only the class or module of the declaration has a level' unless owner.equal?(key.declared_in)
+
+      key.instance_variable_set(:@level, block.call(key.level || empty))
+    else
+      internals::LevelSet.write(owner, key, &block)
+    end
+  end
+
   # Anonymous class that declares the two test apis, with the values and the
   # options each one is given.
   def new_client_class(svc: {}, versioned: {})
