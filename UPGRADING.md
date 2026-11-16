@@ -95,7 +95,8 @@ configuration in place. Four things are worth knowing:
 - A file that is missing, empty, not valid YAML or not valid UTF-8 raises
   `ApiRecipes::RecipeFileError`, which names the file. Files are read with
   `YAML.safe_load`: plain values, symbols and aliases are accepted, and nothing
-  else. A file called `something.recipe.yml` is refused.
+  else. A file called `something.recipe.yml` is refused: it is a portable
+  recipe, and goes in `recipes_paths`.
 
 ### A class with its own destination needs its own credential
 
@@ -397,7 +398,11 @@ You can adopt these when you are ready. The [README](README.md) describes each o
 - **Validated configuration**, with every problem reported at once.
 - **`config.variables`**, **`config.upgrade_warnings`** and the logging options
   described above.
-- **The `api_recipes` command**, with `upgrade`.
+- **The `api_recipes` command**, with `upgrade`, `import`, `routes`, `install`,
+  `update` and `check`.
+- **Portable recipes**: recipes written by others, installed with
+  `api_recipes install` and loaded with `config.recipes_paths`. See
+  [Portable recipes](README.md#portable-recipes) in the README.
 
 ## 6. Security
 

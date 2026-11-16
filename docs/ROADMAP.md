@@ -96,8 +96,15 @@ A command turns an OpenAPI description into a recipe file, for example:
 - A recipe meant to be shared is data only: no ERB, declared placeholders for
   host and credentials, and metadata such as name, version and kind of
   authorization.
-- Recipes are shared through a Git repository, with contributions by pull
-  request. A command downloads a recipe and pins its version.
+- Recipes are shared through a Git repository, the
+  [cookbook](https://github.com/madAle/api_recipes-cookbook), with contributions
+  by pull request. `api_recipes install` downloads a recipe, shows where the
+  requests and the credential go and pins its version in `recipes.lock`;
+  `api_recipes update` shows what changes before replacing it; `api_recipes
+  check` validates a recipe and compares the installed ones with the lock.
+- The application loads the installed recipes with `config.recipes_paths` and
+  downloads nothing when it starts. A recipe that does not match the lock stops
+  the configuration.
 - The content of that repository grows on its own schedule and is not a
   requirement for the release.
 

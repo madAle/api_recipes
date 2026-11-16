@@ -34,6 +34,7 @@ Coming from version 2? Read [UPGRADING.md](UPGRADING.md) first.
 - [Variables](#variables)
 - [Loading the configuration](#loading-the-configuration)
 - [Importing an OpenAPI description](#importing-an-openapi-description)
+- [Portable recipes](#portable-recipes)
 - [Where an API is available](#where-an-api-is-available)
 - [Making requests](#making-requests)
 - [Options for one chain: `with`](#options-for-one-chain-with)
@@ -354,7 +355,8 @@ together: they are applied in the order they are assigned, so assigning
 
 A file that is missing, empty, not valid YAML or not valid UTF-8 raises
 `ApiRecipes::RecipeFileError`, which names the file. A file called
-`something.recipe.yml` is refused: that name is kept for another purpose.
+`something.recipe.yml` is refused here: it is a [portable recipe](#portable-recipes)
+and goes in `recipes_paths`, where it is never evaluated with ERB.
 
 Files are evaluated with ERB before being parsed, so values can come from the
 environment:
@@ -523,6 +525,155 @@ segment (`/a//b`), because the gem joins two slashes into one.
 
 The command reads that one file, never uses the network and runs nothing of the
 description.
+
+## Portable recipes
+
+A portable recipe is a recipe made to be shared: one API in one file, and
+nothing but data. You install it with a command that shows what it does before
+it writes anything, and you load it with `recipes_paths`.
+
+    $ api_recipes install github
+    github 1.0.0
+      summary:       GitHub REST API, users, repositories, issues and pull requests
+      homepage:      https://docs.github.com/en/rest
+      from:          https://github.com/madAle/api_recipes-cookbook, commit 4126a6563bf5
+      address:       https://api.github.com
+      credential:    in the Authorization header
+      calls:         14, of which 2 are not GET:
+        POST  github.repos.issues(owner, repo).create                         /repos/:owner/:repo/issues
+        POST  github.repos.issues(owner, repo).comments(issue_number).create  /repos/:owner/:repo/issues/:issue_number/comments
+    Install github 1.0.0 in config/api_recipes? [y/N] y
+    github 1.0.0 is installed in config/api_recipes/github.recipe.yml
+
+```ruby
+ApiRecipes.configure do |config|
+  config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
+end
+
+ApiRecipes.github.users.show('octocat').run
+```
+
+The command writes two files in `config/api_recipes`: the recipe,
+`github.recipe.yml`, and `recipes.lock`, which records the version, the
+repository, the commit and the checksum of each installed recipe. Commit both
+to your repository: the application downloads nothing when it starts.
+
+Recipes come from the
+[cookbook](https://github.com/madAle/api_recipes-cookbook), a Git repository
+that takes contributions by pull request, or from any repository with the same
+layout.
+
+### Installing, updating and checking
+
+    $ api_recipes install github                      # the recipe at the head of the cookbook
+    $ api_recipes install github --version 1.0.0      # the one at the tag github-1.0.0
+    $ api_recipes install billing --from https://github.com/acme/api-recipes
+    $ api_recipes install ./billing.recipe.yml        # a file of yours
+    $ api_recipes update github
+    $ api_recipes check
+    $ api_recipes check recipes/billing.recipe.yml
+
+- `install NAME` reads `recipes/NAME.recipe.yml` from the repository. `--from`
+  names another repository: an `https://` address, without a user name or a
+  password. A private repository works when `git` already has the credentials
+  for its host. The `git` command of your machine does the download.
+- Before writing, `install` shows the address the requests go to, as the recipe
+  writes it and with the defaults of its variables, where the credential goes,
+  the variables to set and every call that is not a GET. It warns when the
+  credential would travel in the query string or over `http`. Only `y` or `yes`
+  installs; `--yes` installs without asking.
+- `--to DIR` installs in another folder. `update` and `check` take it as
+  `--dir DIR`.
+- `update NAME` takes the recipe that its repository has now, or the one of
+  `--version`, and shows what changes in the address, the credential and the
+  verbs before it replaces the file.
+- `check` compares the installed recipes with `recipes.lock`, as `configure`
+  does. `check FILE` says whether a file is a valid portable recipe: use it
+  while you write one.
+- `install FILE` installs a file of yours. It is also how you accept a change
+  you made by hand to an installed recipe: `api_recipes install
+  config/api_recipes/github.recipe.yml` writes its new checksum in the lock.
+  From then on the lock no longer names a repository for it, and `update`
+  refuses it.
+
+Exit codes: 0 when the work is done or there was nothing to do; 1 when a recipe
+is not valid, is not found, does not match the lock or the answer is no; 2 when
+the arguments are wrong, `git` fails or a file cannot be read or written.
+
+### What `configure` checks
+
+Every file of `recipes_paths` must be called `NAME.recipe.yml` and must be in
+the `recipes.lock` of its folder with the checksum it has now. A file that was
+changed after it was installed, or that was never installed, raises
+`ApiRecipes::ConfigurationError` and the previous configuration stays:
+
+    config/api_recipes/github.recipe.yml: was changed after it was installed: its checksum is not the one in recipes.lock. To accept the file as it is now, run `api_recipes install config/api_recipes/github.recipe.yml`
+
+A recipe never replaces an API: a name that `apis_configs`, `apis_files_paths`
+or another recipe already defines is an error. Everything else works as for any
+API: credentials, variables, `with`, and `api :github` in a class. To add a
+`verify_with`, which a recipe cannot carry, declare it in your code:
+
+```ruby
+class GithubClient
+  include ApiRecipes
+  api :github, verify_with: :expected_response?
+end
+```
+
+`ApiRecipes.github.definition.recipe` returns the `recipe` key of the file:
+its name, its version and the rest.
+
+### Writing a portable recipe
+
+A portable recipe is an ordinary description of one API, with the key `recipe`:
+
+```yaml
+billing:
+  recipe:
+    name: billing
+    version: 1.2.0                # of the recipe, not of the API
+    format: 1
+    summary: Billing API, invoices and customers
+    homepage: https://billing.example.com/docs
+  auth:
+    type: header
+    name: X-Api-Key
+  variables:
+    account:
+      description: the name of your account, before .billing.example.com
+    api_version:
+      default: '2026-10'
+  host: '{account}.billing.example.com'
+  base_url: 'api/{api_version}'
+  endpoints:
+    invoices:
+      endpoints:
+        show:
+          path: /:id
+```
+
+The rules, beyond those of every description:
+
+- One API per file. The name of the API, `recipe.name` and the name of the file
+  (`billing.recipe.yml`) are the same: lowercase letters, digits, `-` and `_`.
+- `recipe.name` and `recipe.version` are required. The version is text made of
+  digits, letters and dots: write `'1.2'` between quotes. `format` is the
+  version of the format, today 1; `summary` and `homepage` are optional.
+- `host` is required. A variable can be the whole host, or stand before fixed
+  text that starts with a dot: `{account}.billing.example.com` and
+  `s3.{region}.example.com` are accepted, `api.example.{tld}` is not.
+- No `verify_with`, no ERB, and no `<%` anywhere in the file.
+- Plain YAML: no anchors, aliases, tags or merge keys, no key given twice, keys
+  that are text (quote `'on'`, `'no'` and numbers), at most 1 MiB.
+- Every name and every value is visible text: no control characters, no line
+  breaks inside a value, no invisible or direction-changing characters.
+- A credential never goes in a recipe: `auth` says where it travels, and the
+  application assigns it.
+
+A repository of recipes keeps each one in `recipes/NAME.recipe.yml`. A
+published version is the tag `NAME-VERSION`, for example `billing-1.2.0`.
+`api_recipes routes billing.recipe.yml` lists the calls of a recipe.
 
 ## Where an API is available
 
@@ -1269,6 +1420,16 @@ What ApiRecipes does:
 - **`api_recipes import`** reads one local file, follows only the references
   inside it, never uses the network and runs nothing of the description. Text of
   the description cannot add keys to the recipe and cannot become ERB in it.
+- **Portable recipes** are data only. A file of `recipes_paths` is never
+  evaluated with ERB and is read as plain YAML, without anchors, aliases or
+  tags. It cannot carry `verify_with`, cannot take the name of an API you
+  already have, and cannot let a variable decide where its host ends. It is
+  loaded only if it matches the checksum in `recipes.lock`.
+- **`api_recipes install` and `update`** show where the requests and the
+  credential go, and which calls are not GET, before they write. They read one
+  file from the repository without checking it out, only over `https`, and run
+  `git` without a shell. An address with a user name or a password is refused,
+  so it cannot end up in `recipes.lock`.
 - **Logs, errors and `inspect`.** A log line and an error message of the gem
   never contain a credential, a header value, a body or a query string. Neither
   does the `inspect` or the `pp` of an API, an endpoint, a response, a
@@ -1296,6 +1457,10 @@ What stays with your application:
 - `response.original_response` is the raw http.rb response, and it gives access
   to the request that was sent, headers included. Do not log or serialize it.
 - ERB in a configuration file runs code. Load only files you trust.
+- Read what `api_recipes install` shows before you answer yes. ApiRecipes checks
+  the form of a recipe, not whose host it names. Commit the installed recipes
+  and `recipes.lock`, and review their changes as you review code: the lock
+  makes a change visible, it does not stop someone who can change both files.
 - Do not put a credential in the source of an application or in a file of the
   repository: read it from the place where your application keeps secrets.
 
@@ -1310,6 +1475,7 @@ Every protection has an example in [`spec/security`](spec/security); its
 | --- | --- |
 | `apis_files_paths` | Array of YAML files, evaluated with ERB |
 | `apis_configs` | Hash of API descriptions |
+| `recipes_paths` | Array of installed portable recipes (`NAME.recipe.yml`), read as data only and checked against `recipes.lock` |
 | `variables` | Hash of default variable values, as `{ api_name: { variable: value } }` |
 | `logger` | a Logger to use |
 | `log_to` | path or IO for the default logger (default: STDERR) |
