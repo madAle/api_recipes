@@ -163,7 +163,7 @@ describe ApiRecipes::Configuration do
     def expect_refused(path)
       expect do
         ApiRecipes.configure { |config| config.apis_files_paths = [path] }
-      end.to raise_error(ApiRecipes::RecipeFileError, /shared recipe files \(\.recipe\.yml\) are not supported by this version/)
+      end.to raise_error(ApiRecipes::RecipeFileError, /is a portable recipe \(\.recipe\.yml\): give it to recipes_paths/)
     end
 
     it 'refuses a shared recipe without evaluating its ERB' do

@@ -16,6 +16,7 @@ module ApiRecipes
       @sources = []
       @apis_configs = {}
       @apis_files_paths = []
+      @recipes_paths = []
       @variables = {}
       @print_urls = false
       @upgrade_warnings = true
@@ -31,6 +32,7 @@ module ApiRecipes
       @sources = @sources.dup
       @apis_configs = deep_copy(@apis_configs)
       @apis_files_paths = deep_copy(@apis_files_paths)
+      @recipes_paths = deep_copy(@recipes_paths)
       @variables = deep_copy(@variables)
     end
 
@@ -38,7 +40,8 @@ module ApiRecipes
     # values, tenant names): only the names of the apis are shown.
     def inspect
       "#<#{self.class.name} apis_configs: #{@apis_configs.keys.inspect} " \
-        "apis_files_paths: #{@apis_files_paths.size} print_urls: #{@print_urls.inspect}>"
+        "apis_files_paths: #{@apis_files_paths.size} recipes_paths: #{@recipes_paths.size} " \
+        "print_urls: #{@print_urls.inspect}>"
     end
 
     def to_s = inspect
@@ -52,13 +55,22 @@ module ApiRecipes
       record_source(:hash)
     end
 
-    attr_reader :apis_configs, :apis_files_paths
+    attr_reader :apis_configs, :apis_files_paths, :recipes_paths
 
     def apis_files_paths=(paths = [])
       raise ArgumentError, 'apis_files_paths must be an Array' unless paths.is_a? Array
 
       @apis_files_paths = paths
       record_source(:files)
+    end
+
+    # Portable recipes: files written by someone else, installed with the
+    # api_recipes command. They are read as data only, never with ERB, and each
+    # must match the recipes.lock of its folder.
+    def recipes_paths=(paths = [])
+      raise ArgumentError, 'recipes_paths must be an Array' unless paths.is_a? Array
+
+      @recipes_paths = paths
     end
 
     def variables=(variables)
@@ -68,7 +80,9 @@ module ApiRecipes
     end
 
     # Applies the sources in the order they were assigned and returns the
-    # apis as { name => description }. A later source replaces whole apis.
+    # apis as { name => description }. A later source replaces whole apis. The
+    # recipes of recipes_paths come last and replace nothing: a name that
+    # another source defines is an error.
     def load
       apis = {}
       @sources.each do |kind|
@@ -78,7 +92,7 @@ module ApiRecipes
           @apis_files_paths.each { |path| merge_file(apis, path) }
         end
       end
-      apis
+      apis.merge(Internals::Recipe.load_all(@recipes_paths, taken: apis.keys))
     end
 
     # Reads one file with the rules of apis_files_paths and returns the apis as
@@ -139,7 +153,7 @@ module ApiRecipes
 
       full_path = File.expand_path(path)
       if shared_recipe?(full_path)
-        raise RecipeFileError.new(path, 'shared recipe files (.recipe.yml) are not supported by this version')
+        raise RecipeFileError.new(path, 'is a portable recipe (.recipe.yml): give it to recipes_paths, which reads it as data only')
       end
 
       text = read_text(path, full_path)
