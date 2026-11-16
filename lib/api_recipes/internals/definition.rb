@@ -18,8 +18,18 @@ module ApiRecipes
         end
       end
 
-      # A definition holds the values of default_headers. Marshal and YAML
-      # would write them, so they are refused; JSON gets to_h, which hides them.
+      # header over the ones of base that have its name, whatever the case:
+      # the name of a header has no case.
+      def self.over_headers(base, added)
+        return base if added.empty?
+        return added if base.empty?
+
+        base.reject { |name, _| added.any? { |other, _| other.casecmp?(name) } }.merge(added).freeze
+      end
+
+      # A definition holds the values of default_headers and default_params.
+      # Marshal and YAML would write them, so they are refused; JSON gets to_h,
+      # which hides them.
       module Serialization
         def marshal_dump = raise(TypeError, "an #{self.class} cannot be serialized: use to_h")
 
@@ -34,12 +44,12 @@ module ApiRecipes
         include Serialization
 
         attr_reader :name, :protocol, :host, :port, :base_url, :timeout, :on_bad_code, :mime_type,
-                    :verify_with, :default_headers, :auth, :variables, :recipe, :endpoints,
-                    :host_template, :base_url_template, :header_templates
+                    :verify_with, :default_headers, :default_params, :auth, :variables, :recipe, :endpoints,
+                    :host_template, :base_url_template, :header_templates, :param_templates
 
         def initialize(name:, protocol:, host:, port:, base_url:, timeout:, on_bad_code:, mime_type:, verify_with:,
-                       default_headers:, auth:, variables:, recipe:, host_template:, base_url_template:,
-                       header_templates:, children:)
+                       default_headers:, default_params:, auth:, variables:, recipe:, host_template:,
+                       base_url_template:, header_templates:, param_templates:, children:)
           @name = name
           @protocol = protocol
           @host = host
@@ -50,12 +60,14 @@ module ApiRecipes
           @mime_type = mime_type
           @verify_with = verify_with
           @default_headers = default_headers
+          @default_params = default_params
           @auth = auth
           @variables = variables
           @recipe = recipe
           @host_template = host_template
           @base_url_template = base_url_template
           @header_templates = header_templates
+          @param_templates = param_templates
           @endpoints = children.call(self).freeze
           freeze
         end
@@ -72,13 +84,14 @@ module ApiRecipes
           {
             name: name, protocol: protocol, host: host, port: port, base_url: base_url, timeout: timeout,
             on_bad_code: on_bad_code, mime_type: mime_type, verify_with: verify_with,
-            default_headers: default_headers.transform_values { '[FILTERED]' }, auth: Definition.plain(auth),
+            default_headers: default_headers.transform_values { '[FILTERED]' },
+            default_params: default_params.transform_values { '[FILTERED]' }, auth: Definition.plain(auth),
             variables: Definition.plain(variables), recipe: Definition.plain(recipe),
             endpoints: endpoints.transform_values(&:to_h)
           }
         end
 
-        # Never shows header values or the tree below.
+        # Never shows the values of headers and parameters, or the tree below.
         def inspect
           list = endpoints.empty? ? '' : " endpoints: #{endpoints.keys.join(', ')}"
           "#<#{self.class} #{name} #{protocol}://#{host}#{port && ":#{port}"}#{list}>"
@@ -111,8 +124,15 @@ module ApiRecipes
       class Endpoint
         include Serialization
 
-        attr_reader :name, :full_name, :path, :full_path, :path_params, :verb, :ok_code, :timeout, :on_bad_code,
-                    :mime_type, :verify_with, :parent, :endpoints, :template
+        NONE = {}.freeze
+
+        # default_headers, default_params: the ones written on this endpoint
+        # and on the endpoints above it, the nearest winning; those of the api
+        # are not among them. header_templates, param_templates: the same,
+        # ready to be filled.
+        attr_reader :name, :full_name, :path, :full_path, :path_params, :path_variables, :verb, :ok_code, :timeout,
+                    :on_bad_code, :mime_type, :verify_with, :default_headers, :default_params, :header_templates,
+                    :param_templates, :parent, :endpoints, :template
 
         def initialize(name:, parent:, own:, template:, children:)
           @name = name
@@ -126,6 +146,7 @@ module ApiRecipes
           @path = (own[:path] || name.to_s).dup.freeze
           @full_path = join_path(parent_path, template.to_s)
           @path_params = template.param_names
+          @path_variables = template.variable_names
           @verb = own[:verb] || :get
           @route = own[:route].nil? ? true : own[:route]
           @ok_code = own[:ok_code]
@@ -133,6 +154,12 @@ module ApiRecipes
           @on_bad_code = own[:on_bad_code] || api.on_bad_code
           @mime_type = own[:mime_type].nil? ? api.mime_type : own[:mime_type]
           @verify_with = own(:verify_with) || api.verify_with
+          above = parent.is_a?(Endpoint) ? parent : nil
+          @header_templates = Definition.over_headers(above ? above.header_templates : NONE,
+                                                      templates(own[:default_headers], :header))
+          @param_templates = (above ? above.param_templates : NONE).merge(templates(own[:default_params], :param)).freeze
+          @default_headers = @header_templates.transform_values(&:to_s).freeze
+          @default_params = @param_templates.transform_values(&:to_s).freeze
           @endpoints = children.call(self).freeze
           freeze
         end
@@ -161,13 +188,22 @@ module ApiRecipes
         def to_h
           {
             name: name, full_name: full_name, path: path, full_path: full_path,
-            path_params: path_params.dup, verb: verb, route: route?, ok_code: Definition.plain(ok_code),
+            path_params: path_params.dup, path_variables: path_variables.dup, verb: verb, route: route?,
+            ok_code: Definition.plain(ok_code),
             timeout: timeout, on_bad_code: on_bad_code, mime_type: mime_type, verify_with: verify_with,
+            default_headers: default_headers.transform_values { '[FILTERED]' },
+            default_params: default_params.transform_values { '[FILTERED]' },
             endpoints: endpoints.transform_values(&:to_h)
           }
         end
 
         private
+
+        def templates(texts, position)
+          return NONE if texts.nil? || texts.empty?
+
+          texts.transform_values { |text| Template.new(text, position) }.freeze
+        end
 
         def join_path(parent_path, own_path)
           joined = own_path.empty? ? parent_path : "#{parent_path}/#{own_path}"

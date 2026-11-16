@@ -26,7 +26,7 @@ module ApiRecipes
       count = @options ? args.size - 1 : args.size
       raise PathParamsMismatch.new(definition.full_path, params, args.first(count)) unless count == params.size
 
-      own = definition.template.expand(args, endpoint: definition.full_name, &UPGRADE_WARNING)
+      own = definition.template.expand(args, endpoint: definition.full_name, context: context, &UPGRADE_WARNING)
       if own.empty?
         # A root endpoint with an empty path is the address of the api, which
         # ends with a slash; a nested one is the address of its parent.

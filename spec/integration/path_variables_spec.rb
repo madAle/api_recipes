@@ -1,0 +1,96 @@
+require 'spec_helper'
+
+describe 'Variables in the path of an endpoint' do
+  let(:shop) do
+    { host: 'shop.example.test', base_url: 'v1',
+      variables: { account: {}, zone: { default: 'eu' } },
+      endpoints: {
+        orders: { path: '/accounts/{account}/orders', endpoints: { show: { path: '/:id' } } },
+        zones: { path: '/{zone}/zones' },
+        plain: nil
+      } }
+  end
+
+  before do
+    stub_request(:any, /shop\.example\.test/).to_return(status: 200, body: '{}', headers: { 'Content-Type' => 'application/json' })
+    configure_test_apis(shop: shop)
+  end
+
+  it 'fills the variable with the value of the nearest level' do
+    ApiRecipes.shop.variables = { account: 'acme' }
+    expect(ApiRecipes.shop.orders.url.to_s).to eq('https://shop.example.test/v1/accounts/acme/orders')
+    expect(ApiRecipes.shop.orders.show(7).url.to_s).to eq('https://shop.example.test/v1/accounts/acme/orders/7')
+    expect(ApiRecipes.shop.with(variables: { account: 'other' }).orders.show(7).url.to_s)
+      .to eq('https://shop.example.test/v1/accounts/other/orders/7')
+  end
+
+  it 'uses the default of the variable' do
+    expect(ApiRecipes.shop.zones.url.to_s).to eq('https://shop.example.test/v1/eu/zones')
+  end
+
+  it 'sends the request to the filled path' do
+    ApiRecipes.shop.variables = { account: 'acme' }
+    ApiRecipes.shop.orders.show(7).run
+    expect(a_request(:get, 'https://shop.example.test/v1/accounts/acme/orders/7')).to have_been_made
+  end
+
+  it 'reads the value of a class and of an object' do
+    klass = Class.new do
+      include ApiRecipes
+      api :shop, variables: { account: 'class' }
+    end
+    client = klass.new
+    expect(client.shop.orders.url.to_s).to eq('https://shop.example.test/v1/accounts/class/orders')
+    client.shop.variables = { account: 'object' }
+    expect(client.shop.orders.url.to_s).to eq('https://shop.example.test/v1/accounts/object/orders')
+  end
+
+  it 'encodes the value as one segment, so that it cannot reach another endpoint' do
+    api = ApiRecipes.shop.with(variables: { account: '../../admin' })
+    expect(api.orders.url.to_s).to eq('https://shop.example.test/v1/accounts/..%2F..%2Fadmin/orders')
+    expect { ApiRecipes.shop.with(variables: { account: '..' }).orders }
+      .to raise_error(ApiRecipes::InvalidVariable, /account/)
+  end
+
+  it 'raises MissingVariable when the chain reaches the endpoint, and not before' do
+    expect(ApiRecipes.shop.plain.url.to_s).to eq('https://shop.example.test/v1/plain')
+    expect { ApiRecipes.shop.orders }.to raise_error(ApiRecipes::MissingVariable, /account/)
+  end
+
+  it 'shows the path as it is written in the definition and in the routes' do
+    definition = ApiRecipes.shop.definition
+    expect(definition.endpoints[:orders].endpoints[:show].full_path).to eq('/v1/accounts/{account}/orders/:id')
+    expect(definition.routes.map(&:url)).to include('https://shop.example.test/v1/accounts/{account}/orders/:id')
+    expect(definition.endpoints[:orders].to_h[:path_variables]).to eq(%i[account])
+    expect(definition.endpoints[:plain].to_h[:path_variables]).to eq([])
+  end
+
+  it 'refuses a variable that the api does not declare, in every endpoint' do
+    broken = { host: 'h.test', variables: { account: {} },
+               endpoints: { orders: { path: '/{acount}/orders', endpoints: { show: { path: '/{zone}/:id' } } } } }
+    expect { configure_test_apis(broken: broken) }
+      .to raise_error(ApiRecipes::ConfigurationError) { |e|
+        expect(e.errors).to eq(["broken.endpoints.orders.path: unknown variable 'acount'",
+                                "broken.endpoints.orders.endpoints.show.path: unknown variable 'zone'"])
+      }
+  end
+
+  it 'accepts the variables of the api in an endpoint that a class adds, and refuses the others when it is declared' do
+    klass = Class.new do
+      include ApiRecipes
+      api :shop, endpoints: { users: { path: '/{zone}/users' } }
+    end
+    expect(klass.shop.users.url.to_s).to eq('https://shop.example.test/v1/eu/users')
+    expect do
+      Class.new do
+        include ApiRecipes
+        api :shop, endpoints: { users: { path: '/{tenant}/users' } }
+      end
+    end.to raise_error(ApiRecipes::ConfigurationError, /endpoints\.users\.path: unknown variable 'tenant'/)
+  end
+
+  it 'keeps a brace written with a backslash as text' do
+    configure_test_apis(lit: { host: 'h.test', endpoints: { odd: { path: '/a/\{b}' } } })
+    expect(ApiRecipes.lit.odd.url.to_s).to eq('https://h.test/a/%7Bb%7D')
+  end
+end

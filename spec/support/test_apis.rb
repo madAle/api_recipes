@@ -66,7 +66,7 @@ module TestApis
     path = endpoint_path.reduce(context.base_path) do |parent_path, name|
       node = node.endpoints.fetch(name)
       own = remaining.shift(node.path_params.size)
-      [parent_path, node.template.expand(own, endpoint: node.full_name)].join('/').squeeze('/')
+      [parent_path, node.template.expand(own, endpoint: node.full_name, context: context)].join('/').squeeze('/')
     end
     ApiRecipes::Internals::Request.new(context: context, definition: node, path: path, options: options)
   end

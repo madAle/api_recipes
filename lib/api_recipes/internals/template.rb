@@ -3,12 +3,24 @@
 module ApiRecipes
   module Internals
     # A string with {name} variables, used for the host, the base_url and the
-    # header values of an api. How a value is checked depends on the position.
+    # values of the headers and of the query parameters sent with every request.
+    # How a value is checked depends on the position.
     class Template
       VARIABLE = /\{([A-Za-z_]\w*)\}/
       HOST_VALUE = /\A[A-Za-z0-9._-]+\z/
       CONTROL = /[\x00-\x1F\x7F]/
-      POSITIONS = %i[host base_url header].freeze
+      POSITIONS = %i[host base_url header param].freeze
+
+      # value as one segment of a path: what base_url and the path of an
+      # endpoint do with the value of a variable.
+      def self.segment(value, name, api)
+        text = value.to_s
+        if value.nil? || text.empty? || text == '.' || text == '..'
+          raise InvalidVariable.new(api, name, 'must not be blank, "." or ".."')
+        end
+
+        PathTemplate.escape(text)
+      end
 
       def initialize(string, position)
         raise ArgumentError, "unknown template position '#{position}'" unless POSITIONS.include?(position)
@@ -56,9 +68,9 @@ module ApiRecipes
         when :host
           reject(api, name, 'must contain only letters, digits, dots, hyphens and underscores') unless HOST_VALUE.match?(bytes)
           text
-        when :base_url
-          reject(api, name, 'must not be blank, "." or ".."') if value.nil? || text.empty? || text == '.' || text == '..'
-          PathTemplate.escape(text)
+        when :base_url then self.class.segment(value, name, api)
+        # http.rb encodes the name and the value of a query parameter.
+        when :param then text
         else
           reject(api, name, 'must not contain control characters') if CONTROL.match?(bytes)
           text

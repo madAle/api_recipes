@@ -28,8 +28,8 @@ module ApiRecipes
       end
 
       # A new context with these options on top of the current ones, as the
-      # compiler resolved them. default_headers and variables add up, the other
-      # options replace. A key given with nil: no credential for authorization
+      # compiler resolved them. default_headers, default_params and variables
+      # add up, the other options replace. A key given with nil: no credential for authorization
       # and basic_auth, no override for the others.
       def with(options)
         resolved = Compiler.resolve_options(options, :with_api)
@@ -90,13 +90,20 @@ module ApiRecipes
         "/#{template.expand(variables, api: @definition.name)}".squeeze('/')
       end
 
-      # The default headers with their variables filled, then the ones given to with.
-      def headers(chain: levels)
-        values = variables(chain: chain)
-        templates = @definition.header_templates
-        added = @overrides[:default_headers] || {}
-        templates = templates.merge(added.transform_values { |text| Template.new(text, :header) }) unless added.empty?
-        templates.transform_values { |template| template.expand(values, api: @definition.name) }
+      # The default headers with their variables filled: those of the api,
+      # then the ones given to with, then the ones of endpoint and of the
+      # endpoints above it. A header replaces the one with its name, whatever
+      # the case.
+      def headers(chain: levels, endpoint: nil)
+        filled(layers(:header, @definition.header_templates, @overrides[:default_headers],
+                      endpoint && endpoint.header_templates), chain)
+      end
+
+      # The default query parameters with their variables filled, as
+      # { name => text }, in the same order as the headers.
+      def params(chain: levels, endpoint: nil)
+        filled(layers(:param, @definition.param_templates, @overrides[:default_params],
+                      endpoint && endpoint.param_templates), chain)
       end
 
       # The nearest credential: the one given to with, then the levels from the
@@ -153,6 +160,31 @@ module ApiRecipes
       def encode_with(_coder) = raise(TypeError, 'an ApiRecipes::Internals::Context cannot be serialized')
 
       private
+
+      NONE = {}.freeze
+
+      # The templates of the api, of with and of the endpoint, the later over
+      # the earlier.
+      def layers(position, api, given, endpoint)
+        templates = api
+        unless given.nil? || given.empty?
+          templates = over(position, templates, given.transform_values { |text| Template.new(text, position) })
+        end
+        templates = over(position, templates, endpoint) unless endpoint.nil? || endpoint.empty?
+        templates
+      end
+
+      def over(position, base, added)
+        position == :header ? Definition.over_headers(base, added) : base.merge(added)
+      end
+
+      # The variables are read only when there is something to fill.
+      def filled(templates, chain)
+        return NONE if templates.empty?
+
+        values = variables(chain: chain)
+        templates.transform_values { |template| template.expand(values, api: @definition.name) }
+      end
 
       # The tree a level reads: the global one for the global level, else the owner's.
       def definition_for(kind) = kind == :global ? @global_definition : @definition
@@ -226,7 +258,7 @@ module ApiRecipes
           merged[:credential] = Credential.from(key, value)
         elsif value.nil?
           merged.delete(key)
-        elsif %i[default_headers variables].include?(key)
+        elsif %i[default_headers default_params variables].include?(key)
           merged[key] = (merged[key] || {}).merge(value).freeze
         else
           merged[key] = value

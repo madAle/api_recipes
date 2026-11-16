@@ -7,10 +7,11 @@ module ApiRecipes
     # all the problems found are reported together in one ConfigurationError.
     class Compiler
       API_KEYS = %i[protocol host port base_url timeout on_bad_code mime_type verify_with default_headers
-                    endpoints auth variables recipe].freeze
+                    default_params endpoints auth variables recipe].freeze
       WITH_API_KEYS = %i[protocol host port base_url timeout on_bad_code mime_type verify_with default_headers
-                         variables authorization basic_auth].freeze
-      ENDPOINT_KEYS = %i[path verb route ok_code timeout on_bad_code mime_type verify_with endpoints].freeze
+                         default_params variables authorization basic_auth].freeze
+      ENDPOINT_KEYS = %i[path verb route ok_code timeout on_bad_code mime_type verify_with default_headers
+                         default_params endpoints].freeze
       WITH_ENDPOINT_KEYS = %i[timeout on_bad_code ok_code mime_type verify_with].freeze
       SCOPE_KEYS = { api: API_KEYS, with_api: WITH_API_KEYS, endpoint: ENDPOINT_KEYS,
                      with_endpoint: WITH_ENDPOINT_KEYS }.freeze
@@ -25,6 +26,12 @@ module ApiRecipes
       VARIABLE_TOKEN = /(\{[A-Za-z_]\w*\})/
       CONTROL = /[\x00-\x1F\x7F]/
       IGNORED_KEY = /\Ax[-_]/
+
+      # What the endpoints of one api are checked against. variables: the
+      # names a path, a header or a parameter may use, nil when they are not
+      # known. credential_param: the query parameter that carries the
+      # credential, which default_params cannot set.
+      Names = Data.define(:variables, :credential_param)
 
       class << self
         def compile(name, config)
@@ -308,10 +315,16 @@ module ApiRecipes
         attrs[:verify_with] = option(:verify_with, config, location, :api, declared)
         attrs[:default_headers] = option(:default_headers, config, location, :api, declared)
         attrs[:auth] = option(:auth, config, location, :api, declared)
+        names = Names.new(variables: declared, credential_param: credential_param(attrs[:auth]))
+        attrs[:default_params] = option(:default_params, config, location, :api, names)
         attrs[:variables] = option(:variables, config, location, :api, declared)
         attrs[:recipe] = option(:recipe, config, location, :api, declared)
-        attrs[:endpoints] = endpoints_attrs(config[:endpoints], join(location, :endpoints))
+        attrs[:endpoints] = endpoints_attrs(config[:endpoints], join(location, :endpoints), names)
         attrs
+      end
+
+      def credential_param(auth)
+        auth && auth[:type] == :query ? auth[:name] : nil
       end
 
       def validate_with(options, scope)
@@ -327,7 +340,7 @@ module ApiRecipes
 
       # ---- endpoints ----
 
-      def endpoints_attrs(value, location)
+      def endpoints_attrs(value, location, names)
         return {} if value.nil?
 
         unless value.is_a?(Hash)
@@ -344,20 +357,25 @@ module ApiRecipes
             add(node_location, 'must be a Hash or empty')
             next
           end
-          out[name.to_sym] = endpoint_attrs(name.to_sym, options, node_location)
+          out[name.to_sym] = endpoint_attrs(name.to_sym, options, node_location, names)
         end
       end
 
-      def endpoint_attrs(name, options, location)
+      def endpoint_attrs(name, options, location, names)
         check_keys(options, ENDPOINT_KEYS, location)
+        declared = names.variables
         own = {}
         (ENDPOINT_KEYS - %i[endpoints]).each do |key|
-          value = option(key, options, location, :endpoint, nil)
+          value = option(key, options, location, :endpoint, key == :default_params ? names : declared)
           own[key] = value unless value.nil?
         end
         path = own[:path] || name.to_s
         template = parse_path(path, join(location, :path), options.key?(:path) && !options[:path].nil?)
-        { own: own, template: template, children: endpoints_attrs(options[:endpoints], join(location, :endpoints)) }
+        unless declared.nil?
+          (template.variable_names - declared).each { |variable| add(join(location, :path), "unknown variable #{shown(variable)}") }
+        end
+        { own: own, template: template,
+          children: endpoints_attrs(options[:endpoints], join(location, :endpoints), names) }
       end
 
       def parse_path(path, location, written)
@@ -387,6 +405,7 @@ module ApiRecipes
         when :mime_type then mime_type(value, where)
         when :verify_with then method_name(value, where)
         when :default_headers then headers(value, where, declared)
+        when :default_params then params(value, where, declared)
         when :auth then auth(value, where)
         when :variables then scope == :with_api ? variable_values(value, where) : variable_declarations(value, where)
         when :recipe then recipe(value, where)
@@ -514,6 +533,34 @@ module ApiRecipes
           text = header.to_s
           add(header_where, 'must not contain control characters') if CONTROL.match?(text.gsub(Template::VARIABLE, ''))
           check_variables(text, header_where, declared)
+          out[name.dup.freeze] = text.dup.freeze
+        end.freeze
+      end
+
+      # The query parameters sent with every request, as { name => text }.
+      # names: a Names, or nil in a with, where nothing is known.
+      def params(value, where, names)
+        unless value.is_a?(Hash)
+          add(where, 'must be a Hash')
+          return nil
+        end
+        value.each_with_object({}) do |(name, param), out|
+          name = name.to_s
+          if name.empty?
+            add(where, 'a parameter name must not be empty')
+            next
+          end
+          param_where = join(where, name)
+          add(param_where, 'the name must not contain control characters') if CONTROL.match?(name)
+          if names && name == names.credential_param
+            add(param_where, 'is the parameter of the credential (auth.name): it cannot be set here')
+          end
+          unless param.is_a?(String) || param.is_a?(Symbol) || param.is_a?(Numeric) || param == true || param == false
+            add(param_where, 'must be a string, a number or a boolean')
+            next
+          end
+          text = param.to_s
+          check_variables(text, param_where, names&.variables)
           out[name.dup.freeze] = text.dup.freeze
         end.freeze
       end
@@ -646,6 +693,7 @@ module ApiRecipes
         host = attrs[:host] || 'localhost'
         base_url = attrs[:base_url]
         headers = attrs[:default_headers] || {}
+        params = attrs[:default_params] || {}
         Definition::Api.new(
           name: name,
           protocol: attrs[:protocol] || 'https',
@@ -657,12 +705,14 @@ module ApiRecipes
           mime_type: attrs[:mime_type],
           verify_with: attrs[:verify_with],
           default_headers: headers.freeze,
+          default_params: params.freeze,
           auth: attrs[:auth],
           variables: (attrs[:variables] || {}).freeze,
           recipe: attrs[:recipe],
           host_template: Template.new(host, :host),
           base_url_template: base_url && Template.new(base_url, :base_url),
           header_templates: headers.transform_values { |text| Template.new(text, :header) }.freeze,
+          param_templates: params.transform_values { |text| Template.new(text, :param) }.freeze,
           children: ->(api) { build_endpoints(attrs[:endpoints], api) }
         )
       end
