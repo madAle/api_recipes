@@ -84,8 +84,19 @@ module ApiRecipes
           if version && err.include?("couldn't find remote ref")
             raise NotFound, "version #{version} of #{name} is not in #{@address}: there is no tag #{name}-#{version}"
           end
-          hint = err.include?('not allowed') ? " (git may use only #{PROTOCOLS.first} here: check url.*.insteadOf in your git configuration)" : ''
-          raise Failure, "git could not read #{@address}: #{reason(err)}#{hint}"
+          raise Failure, "git could not read #{@address}: #{reason(err)}#{hint(err)}"
+        end
+
+        # What to do about a failure that has a known cause, or nothing.
+        def hint(err)
+          if err.include?('not allowed')
+            " (git may use only #{PROTOCOLS.first} here: check url.*.insteadOf in your git configuration)"
+          elsif err.include?('could not read Username') || err.include?('Authentication failed')
+            ' (a private repository needs credentials that git already has for its host, such as a credential ' \
+              'helper: the command never asks for them)'
+          else
+            ''
+          end
         end
 
         # Only the protocols of PROTOCOLS, whatever the configuration of git

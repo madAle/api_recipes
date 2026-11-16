@@ -204,6 +204,20 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
         .to raise_error(described_class::Failure, 'git failed (init): it gave no reason')
     end
 
+    it 'comes with what to do when the repository asks for credentials that git does not have, or refuses them' do
+      done = instance_double(Process::Status, success?: true)
+      ["fatal: could not read Username for 'https://example.test': terminal prompts disabled\n",
+       "fatal: Authentication failed for 'https://example.test/r/'\n"].each do |said|
+        allow(Open3).to receive(:capture3) do |_environment, _git, *arguments|
+          arguments.include?('fetch') ? ['', said.b, failed] : ['', '', done]
+        end
+        expect { described_class.new('https://example.test/r').fetch('shop') }
+          .to raise_error(described_class::Failure, "git could not read https://example.test/r: #{said.strip} " \
+                                                    '(a private repository needs credentials that git already has for ' \
+                                                    'its host, such as a credential helper: the command never asks for them)')
+      end
+    end
+
     it 'must name a commit' do
       done = instance_double(Process::Status, success?: true)
       allow(Open3).to receive(:capture3).and_return(['not a commit', '', done])
