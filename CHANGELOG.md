@@ -1,4 +1,4 @@
-## Unreleased
+## Version 3.0.0.beta3
 
 The third pre-release of 3.0 adds portable recipes: recipes written by others,
 which are data only, and the commands that install them.
@@ -62,8 +62,8 @@ found is used. In the previous pre-releases and in 2.x the value came from the
 API. An option is written once, at the highest place where it holds; `ok_code`
 is read only on its endpoint.
 
-It also adds three ways of describing an API with less text. They are part of
-what a recipe can hold:
+It also adds ways of describing an API with less text. They are part of what a
+recipe can hold:
 
 - A `{name}` in the `path` of an endpoint is a variable of the API, as in
   `host` and `base_url`: `/accounts/{account}/orders`. Its value is encoded as
@@ -77,8 +77,9 @@ what a recipe can hold:
   `params:` of a request win on the same name. With `auth.type: query` the
   parameter of the credential cannot be set there. `with` takes
   `default_params` too. `definition` hides the values in `to_h` and `inspect`.
-- `default_headers` and `default_params` can be written on an endpoint: they
-  hold for that endpoint and for the ones below it, on top of those of the API.
+- `default_headers` and `default_params` can be written on an endpoint, on top
+  of those of the API. An endpoint looks for them up the tree, one name at a
+  time, as for its other options.
 - The name of a header is compared as HTTP does, without its case and with
   `_` read as `-`, wherever a nearer level replaces it: an endpoint, `with` and
   the options of a class. `with(default_headers: { 'accept' => ... })` replaces
