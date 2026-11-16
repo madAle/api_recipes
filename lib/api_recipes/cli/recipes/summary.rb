@@ -34,7 +34,7 @@ module ApiRecipes
           rows << ['with defaults', filled_address] unless filled_address == address
           rows << ['credential', credential]
           [title] + rows.reject { |_, text| text.nil? }.flat_map { |label, text| rows_for(label, [text]) } +
-            rows_for('headers', headers) + rows_for('variables', variables) + calls
+            rows_for('headers', headers) + rows_for('params', params) + rows_for('variables', variables) + calls
         end
 
         # What whoever installs the recipe should know before using it.
@@ -73,8 +73,12 @@ module ApiRecipes
           end
         end
 
-        # The headers sent with every request, as "Name: value".
-        def headers = @api.default_headers.map { |name, value| "#{name}: #{shown(value, 100)}" }
+        # The headers sent with every request, as "Name: value", then those
+        # that an endpoint adds, with the endpoint.
+        def headers = sent_always(@api.default_headers, :default_headers)
+
+        # The query parameters sent with every request, in the same form.
+        def params = sent_always(@api.default_params, :default_params)
 
         # Each call that is not a GET, as [verb, call, path].
         def changing_calls
@@ -89,24 +93,42 @@ module ApiRecipes
 
         # What this recipe changes in the recipe installed now, whose summary
         # is previous (nil when it is not a valid recipe): the address, the
-        # credential, the headers and the verbs.
+        # credential, the headers, the parameters and the verbs.
         def changes_from(previous)
           return ['  it replaces a file that is not a valid recipe'] if previous.nil?
 
           found = [%w[address address], ['with defaults', 'filled_address'], %w[credential credential],
-                   %w[headers headers]].filter_map do |label, reader|
+                   %w[headers headers], %w[params params]].filter_map do |label, reader|
             before = previous.public_send(reader)
             after = public_send(reader)
             "    #{label}: #{changed(before)} -> #{changed(after)}" unless before == after
           end
           found.concat(verb_changes(previous.verbs))
-          found << '    no change in the address, the credential, the headers or the verbs' if found.empty?
+          found << '    no change in the address, the credential, the headers, the parameters or the verbs' if found.empty?
           ["  changes from #{shown(previous.title, 100)}:"] + found
         end
 
         private
 
         def shown(value, limit = 200) = self.class.shown(value, limit)
+
+        # of_api: the headers or the parameters of the api. key: the option
+        # that gives them to an endpoint, for itself and for those below it.
+        def sent_always(of_api, key)
+          found = of_api.map { |name, value| "#{name}: #{shown(value, 100)}" }
+          each_endpoint do |node|
+            where = "#{shown(node.full_name, 100)}#{' and below' unless node.endpoints.empty?}"
+            (node.own(key) || {}).each { |name, value| found << "#{shown(name, 100)}: #{shown(value, 100)} (#{where})" }
+          end
+          found
+        end
+
+        def each_endpoint(level = @api.endpoints, &block)
+          level.each_value do |node|
+            block.call(node)
+            each_endpoint(node.endpoints, &block)
+          end
+        end
 
         def changed(value)
           value = value.empty? ? 'none' : value.join(', ') if value.is_a?(Array)

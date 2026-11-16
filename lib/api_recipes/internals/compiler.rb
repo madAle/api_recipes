@@ -11,7 +11,7 @@ module ApiRecipes
       WITH_API_KEYS = %i[protocol host port base_url timeout on_bad_code mime_type verify_with default_headers
                          default_params variables authorization basic_auth].freeze
       ENDPOINT_KEYS = %i[path verb route ok_code timeout on_bad_code mime_type verify_with default_headers
-                         default_params endpoints].freeze
+                         default_params resource endpoints].freeze
       WITH_ENDPOINT_KEYS = %i[timeout on_bad_code ok_code mime_type verify_with].freeze
       SCOPE_KEYS = { api: API_KEYS, with_api: WITH_API_KEYS, endpoint: ENDPOINT_KEYS,
                      with_endpoint: WITH_ENDPOINT_KEYS }.freeze
@@ -26,6 +26,16 @@ module ApiRecipes
       VARIABLE_TOKEN = /(\{[A-Za-z_]\w*\})/
       CONTROL = /[\x00-\x1F\x7F]/
       IGNORED_KEY = /\Ax[-_]/
+
+      # The endpoints that `resource` adds under an endpoint, which is itself
+      # the list: the names the importer gives to the same operations.
+      RESOURCE = {
+        show: { path: '/:id' }.freeze,
+        create: { path: '', verb: :post }.freeze,
+        update: { path: '/:id', verb: :patch }.freeze,
+        replace: { path: '/:id', verb: :put }.freeze,
+        delete: { path: '/:id', verb: :delete }.freeze
+      }.freeze
 
       # What the endpoints of one api are checked against. variables: the
       # names a path, a header or a parameter may use, nil when they are not
@@ -97,6 +107,20 @@ module ApiRecipes
         # A deep copy whose Hashes, Arrays and Strings are frozen: input kept
         # for a later compilation cannot be changed by the caller.
         def frozen_copy(value) = new.frozen_copy(value)
+
+        # The names of the endpoints that a value of `resource` adds, in the
+        # order of RESOURCE; nil when the value is not valid.
+        def resource_names(value)
+          case value
+          when nil, false, 'no' then []
+          when true, 'yes' then RESOURCE.keys
+          when Array
+            names = value.map { |name| name.is_a?(String) || name.is_a?(Symbol) ? name.to_sym : nil }
+            return nil if names.empty? || !names.all? { |name| RESOURCE.key?(name) }
+
+            RESOURCE.keys & names
+          end
+        end
 
         private
 
@@ -365,17 +389,38 @@ module ApiRecipes
         check_keys(options, ENDPOINT_KEYS, location)
         declared = names.variables
         own = {}
-        (ENDPOINT_KEYS - %i[endpoints]).each do |key|
+        (ENDPOINT_KEYS - %i[endpoints resource]).each do |key|
           value = option(key, options, location, :endpoint, key == :default_params ? names : declared)
           own[key] = value unless value.nil?
         end
+        children = with_resource(options[:resource], options[:endpoints], join(location, :resource))
         path = own[:path] || name.to_s
         template = parse_path(path, join(location, :path), options.key?(:path) && !options[:path].nil?)
         unless declared.nil?
           (template.variable_names - declared).each { |variable| add(join(location, :path), "unknown variable #{shown(variable)}") }
         end
         { own: own, template: template,
-          children: endpoints_attrs(options[:endpoints], join(location, :endpoints), names) }
+          children: endpoints_attrs(children, join(location, :endpoints), names) }
+      end
+
+      # The endpoints written under an endpoint, with those its `resource`
+      # adds before them. An endpoint written with the name of a generated
+      # one completes it: its options win, a nil one keeps the generated value.
+      def with_resource(value, written, where)
+        added = self.class.resource_names(value)
+        if added.nil?
+          add(where, "must be true, false or a list of: #{RESOURCE.keys.join(', ')}")
+          return written
+        end
+        return written if added.empty? || !(written.nil? || written.is_a?(Hash))
+
+        written ||= {}
+        generated = added.to_h do |name|
+          given = written[name]
+          given = RESOURCE[name].merge(given) { |_key, usual, own| own.nil? ? usual : own } if given.is_a?(Hash)
+          [name, given.nil? ? RESOURCE[name] : given]
+        end
+        generated.merge(written.reject { |name, _| generated.key?(name) })
       end
 
       def parse_path(path, location, written)

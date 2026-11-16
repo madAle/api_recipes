@@ -124,7 +124,49 @@ RSpec.describe ApiRecipes::CLI::Recipes::Summary do
     expect(described_class.shown("a #{[0xA0].pack('U')}  b")).to eq('a b')
   end
 
+  it 'shows the parameters sent with every request, one per line, as they are written' do
+    lines = summary('shop', 'variables' => { 'api_version' => { 'default' => '2026-10' } },
+                            'default_params' => { 'api-version' => '{api_version}', 'per_page' => 100 }).lines
+    expect(lines).to include('  params:        api-version: {api_version}', '                 per_page: 100')
+    expect(summary.lines.grep(/params/)).to eq([])
+  end
+
+  it 'shows the headers and the parameters that an endpoint adds, and where they apply' do
+    endpoints = { 'orders' => { 'default_params' => { 'state' => 'open' }, 'endpoints' => {
+      'show' => { 'path' => '/:id', 'default_headers' => { 'X-HTTP-Method-Override' => 'DELETE' } }
+    } } }
+    lines = summary('shop', 'default_headers' => { 'Accept' => 'application/json' }, 'endpoints' => endpoints).lines
+    expect(lines).to include('  headers:       Accept: application/json',
+                             '                 X-HTTP-Method-Override: DELETE (shop.orders.show)',
+                             '  params:        state: open (shop.orders and below)')
+  end
+
+  it 'lists the calls that resource adds and that are not GET' do
+    lines = summary('shop', 'endpoints' => { 'orders' => { 'resource' => true } }).lines
+    expect(lines.last(5)).to eq(['  calls:         6, of which 4 are not GET:',
+                                 '    POST    shop.orders.create       /orders',
+                                 '    PATCH   shop.orders.update(id)   /orders/:id',
+                                 '    PUT     shop.orders.replace(id)  /orders/:id',
+                                 '    DELETE  shop.orders.delete(id)   /orders/:id'])
+  end
+
+  it 'shows a path with its variable as it is written' do
+    endpoints = { 'orders' => { 'path' => '/accounts/{account}/orders', 'verb' => 'post' } }
+    lines = summary('shop', 'variables' => { 'account' => nil }, 'endpoints' => endpoints).lines
+    expect(lines.last).to eq('    POST  shop.orders  /accounts/{account}/orders')
+  end
+
   describe '#changes_from' do
+    it 'says what changes in the parameters, on the api and on an endpoint' do
+      before = summary
+      after = summary('shop', 'default_params' => { 'debug' => 1 })
+      expect(after.changes_from(before)).to eq(['  changes from shop 1.0.0:', '    params: none -> debug: 1'])
+      endpoints = { 'orders' => { 'default_params' => { 'all' => true } } }
+      nested = summary('shop', 'endpoints' => endpoints)
+      expect(nested.changes_from(summary('shop', 'endpoints' => { 'orders' => nil })))
+        .to eq(['  changes from shop 1.0.0:', '    params: none -> all: true (shop.orders)'])
+    end
+
     it 'says what changes in the headers' do
       before = summary
       after = summary('shop', 'default_headers' => { 'X-HTTP-Method-Override' => 'DELETE' })
@@ -134,7 +176,7 @@ RSpec.describe ApiRecipes::CLI::Recipes::Summary do
 
     it 'says so when nothing of what it shows changes' do
       expect(summary.changes_from(summary('shop', 'timeout' => 9)))
-        .to eq(['  changes from shop 1.0.0:', '    no change in the address, the credential, the headers or the verbs'])
+        .to eq(['  changes from shop 1.0.0:', '    no change in the address, the credential, the headers, the parameters or the verbs'])
     end
   end
 end

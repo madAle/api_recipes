@@ -123,6 +123,29 @@ RSpec.describe ApiRecipes::Internals::Recipe do
       } } }))).to eq(['the path of an endpoint, with the paths above it, has at most 4000 characters'])
     end
 
+    it 'counts the endpoints that resource adds, and measures their paths' do
+      many = (1..1_700).to_h { |number| ["e#{number}", { 'resource' => true }] }
+      expect(problems(recipe_text('shop', 'endpoints' => many))).to eq(['has 10200 endpoints: a recipe has at most 10000'])
+      expect(problems(recipe_text('shop', 'endpoints' => many.first(1_666).to_h))).to eq([])
+      some = (1..3_400).to_h { |number| ["e#{number}", { 'resource' => %w[show create], 'endpoints' => { 'show' => nil, 'more' => nil } }] }
+      expect(problems(recipe_text('shop', 'endpoints' => some))).to eq(['has 13600 endpoints: a recipe has at most 10000'])
+      long = { 'a' => { 'path' => "/#{'a' * 1998}", 'endpoints' => { 'b' => { 'path' => "/#{'b' * 1996}", 'resource' => 'yes' } } } }
+      expect(problems(recipe_text('shop', 'endpoints' => long)))
+        .to eq(['the path of an endpoint, with the paths above it, has at most 4000 characters'])
+      long['a']['endpoints']['b']['resource'] = %w[create]
+      expect(problems(recipe_text('shop', 'endpoints' => long))).to eq([])
+    end
+
+    it 'accepts variables in a path, default_params and resource, which are only data' do
+      text = recipe_text('shop', 'variables' => { 'account' => nil, 'api_version' => { 'default' => '2026-10' } },
+                                 'default_params' => { 'api-version' => '{api_version}' },
+                                 'endpoints' => { 'orders' => { 'path' => '/accounts/{account}/orders', 'resource' => true,
+                                                                'default_headers' => { 'Accept' => 'application/json' } } })
+      recipe = described_class.parse(text, 'the recipe')
+      expect(recipe.definition.routes.map(&:call)).to include('shop.orders.delete(id)')
+      expect(recipe.definition.endpoints[:orders].full_path).to eq('/accounts/{account}/orders')
+    end
+
     it 'answers at once to a recipe made to cost much more than its size' do
       children = (1..4000).to_h { |number| ["c#{number}", nil] }
       text = recipe_text('shop', 'endpoints' => { 'top' => { 'path' => "/#{'p' * 1900}", 'endpoints' => {

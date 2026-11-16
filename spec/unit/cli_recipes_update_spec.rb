@@ -62,7 +62,7 @@ RSpec.describe 'api_recipes update' do
     installed
     @repository.publish('shop', recipe_text('shop', 'timeout' => 9, recipe: { 'version' => '1.0.1' }))
     _code, out, = update('--yes')
-    expect(out).to include("  changes from shop 1.0.0:\n    no change in the address, the credential, the headers or the verbs\n")
+    expect(out).to include("  changes from shop 1.0.0:\n    no change in the address, the credential, the headers, the parameters or the verbs\n")
   end
 
   it 'does nothing when the repository has the same recipe' do

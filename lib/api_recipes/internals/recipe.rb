@@ -158,8 +158,9 @@ module ApiRecipes
         end
       end
 
-      # The endpoints are counted, and the path of each is measured with the
-      # paths above it: every endpoint keeps its whole path.
+      # The endpoints are counted, those that `resource` adds among them, and
+      # the path of each is measured with the paths above it: every endpoint
+      # keeps its whole path.
       def size_problems(options)
         count = 0
         longest = 0
@@ -171,7 +172,14 @@ module ApiRecipes
             own = child.is_a?(Hash) && child['path'].is_a?(String) ? child['path'] : name
             length = above + own.length + 1
             longest = length if length > longest
-            walk.call(child['endpoints'], length) if child.is_a?(Hash)
+            next unless child.is_a?(Hash)
+
+            written = child['endpoints']
+            generated(child['resource'], written).each do |path|
+              count += 1
+              longest = [longest, length + path.length + 1].max
+            end
+            walk.call(written, length)
           end
         end
         walk.call(options['endpoints'], options['base_url'].to_s.length)
@@ -179,6 +187,14 @@ module ApiRecipes
         problems << "has #{count} endpoints: a recipe has at most #{MAX_ENDPOINTS}" if count > MAX_ENDPOINTS
         problems << "the path of an endpoint, with the paths above it, has at most #{MAX_PATH} characters" if longest > MAX_PATH
         problems
+      end
+
+      # The paths of the endpoints that a value of `resource` adds and that
+      # are not written by hand as well.
+      def generated(resource, written)
+        names = Compiler.resource_names(resource) || []
+        names -= written.keys.map { |name| name.to_s.to_sym } if written.is_a?(Hash)
+        names.map { |name| Compiler::RESOURCE[name][:path] }
       end
 
       def one_api(data)

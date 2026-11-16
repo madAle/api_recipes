@@ -242,7 +242,7 @@ RSpec.describe 'api_recipes install' do
       File.write(destination, recipe_text('shop', 'timeout' => 10))
       _code, out, = from_repository
       expect(out).to include("  #{destination} was changed after it was installed: those changes will be lost\n",
-                             "    no change in the address, the credential, the headers or the verbs\n")
+                             "    no change in the address, the credential, the headers, the parameters or the verbs\n")
     end
 
     it 'says when it replaces a file that is not a valid recipe' do
