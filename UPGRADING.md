@@ -283,11 +283,14 @@ rescue ApiRecipes::ResponseCodeNotAsExpected => e
 end
 ```
 
-### Nested endpoints inherit `verify_with`
+### Nested endpoints take the options of the endpoint above
 
-A nested endpoint written without options, under a parent with `verify_with`, did
-not inherit the verification in 2.x. Now every nested endpoint does, unless it
-sets its own.
+In 2.x an endpoint took `timeout`, `on_bad_code` and `mime_type` from the API,
+whatever the endpoint that contained it said, and one written without options
+did not take `verify_with` from its parent. Now an endpoint that does not set
+one of these four options takes it from the nearest endpoint above it that
+does, then from the API. Look at the endpoints that have one of them and also
+have endpoints below: those now follow it. `ok_code` stays on its endpoint.
 
 ### `apis_configs` after the files
 

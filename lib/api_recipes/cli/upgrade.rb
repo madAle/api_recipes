@@ -47,7 +47,7 @@ module ApiRecipes
         'the response body read from the message of a verify_with error: read it from error.response',
         'a block passed to run whose return value is used: it is now the Response',
         'apis_configs assigned after the files to discard them: do not assign the files',
-        'a nested endpoint without options under a parent with verify_with: it now inherits the verification',
+        'timeout, on_bad_code, mime_type or verify_with on an endpoint that has endpoints below it: they now take them too, unless they set their own',
         'an endpoint called with, definition, authorization, basic_auth or variables (on an api), or run, url, with or definition (on an endpoint): reach it with []; the warning at configuration reports it',
         'fill with private setters, or code that relies on swallowed errors: make the setters public, handle the errors',
         'follow: true together with a credential: the credential no longer follows to another host',

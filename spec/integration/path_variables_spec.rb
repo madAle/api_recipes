@@ -98,6 +98,30 @@ describe 'Variables in the path of an endpoint' do
     expect(kept.with(timeout: 5).with(ok_code: 200).show(7).url.to_s).to eq('https://shop.example.test/v1/accounts/alice/orders/7')
   end
 
+  # A server answers many users at once: the value of one must never reach
+  # the request of another.
+  it 'keeps the value of each thread apart, given to with or to an object of its own' do
+    client = Class.new do
+      include ApiRecipes
+      api :shop
+    end
+    seen = Queue.new
+    threads = %w[alice bob carol].map do |user|
+      Thread.new do
+        50.times do
+          seen << [user, ApiRecipes.shop.with(variables: { account: user }).orders.show(1).run.uri.path]
+          own = client.new
+          own.shop.variables = { account: user }
+          seen << [user, own.shop.orders.show(1).run.uri.path]
+        end
+      end
+    end
+    threads.each(&:join)
+    results = Array.new(seen.size) { seen.pop }
+    expect(results.size).to eq(300)
+    expect(results).to all(satisfy { |user, path| path == "/v1/accounts/#{user}/orders/1" })
+  end
+
   it 'keeps a brace written with a backslash as text' do
     configure_test_apis(lit: { host: 'h.test', endpoints: { odd: { path: '/a/\{b}' } } })
     expect(ApiRecipes.lit.odd.url.to_s).to eq('https://h.test/a/%7Bb%7D')

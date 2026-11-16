@@ -130,6 +130,11 @@ module ApiRecipes
         include Serialization
 
         NONE = {}.freeze
+        # The options an endpoint takes from the nearest endpoint above it
+        # that has them, then from the api. default_headers and default_params
+        # go down too, and add up. path, verb, route, ok_code and resource
+        # describe one endpoint.
+        INHERITED = %i[timeout on_bad_code mime_type verify_with].freeze
 
         # header_templates, param_templates: the headers and the parameters
         # written on this endpoint and on the endpoints above it, the nearest
@@ -155,11 +160,13 @@ module ApiRecipes
           @verb = own[:verb] || :get
           @route = own[:route].nil? ? true : own[:route]
           @ok_code = own[:ok_code]
-          @timeout = own[:timeout].nil? ? api.timeout : own[:timeout]
-          @on_bad_code = own[:on_bad_code] || api.on_bad_code
-          @mime_type = own[:mime_type].nil? ? api.mime_type : own[:mime_type]
-          @verify_with = own(:verify_with) || api.verify_with
           above = parent.is_a?(Endpoint) ? parent : nil
+          # Kept on each endpoint: reading them never climbs the tree.
+          @taken = INHERITED.to_h { |key| [key, own[key].nil? && above ? above.own(key) : own[key]] }.freeze
+          @timeout = @taken[:timeout].nil? ? api.timeout : @taken[:timeout]
+          @on_bad_code = @taken[:on_bad_code] || api.on_bad_code
+          @mime_type = @taken[:mime_type].nil? ? api.mime_type : @taken[:mime_type]
+          @verify_with = @taken[:verify_with] || api.verify_with
           @header_templates = Definition.over_headers(above ? above.header_templates : NONE,
                                                       templates(own[:default_headers], :header))
           params = templates(own[:default_params], :param)
@@ -180,14 +187,10 @@ module ApiRecipes
 
         def default_params = @param_templates.transform_values(&:to_s).freeze
 
-        # The value written on this endpoint, or nil. For :verify_with, the
-        # value of the nearest endpoint, this one included, that has one.
-        def own(key)
-          value = @own[key]
-          return value unless value.nil? && key == :verify_with && parent.is_a?(Endpoint)
-
-          parent.own(key)
-        end
+        # The value written on this endpoint, or nil. For the options of
+        # INHERITED, the value of the nearest endpoint, this one included, that
+        # has one: the api is not looked at.
+        def own(key) = @taken.key?(key) ? @taken[key] : @own[key]
 
         def inspect
           "#<#{self.class} #{full_name} #{verb.to_s.upcase} #{full_path}>"

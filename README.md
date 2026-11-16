@@ -144,6 +144,13 @@ github:
         repositories:                   # GET  /search/repositories
 ```
 
+An option is written once, at the highest place where it holds. An endpoint
+that does not have `timeout`, `on_bad_code`, `mime_type` or `verify_with` takes
+it from the nearest endpoint above it that has it, then from the API, then from
+the default. `default_headers` and `default_params` go down the same way, and
+add up. `path`, `verb`, `route`, `ok_code` and `resource` describe one endpoint
+and stay on it.
+
 The configuration is checked when it is loaded. A mistake, such as an unknown
 option, a verb that does not exist or a negative timeout, raises
 `ApiRecipes::ConfigurationError`. Its message lists every problem at once, so you
@@ -203,8 +210,9 @@ ApiRecipes.github.repos('rails', 'rails').contents('lib/rails.rb').url.to_s
 A `*name` placeholder works only at the start of a segment, and a `:` that must
 stay in the path is written `\:`.
 
-A `{name}` in a path is a [variable](#variables): a value that holds for the
-whole client and is set once, where a `:name` changes at every call.
+A `{name}` in a path is a [variable](#variables): a value given once, to a
+chain, an object, a class or the whole application, where a `:name` is an
+argument of each call.
 
 ### Endpoints that only group others
 
@@ -428,6 +436,25 @@ end
 
 ApiRecipes never reads the environment for you: if the shop comes from an
 environment variable, read it in your code and pass it in.
+
+When the value changes with each request, as in a server where it depends on
+the user who is signed in, give it to `with` or to an object that lives as long
+as the request. Both belong to the code that created them, so two requests
+served at the same time, in two threads, never see the value of each other:
+
+```ruby
+class OrdersController < ApplicationController
+  def index
+    shop = ApiRecipes.shopify.with(variables: { shop: current_user.shop, location: current_user.location_id },
+                                   authorization: current_user.shopify_token)
+    render json: shop.inventory.run.data
+  end
+end
+```
+
+A value assigned on `ApiRecipes.shopify` or on a class is shared by the whole
+process, in every thread, until it is assigned again: keep those two for what
+is the same for every user, and do not assign them while a request is served.
 
 A value is checked for the place where it ends up. In a `host` it can contain
 only letters, digits, dots, hyphens and underscores. In a `base_url` and in a
@@ -1166,8 +1193,9 @@ end
 ```
 
 The method can be private. It is looked up on the caller, so `verify_with` is
-meant for APIs used from a class or an instance. A nested endpoint that has no
-`verify_with` of its own uses the one of its parent.
+meant for APIs used from a class or an instance. An endpoint that has no
+`verify_with` of its own uses the one of the nearest endpoint above it, then
+the one of the API.
 
 ## Handling errors
 
@@ -1681,18 +1709,19 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `verb` | `get` | HTTP verb |
 | `route` | `yes` | `no` makes the endpoint a group that cannot be called |
 | `ok_code` | any 2xx | the status, or the list of statuses, accepted as a success |
-| `timeout` | the API value | seconds allowed for the whole request |
-| `on_bad_code` | the API value | `raise` or `ignore` |
-| `mime_type` | the API value | content type used by `response.data` |
-| `verify_with` | the API or parent value | method that decides whether a response is a success |
+| `timeout` | the value above | seconds allowed for the whole request |
+| `on_bad_code` | the value above | `raise` or `ignore` |
+| `mime_type` | the value above | content type used by `response.data` |
+| `verify_with` | the value above | method that decides whether a response is a success |
 | `default_headers` | none | headers added to those of the API, for this endpoint and the ones below it |
 | `default_params` | none | query parameters added to those of the API, for this endpoint and the ones below it |
 | `resource` | `no` | `yes` adds the endpoints `show`, `create`, `update`, `replace` and `delete`; a list adds only the ones it names |
 | `endpoints` | none | nested endpoints |
 
-An endpoint takes `timeout`, `on_bad_code` and `mime_type` from the API, not from
-the endpoint that contains it. `verify_with`, `default_headers` and
-`default_params` go down to the endpoints below it.
+"The value above" is the one of the nearest endpoint above that has the
+option, then the one of the API. `default_headers` and `default_params` go down
+to the endpoints below in the same way. `ok_code` does not: the status that
+means success belongs to one operation, as its verb does.
 
 ## Good to know
 

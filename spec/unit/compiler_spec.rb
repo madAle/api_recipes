@@ -25,9 +25,9 @@ describe ApiRecipes::Internals::Compiler do
     expect(show.full_path).to eq('/v1/users/:id')
     expect(show.path_params).to eq(%i[id])
     expect(show.verb).to eq(:post)
-    expect([users.timeout, show.timeout]).to eq([1, 10])   # timeout comes from the api, not from the parent
+    expect([users.timeout, show.timeout, api.endpoints[:users].endpoints[:list].timeout]).to eq([1, 1, 1])
     expect(users.own(:timeout)).to eq(1)
-    expect(show.own(:timeout)).to be_nil
+    expect(show.own(:timeout)).to eq(1)   # the value of the nearest endpoint that has one
     expect(show.verify_with).to eq(:check)
     expect(users.endpoints[:list].route?).to eq(true)
     expect([api, api.endpoints, users, show]).to all(be_frozen)
@@ -141,12 +141,28 @@ describe ApiRecipes::Internals::Compiler do
     expect(api.endpoints[:a].endpoints[:c].path).to eq('c')
   end
 
-  it 'takes on_bad_code and mime_type from the api, not from the parent endpoint' do
+  it 'takes on_bad_code and mime_type from the parent endpoint, and from the api when no endpoint above has them' do
     api = compile(on_bad_code: 'ignore', mime_type: 'text/plain',
-                  endpoints: { a: { on_bad_code: 'raise', mime_type: 'application/json', endpoints: { b: nil } } })
+                  endpoints: { a: { on_bad_code: 'raise', mime_type: 'application/json', endpoints: { b: nil } },
+                               c: { endpoints: { d: nil } } })
     expect([api.endpoints[:a].on_bad_code, api.endpoints[:a].mime_type]).to eq(['raise', 'application/json'])
     expect([api.endpoints[:a].endpoints[:b].on_bad_code, api.endpoints[:a].endpoints[:b].mime_type])
+      .to eq(['raise', 'application/json'])
+    expect([api.endpoints[:c].endpoints[:d].on_bad_code, api.endpoints[:c].endpoints[:d].mime_type])
       .to eq(['ignore', 'text/plain'])
+  end
+
+  it 'keeps ok_code on the endpoint that has it' do
+    api = compile(endpoints: { a: { ok_code: 201, endpoints: { b: nil } } })
+    expect([api.endpoints[:a].ok_code, api.endpoints[:a].endpoints[:b].ok_code]).to eq([201, nil])
+  end
+
+  it 'takes an option from an endpoint many levels above' do
+    deep = (1..100).reduce(nil) { |below, _| { endpoints: { n: below } } }
+    api = compile(endpoints: { top: deep.merge(timeout: 8, verify_with: :check) })
+    leaf = api.endpoints[:top]
+    leaf = leaf.endpoints[:n] while leaf.endpoints[:n]
+    expect([leaf.timeout, leaf.own(:verify_with)]).to eq([8, :check])
   end
 
   it 'does not echo header values in its messages' do
