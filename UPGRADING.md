@@ -283,14 +283,15 @@ rescue ApiRecipes::ResponseCodeNotAsExpected => e
 end
 ```
 
-### Nested endpoints take the options of the endpoint above
+### An endpoint looks for its options up the tree
 
 In 2.x an endpoint took `timeout`, `on_bad_code` and `mime_type` from the API,
 whatever the endpoint that contained it said, and one written without options
 did not take `verify_with` from its parent. Now an endpoint that does not set
-one of these four options takes it from the nearest endpoint above it that
-does, then from the API. Look at the endpoints that have one of them and also
-have endpoints below: those now follow it. `ok_code` stays on its endpoint.
+one of these four options looks for it in the endpoints that contain it, from
+the nearest, then in the API, and takes the first value it finds. Look at the
+endpoints that set one of them and also contain other endpoints: those now
+find it there. `ok_code` is read only on its endpoint.
 
 ### `apis_configs` after the files
 

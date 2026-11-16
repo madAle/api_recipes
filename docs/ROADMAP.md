@@ -123,8 +123,9 @@ recipe can hold.
 - `resource: true`, which adds the endpoints of a REST resource (`show`,
   `create`, `update`, `replace`, `delete`) under an endpoint.
 - An option is written once, at the highest place where it holds: an endpoint
-  takes `timeout`, `on_bad_code`, `mime_type` and `verify_with` from the nearest
-  endpoint above it, then from the API.
+  that does not set `timeout`, `on_bad_code`, `mime_type` or `verify_with`
+  looks for it up the tree, in the endpoints that contain it and then in the
+  API.
 
 ## Later
 

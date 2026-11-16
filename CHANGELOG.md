@@ -34,11 +34,12 @@ which are data only, and the commands that install them.
   `git` already has for its host. When the repository asks for credentials that
   `git` does not have, the message says so.
 
-**An endpoint now takes `timeout`, `on_bad_code` and `mime_type` from the
-nearest endpoint above it that has them**, as it already did for `verify_with`,
-and from the API only when none has. In the previous pre-releases and in 2.x
-it took them from the API. An option is written once, at the highest place
-where it holds; `ok_code` stays on its endpoint.
+**An endpoint that does not set `timeout`, `on_bad_code` or `mime_type` now
+looks for it up the tree**, as it already did for `verify_with`: in the
+endpoints that contain it, from the nearest, then in the API. The first value
+found is used. In the previous pre-releases and in 2.x the value came from the
+API. An option is written once, at the highest place where it holds; `ok_code`
+is read only on its endpoint.
 
 It also adds three ways of describing an API with less text. They are part of
 what a recipe can hold:

@@ -130,10 +130,11 @@ module ApiRecipes
         include Serialization
 
         NONE = {}.freeze
-        # The options an endpoint takes from the nearest endpoint above it
-        # that has them, then from the api. default_headers and default_params
-        # go down too, and add up. path, verb, route, ok_code and resource
-        # describe one endpoint.
+        # The options an endpoint that does not set them looks for up the
+        # tree: in the endpoints that contain it, from the nearest, then in the
+        # api; the first value found is used. default_headers and
+        # default_params are looked for in the same way, one name at a time.
+        # path, verb, route, ok_code and resource are read only on their endpoint.
         INHERITED = %i[timeout on_bad_code mime_type verify_with].freeze
 
         # header_templates, param_templates: the headers and the parameters
@@ -161,7 +162,8 @@ module ApiRecipes
           @route = own[:route].nil? ? true : own[:route]
           @ok_code = own[:ok_code]
           above = parent.is_a?(Endpoint) ? parent : nil
-          # Kept on each endpoint: reading them never climbs the tree.
+          # The result of the search, kept on each endpoint: the parent has
+          # already made its own, so a request does not walk the tree again.
           @taken = INHERITED.to_h { |key| [key, own[key].nil? && above ? above.own(key) : own[key]] }.freeze
           @timeout = @taken[:timeout].nil? ? api.timeout : @taken[:timeout]
           @on_bad_code = @taken[:on_bad_code] || api.on_bad_code
@@ -188,8 +190,8 @@ module ApiRecipes
         def default_params = @param_templates.transform_values(&:to_s).freeze
 
         # The value written on this endpoint, or nil. For the options of
-        # INHERITED, the value of the nearest endpoint, this one included, that
-        # has one: the api is not looked at.
+        # INHERITED, the first value found from this endpoint up to the one
+        # under the api: the api is not looked at.
         def own(key) = @taken.key?(key) ? @taken[key] : @own[key]
 
         def inspect

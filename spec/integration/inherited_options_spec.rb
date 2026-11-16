@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe 'Options that go down the tree' do
+describe 'Options an endpoint looks for up the tree' do
   let(:json) { { 'Content-Type' => 'application/json' } }
 
   # things > part > leaf, and other next to things.
@@ -17,31 +17,31 @@ describe 'Options that go down the tree' do
   describe 'timeout' do
     before { respond('/things/part/leaf') }
 
-    it 'comes from the endpoint above' do
+    it 'is found in the endpoint that contains it' do
       svc = configure({}, { timeout: 7 })
       expect_timeout(7)
       svc.things.part.leaf.run
     end
 
-    it 'comes from the nearest endpoint above that has one' do
+    it 'is found further up when the endpoint that contains it sets none, before the api' do
       svc = configure({ timeout: 9 }, {}, {}, timeout: 20)
       expect_timeout(9)
       svc.things.part.leaf.run
     end
 
-    it 'is the one of the endpoint itself when it has one' do
+    it 'stops at the first value found, starting from the endpoint itself' do
       svc = configure({ timeout: 9 }, { timeout: 7 }, { timeout: 2 })
       expect_timeout(2)
       svc.things.part.leaf.run
     end
 
-    it 'is the one of the api when no endpoint above has one' do
+    it 'is the one of the api when no endpoint on the way up sets one' do
       svc = configure({}, {}, {}, timeout: 20)
       expect_timeout(20)
       svc.things.part.leaf.run
     end
 
-    it 'does not reach an endpoint that is not below' do
+    it 'is the default when nothing on the way up sets one: an endpoint next to it is not looked at' do
       svc = configure({ timeout: 9 })
       respond('/other')
       expect_timeout(3)
@@ -72,7 +72,7 @@ describe 'Options that go down the tree' do
   end
 
   describe 'on_bad_code' do
-    it 'comes from the nearest endpoint above that has one' do
+    it 'is found up the tree' do
       svc = configure({ on_bad_code: 'ignore' })
       respond('/things/part/leaf', status: 500)
       expect(svc.things.part.leaf.run.code).to eq(500)
@@ -84,7 +84,7 @@ describe 'Options that go down the tree' do
       expect { svc.things.part.leaf.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
     end
 
-    it 'does not reach an endpoint that is not below' do
+    it 'is not taken from an endpoint next to it' do
       svc = configure({ on_bad_code: 'ignore' })
       respond('/other', status: 500)
       expect { svc.other.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
@@ -92,7 +92,7 @@ describe 'Options that go down the tree' do
   end
 
   describe 'mime_type' do
-    it 'comes from the nearest endpoint above that has one' do
+    it 'is found up the tree, before the api' do
       svc = configure({ mime_type: 'application/json' }, {}, {}, mime_type: 'text/plain')
       respond('/things/part/leaf', body: '{"a":1}', headers: { 'Content-Type' => 'text/plain' })
       expect(svc.things.part.leaf.run.data).to eq('a' => 1)
@@ -106,7 +106,7 @@ describe 'Options that go down the tree' do
   end
 
   describe 'verify_with' do
-    it 'comes from the nearest endpoint above that has one' do
+    it 'is found up the tree' do
       configure({ verify_with: :refuse })
       klass = Class.new do
         include ApiRecipes
@@ -120,7 +120,7 @@ describe 'Options that go down the tree' do
   end
 
   describe 'what describes one endpoint' do
-    it 'keeps ok_code on the endpoint that has it: the one below accepts every 2xx' do
+    it 'reads ok_code only on its endpoint: one that sets none accepts every 2xx' do
       svc = configure({ ok_code: 201 })
       respond('/things/part/leaf', status: 200)
       respond('/things', status: 200)
@@ -128,13 +128,13 @@ describe 'Options that go down the tree' do
       expect { svc.things.run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
     end
 
-    it 'keeps verb and route on the endpoint that has them' do
+    it 'reads verb and route only on their endpoint' do
       svc = configure({ verb: :post, route: false })
       expect(svc.things.part.leaf.definition.to_h.values_at(:verb, :route)).to eq([:get, true])
     end
   end
 
-  it 'reaches the endpoints that resource adds' do
+  it 'is the same for the endpoints that resource adds' do
     configure_test_apis(svc: { host: 'api.example.test',
                                endpoints: { orders: { resource: true, timeout: 12, on_bad_code: 'ignore' } } })
     stub_request(:delete, "#{base_url}/orders/7").to_return(status: 500)
@@ -142,7 +142,7 @@ describe 'Options that go down the tree' do
     expect(ApiRecipes.svc.orders.delete(7).run.code).to eq(500)
   end
 
-  it 'shows in definition the values an endpoint takes from above' do
+  it 'shows in definition the values an endpoint found up the tree' do
     svc = configure({ timeout: 9, on_bad_code: 'ignore', mime_type: 'text/csv', verify_with: :check })
     leaf = svc.things.part.leaf.definition
     expect(leaf.to_h.values_at(:timeout, :on_bad_code, :mime_type, :verify_with)).to eq([9, 'ignore', 'text/csv', :check])

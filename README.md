@@ -145,11 +145,14 @@ github:
 ```
 
 An option is written once, at the highest place where it holds. An endpoint
-that does not have `timeout`, `on_bad_code`, `mime_type` or `verify_with` takes
-it from the nearest endpoint above it that has it, then from the API, then from
-the default. `default_headers` and `default_params` go down the same way, and
-add up. `path`, `verb`, `route`, `ok_code` and `resource` describe one endpoint
-and stay on it.
+that does not set `timeout`, `on_bad_code`, `mime_type` or `verify_with` looks
+for it up the tree: in the endpoint that contains it, then in the one that
+contains that one, up to the API. The first that sets the option gives the
+value, and when none does the default applies. An endpoint that is not on that
+way up, such as one next to it, is never looked at. `default_headers` and
+`default_params` are looked for in the same way, one name at a time.
+`path`, `verb`, `route`, `ok_code` and `resource` describe one endpoint and are
+read only there.
 
 The configuration is checked when it is loaded. A mistake, such as an unknown
 option, a verb that does not exist or a negative timeout, raises
@@ -1194,8 +1197,7 @@ end
 
 The method can be private. It is looked up on the caller, so `verify_with` is
 meant for APIs used from a class or an instance. An endpoint that has no
-`verify_with` of its own uses the one of the nearest endpoint above it, then
-the one of the API.
+`verify_with` of its own looks for one up the tree, as for the other options.
 
 ## Handling errors
 
@@ -1709,19 +1711,21 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `verb` | `get` | HTTP verb |
 | `route` | `yes` | `no` makes the endpoint a group that cannot be called |
 | `ok_code` | any 2xx | the status, or the list of statuses, accepted as a success |
-| `timeout` | the value above | seconds allowed for the whole request |
-| `on_bad_code` | the value above | `raise` or `ignore` |
-| `mime_type` | the value above | content type used by `response.data` |
-| `verify_with` | the value above | method that decides whether a response is a success |
+| `timeout` | looked for up the tree | seconds allowed for the whole request |
+| `on_bad_code` | looked for up the tree | `raise` or `ignore` |
+| `mime_type` | looked for up the tree | content type used by `response.data` |
+| `verify_with` | looked for up the tree | method that decides whether a response is a success |
 | `default_headers` | none | headers added to those of the API, for this endpoint and the ones below it |
 | `default_params` | none | query parameters added to those of the API, for this endpoint and the ones below it |
 | `resource` | `no` | `yes` adds the endpoints `show`, `create`, `update`, `replace` and `delete`; a list adds only the ones it names |
 | `endpoints` | none | nested endpoints |
 
-"The value above" is the one of the nearest endpoint above that has the
-option, then the one of the API. `default_headers` and `default_params` go down
-to the endpoints below in the same way. `ok_code` does not: the status that
-means success belongs to one operation, as its verb does.
+"Looked for up the tree" means: in the endpoints that contain this one, from
+the nearest, then in the API; the first that sets the option gives the value,
+and the default of the API table applies when none does. `default_headers` and
+`default_params` are looked for in the same way, one name at a time. `ok_code`
+is read only on its endpoint: the status that means success belongs to one
+operation, as its verb does.
 
 ## Good to know
 
