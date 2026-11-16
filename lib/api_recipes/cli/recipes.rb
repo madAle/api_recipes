@@ -103,7 +103,11 @@ module ApiRecipes
           raise Stop.new(2, '--version must be made of digits, letters and dots')
         end
 
-        found = Git.new(address).fetch(name, version)
+        # Said before git connects: the address may come from the lock, and
+        # git or ssh may ask something on the terminal for it.
+        @out.puts "reading #{name} from #{address}"
+        @out.flush if @out.respond_to?(:flush)
+        found = Git.new(address, ask: terminal?).fetch(name, version)
         recipe = Recipe.parse(found.text, "#{name} in #{address}", file_name: "#{name}#{Recipe::SUFFIX}")
         if version && recipe.version != version
           raise Stop.new(1, "the tag #{name}-#{version} of #{address} holds version #{recipe.version}: nothing was written")
@@ -111,6 +115,9 @@ module ApiRecipes
 
         Incoming.new(recipe: recipe, source: address, commit: found.commit, origin: "#{address}, commit #{found.commit[0, 12]}")
       end
+
+      # Whether someone is there to answer: the input of the command is a terminal.
+      def terminal? = @input.respond_to?(:tty?) && @input.tty? ? true : false
 
       def local(path, version, from)
         raise Stop.new(2, '--from and --version go with the name of a recipe, not with a file') if version || from

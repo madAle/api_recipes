@@ -716,9 +716,10 @@ layout.
     $ api_recipes check recipes/billing.recipe.yml
 
 - `install NAME` reads `recipes/NAME.recipe.yml` from the repository. `--from`
-  names another repository: an `https://` address, without a user name or a
-  password. The `git` command of your machine does the download. For a
-  repository of your company, see [private repositories](#private-repositories).
+  names another repository: an `https://` address without a user name or a
+  password, or an `ssh` address. The `git` command of your machine does the
+  download, and the command says which address it reads before `git` connects.
+  For a repository of your company, see [private repositories](#private-repositories).
 - Before writing, `install` shows the address the requests go to, as the recipe
   writes it and with the defaults of its variables, where the credential goes,
   the headers and the parameters sent with every request, with the endpoint
@@ -765,11 +766,18 @@ your keys, your agent and your `~/.ssh/config`. A deploy key that can read the
 repository is enough, also in CI. When `ssh` has to ask something, such as the
 passphrase of a key or whether to trust a host it meets for the first time, it
 asks on the terminal; without a terminal it fails, and the message says what
-is missing. An address with a password is refused.
+is missing. When `ssh` warns that the key of a host has changed, the command
+says so and does not suggest to trust it. An address with a password is
+refused. The user of the address is written in `recipes.lock` with it: use the
+one everybody shares, such as `git`, or leave it out of an `ssh://` address and
+let the `ssh` configuration of each person choose.
 
-**Over `https`** the command never asks for a user name or a password and
-never takes them in the address: `git` must already have them for that host.
-Two ways that work on a laptop and in CI:
+**Over `https`** `git` uses the user name and the password it already has for
+that host. When it has none and the command runs on a terminal, `git` asks for
+them, as it does for a clone: they go from the terminal to `git`, and the
+command never sees them. Without a terminal, as in CI, nothing is asked and the
+command fails with a message that says so. They are never taken in the
+address. Two ways to give them to `git` once, on a laptop and in CI:
 
     # a credential helper: the one of your system, or a file
     $ git config --global credential.helper store
@@ -1637,9 +1645,12 @@ What ApiRecipes does:
   credential go, the headers and the parameters sent with every request, those
   that an endpoint adds, and which calls are not GET, the ones that `resource`
   adds among them, before they write. They read one
-  file from the repository without checking it out, only over `https`, and run
-  `git` without a shell. An address with a user name or a password is refused,
-  so it cannot end up in `recipes.lock`.
+  file from the repository without checking it out, only over `https` or `ssh`,
+  and run `git` without a shell. An `https` address with a user name or a
+  password and an `ssh` address with a password are refused, so no secret can
+  end up in `recipes.lock`. The commands say which address they read before
+  `git` connects to it: `update` takes it from `recipes.lock`, so read a change
+  to that file as you read a change to the code.
 - **Logs, errors and `inspect`.** A log line and an error message of the gem
   never contain a credential, a header value, a body or a query string. Neither
   does the `inspect` or the `pp` of an API, an endpoint, a response, a

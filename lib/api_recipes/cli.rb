@@ -36,7 +36,8 @@ module ApiRecipes
             Installs the portable recipe called NAME from the cookbook
             (https://github.com/madAle/api_recipes-cookbook) or from the Git repository at URL,
             an https:// or ssh address (ssh://HOST/PATH, USER@HOST:PATH) that holds
-            recipes/NAME.recipe.yml. Without --version
+            recipes/NAME.recipe.yml. On a terminal git may ask for the user name and the password
+            of an https repository. Without --version
             it takes the recipe at the head of the repository, with it the one at the tag
             NAME-VERSION. Given a FILE, it installs that file. It shows where the requests and
             the credential go, the headers and which calls are not GET, asks, then writes NAME.recipe.yml and

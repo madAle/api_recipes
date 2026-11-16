@@ -7,6 +7,9 @@ require 'fileutils'
 # Helpers for the specs of portable recipes. They are methods, not constants:
 # a constant of the module is not visible from an example.
 module RecipeHelpers
+  # What install and update say before git connects to the repository.
+  def reading(name = 'shop', address = @repository.address) = "reading #{name} from #{address}\n"
+
   # The data of a small valid recipe. options are merged over the options of
   # the api, recipe over its `recipe` key; a nil value removes the key.
   def recipe_data(name = 'shop', options = nil, recipe: {}, **more)

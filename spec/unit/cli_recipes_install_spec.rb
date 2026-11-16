@@ -28,6 +28,7 @@ RSpec.describe 'api_recipes install' do
       code, out, err = from_repository(input: "y\n")
       expect([code, err]).to eq([0, ''])
       expect(out).to eq(<<~TEXT)
+        reading shop from #{@repository.address}
         shop 1.0.0
           summary:       A test api
           from:          #{@repository.address}, commit #{commit[0, 12]}
@@ -115,7 +116,7 @@ RSpec.describe 'api_recipes install' do
                                               'variables' => { 'tld' => { 'default' => 'test' } }))
       code, out, err = from_repository('--yes')
       expect(code).to eq(1)
-      expect(out).to eq('')
+      expect(out).to eq(reading)
       expect(err.lines.size).to eq(2)
       expect(err.lines).to all(start_with("shop in #{@repository.address}: "))
       expect(File.exist?(@dir)).to eq(false)
@@ -137,9 +138,10 @@ RSpec.describe 'api_recipes install' do
     it 'takes the cookbook when no repository is given' do
       found = ApiRecipes::CLI::Recipes::Git::Found.new(text: recipe_text, commit: 'a' * 40)
       git = instance_double(ApiRecipes::CLI::Recipes::Git, fetch: found)
-      expect(ApiRecipes::CLI::Recipes::Git).to receive(:new).with('https://github.com/madAle/api_recipes-cookbook').and_return(git)
+      expect(ApiRecipes::CLI::Recipes::Git).to receive(:new).with('https://github.com/madAle/api_recipes-cookbook', ask: false).and_return(git)
       code, out, = install('shop', '--yes')
       expect(code).to eq(0)
+      expect(out).to start_with("reading shop from https://github.com/madAle/api_recipes-cookbook\n")
       expect(out).to include("  from:          https://github.com/madAle/api_recipes-cookbook, commit #{'a' * 12}")
       expect(git).to have_received(:fetch).with('shop', nil)
     end
@@ -155,6 +157,19 @@ RSpec.describe 'api_recipes install' do
       end
     end
 
+    it 'lets git ask for the credentials of the repository only when its input is a terminal' do
+      found = ApiRecipes::CLI::Recipes::Git::Found.new(text: recipe_text, commit: 'a' * 40)
+      git = instance_double(ApiRecipes::CLI::Recipes::Git, fetch: found)
+      { true => true, false => false }.each do |terminal, ask|
+        input = instance_double(IO, tty?: terminal, gets: "n\n")
+        expect(ApiRecipes::CLI::Recipes::Git).to receive(:new).with('https://example.test/r', ask: ask).and_return(git)
+        ApiRecipes::CLI::Recipes.new(out: StringIO.new, err: StringIO.new, input: input)
+                                .install('shop', from: 'https://example.test/r', directory: @dir)
+      end
+      expect(ApiRecipes::CLI::Recipes::Git).to receive(:new).with('https://example.test/r', ask: false).and_return(git)
+      ApiRecipes::CLI::Recipes.new(out: StringIO.new, err: StringIO.new).install('shop', from: 'https://example.test/r', directory: @dir)
+    end
+
     it 'refuses a version that is not made of digits, letters and dots, before running git' do
       expect(Open3).not_to receive(:capture3)
       ['1.0 --x', '../1', "1\n2", 'a' * 33].each do |version|
@@ -168,7 +183,7 @@ RSpec.describe 'api_recipes install' do
       from_repository('--yes')
       before = File.mtime(destination)
       code, out, err = from_repository
-      expect([code, out, err]).to eq([0, "shop 1.0.0 is already installed in #{@dir}: nothing to do\n", ''])
+      expect([code, out, err]).to eq([0, "#{reading}shop 1.0.0 is already installed in #{@dir}: nothing to do\n", ''])
       expect(File.mtime(destination)).to eq(before)
     end
 
@@ -286,7 +301,7 @@ RSpec.describe 'api_recipes install' do
         link = File.join(@dir, name)
         File.symlink(target, link)
         code, out, err = from_repository('--yes')
-        expect([code, out, err]).to eq([2, '', "#{link} is a link: api_recipes does not write through links\n"])
+        expect([code, out, err]).to eq([2, reading, "#{link} is a link: api_recipes does not write through links\n"])
         File.delete(link)
       end
       expect(File.read(target)).to eq('untouched')
@@ -303,17 +318,17 @@ RSpec.describe 'api_recipes install' do
     it 'refuses a destination that is not a folder, and an installed recipe that is a folder' do
       FileUtils.mkdir_p(File.dirname(@dir))
       File.write(@dir, 'a file')
-      expect(from_repository('--yes')).to eq([2, '', "#{@dir} is not a folder\n"])
+      expect(from_repository('--yes')).to eq([2, reading, "#{@dir} is not a folder\n"])
       File.delete(@dir)
       FileUtils.mkdir_p(destination)
-      expect(from_repository('--yes')).to eq([2, '', "#{destination} is not a file\n"])
+      expect(from_repository('--yes')).to eq([2, reading, "#{destination} is not a file\n"])
     end
 
     it 'stops at a lock it cannot use' do
       FileUtils.mkdir_p(@dir)
       File.write(File.join(@dir, 'recipes.lock'), "format: 9\n")
       code, out, err = from_repository('--yes')
-      expect([code, out]).to eq([1, ''])
+      expect([code, out]).to eq([1, reading])
       expect(err).to include('recipes.lock: format 9 is not known')
       expect(File.exist?(destination)).to eq(false)
     end
@@ -349,7 +364,7 @@ RSpec.describe 'api_recipes install' do
       [File.join(@dir, 'recipes.lock'), destination].each do |unreadable|
         allow(File).to receive(:readable?).and_call_original
         allow(File).to receive(:readable?).with(unreadable).and_return(false)
-        expect(from_repository('--yes')).to eq([2, '', "#{unreadable}: cannot be read\n"])
+        expect(from_repository('--yes')).to eq([2, reading, "#{unreadable}: cannot be read\n"])
         RSpec::Mocks.space.proxy_for(File).reset
       end
     end

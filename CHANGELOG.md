@@ -33,8 +33,12 @@ which are data only, and the commands that install them.
 - A private repository of recipes works over `https` with the credentials that
   `git` already has for its host, and over `ssh` with the keys that `ssh`
   already uses: the address is `user@host:path` or `ssh://user@host/path`.
-  When the repository asks for credentials that `git` does not have, when `ssh`
-  does not know the host or has no key the host accepts, the message says so.
+  On a terminal `git` asks for the user name and the password it does not
+  have, as it does for a clone; without a terminal nothing is asked. When the
+  credentials are missing or refused, when `ssh` does not know the host, has no
+  key the host accepts or warns that the key of the host has changed, the
+  message says so. `install` and `update` say which address they read before
+  `git` connects to it.
 
 **An endpoint that does not set `timeout`, `on_bad_code` or `mime_type` now
 looks for it up the tree**, as it already did for `verify_with`: in the

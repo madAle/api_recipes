@@ -67,7 +67,7 @@ RSpec.describe 'api_recipes update' do
 
   it 'does nothing when the repository has the same recipe' do
     installed
-    expect(update).to eq([0, "shop 1.0.0 is already installed in #{@dir}: nothing to do\n", ''])
+    expect(update).to eq([0, "#{reading}shop 1.0.0 is already installed in #{@dir}: nothing to do\n", ''])
   end
 
   it 'takes the version asked for' do
@@ -99,7 +99,7 @@ RSpec.describe 'api_recipes update' do
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do
         expect(run_cli('install', 'shop', '--from', @repository.address, '--yes').first).to eq(0)
-        expect(run_cli('update', 'shop')).to eq([0, "shop 1.0.0 is already installed in config/api_recipes: nothing to do\n", ''])
+        expect(run_cli('update', 'shop')).to eq([0, "#{reading}shop 1.0.0 is already installed in config/api_recipes: nothing to do\n", ''])
       end
     end
   end

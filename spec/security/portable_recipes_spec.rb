@@ -246,7 +246,7 @@ describe 'Portable recipes' do
         recipe_text('shop', 'variables' => { 'tenant' => { 'description' => "hidden\u200B" } })
       ].each do |text|
         code, out, err = install_text(text, '--yes')
-        expect([code, out]).to eq([1, '']), text
+        expect([code, out]).to eq([1, reading]), text
         expect(err).to include('contains a character that is not printed'), text
         expect(err).not_to match(/[\e\r\u202E\u200B]/)
         expect(err.lines.size).to eq(1)
@@ -343,7 +343,7 @@ describe 'Portable recipes' do
       expect(YAML.safe_load(with_verb)['shop']['endpoints']['orders']['endpoints']['show']['verb']).to eq('delete')
       [hidden, with_verb, "#{recipe_text}# right#{[0x202E].pack('U')}to left\n"].each do |text|
         code, out, err = install_text(text, '--yes')
-        expect([code, out]).to eq([1, ''])
+        expect([code, out]).to eq([1, reading])
         expect(err).to match(/\Ashop in .*: line \d+: contains a character that is not printed/)
         path = installed(text)
         expect(run_cli('check', path).first).to eq(1)
@@ -416,6 +416,24 @@ describe 'Portable recipes' do
                              "    shop.orders.show(id): GET -> DELETE\n")
       expect(File.read(destination)).to eq(recipe_text)
       expect(configure_problems(destination)).to eq([])
+    end
+
+    it 'says which address it reads before git connects to it: the address comes from the lock' do
+      expect(install_text(recipe_text, '--yes').first).to eq(0)
+      lock = File.join(@dir, 'recipes.lock')
+      File.write(lock, File.read(lock).sub(@repository.address, 'ssh://collector.example.test/r'))
+      stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
+      out = StringIO.new
+      said_before = nil
+      failed = instance_double(Process::Status, success?: false)
+      allow(Open3).to receive(:capture3) do
+        said_before ||= out.string.dup
+        ['', "fatal: stopped here\n".b, failed]
+      end
+      code = ApiRecipes::CLI::Recipes.new(out: out, err: StringIO.new, input: StringIO.new).update('shop', directory: @dir, yes: true)
+      expect(code).to eq(2)
+      expect(said_before).to eq("reading shop from ssh://collector.example.test/r\n")
+      expect(File.read(destination)).to eq(recipe_text)
     end
   end
 
@@ -505,7 +523,10 @@ describe 'Portable recipes' do
        "-oProxyCommand=touch${IFS}#{marker}@example.test:r", "git@-oProxyCommand=touch${IFS}#{marker}:r",
        "ssh://-oProxyCommand=touch #{marker}/r", 'ssh://-F/tmp/config@example.test/r', "git@example.test:--upload-pack=touch${IFS}#{marker}",
        'git@example.test:-x', 'ssh://git:secret@example.test/r', "git@example.test:r\n--x", 'ssh://-v/r', 'ssh://-F/r',
-       "ssh://git@example.test/r\n--x"].each do |address|
+       "ssh://git@example.test/r\n--x", '-l@example.test:r', 'ssh://-l@example.test/r', "--upload-pack=x\ngit@example.test:r",
+       'ssh://git@example.test$(id)/r', 'git@example.test;id:r', 'u;id@example.test:r', 'ssh://u$(id)@example.test/r',
+       'ssh://git@example.test`id`/r', 'git@example.test&x:r', "ssh://example.test/r'x", 'ssh://example.test/r;x',
+       'ssh://example.test/r$x', 'ssh://example.test/r\\x', 'git@example.test://x'].each do |address|
         code, out, err = run_cli('install', 'shop', '--from', address, '--to', @dir, '--yes')
         expect([code, out]).to eq([2, '']), address
         expect(err).to start_with('--from must '), address
@@ -525,7 +546,7 @@ describe 'Portable recipes' do
       @repository.git('commit', '--quiet', '--message', 'submodule')
       %w[shop bank post].each do |name|
         code, out, err = install('--yes', name: name)
-        expect([code, out]).to eq([1, '']), name
+        expect([code, out]).to eq([1, reading(name)]), name
         expect(err).to include('is not a regular file (it is a link, a folder or a submodule): it was not read'), name
       end
       expect(File.exist?(@dir)).to eq(false)
@@ -553,7 +574,7 @@ describe 'Portable recipes' do
       stub_const('ApiRecipes::CLI::Recipes::Git::PROTOCOLS', %w[https ssh].freeze)
       allow(ApiRecipes::CLI::Recipes::Git).to receive(:address_problem).and_return(nil)
       code, out, err = install('--yes')
-      expect([code, out]).to eq([2, ''])
+      expect([code, out]).to eq([2, reading])
       expect(err).to match(/\Agit could not read file:.*not allowed/)
     end
 
@@ -561,7 +582,7 @@ describe 'Portable recipes' do
       failed = instance_double(Process::Status, success?: false)
       allow(Open3).to receive(:capture3).and_return(['', "remote: fine\nremote: \e[2J\e[Hshop 1.0.0 is installed\r\n".b, failed])
       code, out, err = run_cli('install', 'shop', '--from', 'https://example.test/r', '--to', @dir, '--yes')
-      expect([code, out]).to eq([2, ''])
+      expect([code, out]).to eq([2, reading('shop', 'https://example.test/r')])
       expect(err).to eq("git failed (init): remote: ?[2J?[Hshop 1.0.0 is installed\n")
     end
 

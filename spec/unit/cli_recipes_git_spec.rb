@@ -43,7 +43,11 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
     # ssh reads a host or a user that starts with a hyphen as one of its
     # options, and -oProxyCommand runs a command.
     it 'refuses an ssh address with a user, a host or a path that ssh or git would read as an option' do
-      ['ssh://-v/r', "ssh://git@example.test/r\n--x", 'ssh://-oProxyCommand=x/r', 'ssh://git@-oProxyCommand=x/r', 'ssh://-l@example.test/r', '-oProxyCommand=x@example.test:r',
+      ['ssh://-v/r', "ssh://git@example.test/r\n--x", "git@example.test:p\n", "ssh://example.test/r\n", "x\ngit@example.test:r",
+       "x\nssh://example.test/r", 'ssh://git@example.test$(id)/r', 'git@example.test;id:r', 'u;id@example.test:r',
+       'ssh://u$(id)@example.test/r', 'ssh://git@example.test`id`/r', 'git@example.test&x:r', "ssh://example.test/r'x",
+       'ssh://example.test/r;x', 'ssh://example.test/r:x', 'ssh://example.test/r$x', 'ssh://example.test/r\\x', 'git@example.test:r;x',
+       'git@example.test://x', 'git@https://example.test/r', 'u@file://x', 'ssh://-l@example.test:22/r', '-l@example.test:r', 'ssh://-oProxyCommand=x/r', 'ssh://git@-oProxyCommand=x/r', 'ssh://-l@example.test/r', '-oProxyCommand=x@example.test:r',
        'git@-oProxyCommand=x:r', 'git@example.test:-x', 'git@example.test:--upload-pack=x', 'git@example.test:',
        'ssh://git@example.test/%2Dx', 'ssh://a@b@example.test/r', 'git@example.test:r@x', 'git@example.test:r --x',
        "git@example.test:r\n--x", 'ssh://git@example.test/r?x', 'ssh://git@example.test:port/r', 'ssh://git@/r',
@@ -59,6 +63,19 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
       end
       expect(described_class.address_problem(nil)).to eq('must be text')
       expect(described_class.address_problem("https://example.test/#{'a' * 2000}")).to eq('must be at most 2000 characters')
+    end
+
+    it 'refuses an ssh address when ssh is not among the protocols' do
+      stub_const("#{described_class}::PROTOCOLS", %w[https].freeze)
+      %w[git@example.test:team/r ssh://git@example.test/r ssh://example.test/r].each do |address|
+        expect(described_class.address_problem(address)).not_to be_nil, address
+      end
+    end
+
+    it 'says of every address that is not https that it must be one of the accepted forms' do
+      %w[SSH://me@example.test/r http://me@example.test/r git://me:secret@example.test/r].each do |address|
+        expect(described_class.address_problem(address)).to eq(described_class::ACCEPTED), address
+      end
     end
 
     it 'refuses to be built with an address it would not use' do
@@ -232,8 +249,10 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
       Dir.mktmpdir do |directory|
         marker = File.join(directory, 'ran')
         allow(described_class).to receive(:address_problem).and_return(nil)
-        expect { described_class.new("ssh://-oProxyCommand=touch #{marker}/r").fetch('shop') }
-          .to raise_error(described_class::Failure, /git could not read/)
+        Dir.chdir(directory) do
+          expect { described_class.new('ssh://-oProxyCommand=touch${IFS}ran/r').fetch('shop') }
+            .to raise_error(described_class::Failure, /strange hostname '-oProxyCommand=touch\$\{IFS\}ran' blocked/)
+        end
         expect(File.exist?(marker)).to eq(false)
       end
     end
@@ -262,33 +281,62 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
         .to raise_error(described_class::Failure, 'git failed (init): it gave no reason')
     end
 
-    it 'comes with what to do when the repository asks for credentials that git does not have, or refuses them' do
+    def failing_fetch(address, said)
       done = instance_double(Process::Status, success?: true)
-      ["fatal: could not read Username for 'https://example.test': terminal prompts disabled\n",
-       "fatal: Authentication failed for 'https://example.test/r/'\n"].each do |said|
-        allow(Open3).to receive(:capture3) do |_environment, _git, *arguments|
-          arguments.include?('fetch') ? ['', said.b, failed] : ['', '', done]
-        end
-        expect { described_class.new('https://example.test/r').fetch('shop') }
-          .to raise_error(described_class::Failure, "git could not read https://example.test/r: #{said.strip} " \
-                                                    '(a private repository needs credentials that git already has for ' \
-                                                    'its host, such as a credential helper: the command never asks for them)')
+      allow(Open3).to receive(:capture3) do |_environment, _git, *arguments|
+        arguments.include?('fetch') ? ['', said.b, failed] : ['', '', done]
+      end
+      described_class.new(address).fetch('shop')
+    rescue described_class::Failure => e
+      e.message
+    end
+
+    it 'comes with what to do when the repository asks for credentials that git does not have, or refuses them' do
+      { "fatal: could not read Username for 'https://example.test': terminal prompts disabled\n" =>
+          '(a private repository needs credentials that git already has for its host, such as a credential helper: ' \
+          'without a terminal the command cannot ask for them)',
+        "fatal: Authentication failed for 'https://example.test/r/'\n" =>
+          '(the repository refused the user name or the password that git gave it)' }.each do |said, hint|
+        expect(failing_fetch('https://example.test/r', said)).to eq("git could not read https://example.test/r: #{said.strip} #{hint}")
       end
     end
 
-    it 'comes with what to do when ssh does not know the host, or has no key the host accepts' do
-      done = instance_double(Process::Status, success?: true)
-      { "Host key verification failed.\r\nfatal: Could not read from remote repository.\n" =>
-          '(ssh does not know this host: connect to it once with ssh, or add its key to known_hosts)',
+    it 'comes with what to do when ssh does not know the host, or has no key the host accepts, with the line where ssh says so' do
+      { "Host key verification failed.\r\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\n" =>
+          'Host key verification failed. (ssh does not know this host: connect to it once with ssh, or add its key to known_hosts)',
         "git@example.test: Permission denied (publickey).\r\nfatal: Could not read from remote repository.\n" =>
-          '(ssh has no key that this host accepts for the repository: check the key and the agent with ssh -T)' }.each do |said, hint|
-        allow(Open3).to receive(:capture3) do |_environment, _git, *arguments|
-          arguments.include?('fetch') ? ['', said.b, failed] : ['', '', done]
-        end
-        expect { described_class.new('git@example.test:team/r').fetch('shop') }
-          .to raise_error(described_class::Failure,
-                          "git could not read git@example.test:team/r: fatal: Could not read from remote repository. #{hint}")
+          'git@example.test: Permission denied (publickey). (ssh has no key that this host accepts for the repository: ' \
+          'check the key and the agent with ssh -T)' }.each do |said, shown|
+        expect(failing_fetch('git@example.test:team/r', said)).to eq("git could not read git@example.test:team/r: #{shown}")
       end
+    end
+
+    # ssh ends both cases with "Host key verification failed": the advice to
+    # trust the key must never answer its warning of a key that changed.
+    it 'does not tell to trust a host whose key has changed' do
+      said = "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n" \
+             "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n" \
+             "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n" \
+             "IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\r\n" \
+             "Host key verification failed.\r\nfatal: Could not read from remote repository.\n"
+      message = failing_fetch('git@example.test:team/r', said)
+      expect(message).to eq('git could not read git@example.test:team/r: Host key verification failed. ' \
+                            '(ssh says that the key of this host is not the one it knows: another machine may be ' \
+                            'answering in its place. Find out why before you connect again)')
+      expect(message).not_to include('known_hosts')
+    end
+
+    it 'chooses what to do from the lines of git and ssh, not from what a server writes' do
+      { "remote: You are not allowed to download code from this project.\nfatal: Could not read from remote repository.\n" =>
+          'remote: You are not allowed to download code from this project.',
+        "ERROR: Repository not found. Host key verification failed. Permission denied (x)\nfatal: Could not read from remote repository.\n" =>
+          'ERROR: Repository not found. Host key verification failed. Permission denied (x)',
+        "remote: fatal: could not read Username for nobody: Authentication failed for nothing\nfatal: Could not read from remote repository.\n" =>
+          'remote: fatal: could not read Username for nobody: Authentication failed for nothing' }.each do |said, shown|
+        expect(failing_fetch('git@example.test:team/r', said)).to eq("git could not read git@example.test:team/r: #{shown}")
+      end
+      expect(failing_fetch('git@example.test:team/r', "fatal: Could not read from remote repository.\n"))
+        .to eq('git could not read git@example.test:team/r: fatal: Could not read from remote repository.')
     end
 
     it 'must name a commit' do
@@ -296,6 +344,29 @@ RSpec.describe ApiRecipes::CLI::Recipes::Git do
       allow(Open3).to receive(:capture3).and_return(['not a commit', '', done])
       expect { described_class.new('https://example.test/r').fetch('shop') }
         .to raise_error(described_class::Failure, 'git did not say which commit of https://example.test/r it read')
+    end
+  end
+
+  describe 'what git may ask' do
+    def environments(**options)
+      seen = []
+      failed = instance_double(Process::Status, success?: false)
+      allow(Open3).to receive(:capture3) do |environment, *_arguments, **_options|
+        seen << environment
+        ['', "fatal: stopped here\n".b, failed]
+      end
+      expect { described_class.new('https://example.test/r', **options).fetch('shop') }.to raise_error(described_class::Failure)
+      seen
+    end
+
+    it 'is nothing, unless it is told that someone can answer' do
+      expect(environments).to all(include('GIT_TERMINAL_PROMPT' => '0'))
+      expect(environments(ask: false)).to all(include('GIT_TERMINAL_PROMPT' => '0'))
+    end
+
+    it 'is the user name and the password, as git asks them, when someone can answer: the setting of the user stays' do
+      expect(environments(ask: true)).not_to be_empty
+      expect(environments(ask: true)).to all(satisfy { |environment| !environment.key?('GIT_TERMINAL_PROMPT') })
     end
   end
 
