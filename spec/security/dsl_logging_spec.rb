@@ -4,7 +4,10 @@ require 'spec_helper'
 describe 'Logging through the DSL' do
   let(:io) { StringIO.new }
   let(:json) { { 'Content-Type' => 'application/json' } }
-  let(:secrets) { %w[SECRET-TOKEN SECRET-USER SECRET-PASS SECRET-HEADER SECRET-DEFAULT SECRET-PARAM SECRET-BODY SECRET-COOKIE] }
+  let(:secrets) do
+    %w[SECRET-TOKEN SECRET-USER SECRET-PASS SECRET-HEADER SECRET-DEFAULT SECRET-PARAM SECRET-BODY SECRET-COOKIE
+       SECRET-ALWAYS SECRET-ENDPOINT]
+  end
 
   def configure(auth, **settings)
     log = io
@@ -12,7 +15,10 @@ describe 'Logging through the DSL' do
       config.log_to = log
       settings.each { |key, value| config.public_send("#{key}=", value) }
       config.apis_configs = { svc: { host: 'api.example.test', auth: auth, default_headers: { 'X-Default' => 'SECRET-DEFAULT' },
-                                     endpoints: { users: nil, show: { path: '/:id' } } } }
+                                     default_params: { 'always' => 'SECRET-ALWAYS' },
+                                     endpoints: { users: { default_params: { 'only' => 'SECRET-ENDPOINT' },
+                                                           default_headers: { 'X-Users' => 'SECRET-ENDPOINT' } },
+                                                  show: { path: '/:id' } } } }
     end
   end
 

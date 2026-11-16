@@ -22,6 +22,17 @@ describe 'Credentials through the DSL' do
 
   def users_url = 'https://api.example.test/users'
 
+  it 'sends the credential, not a header of the same name that the api or an endpoint writes, whatever its case' do
+    configure_test_apis(svc: { host: 'api.example.test', default_headers: { 'AUTHORIZATION' => 'THEIRS' },
+                               endpoints: { users: { default_headers: { 'authorization' => 'THEIRS-TOO' } } } })
+    ApiRecipes.svc.with(authorization: 'Bearer MINE').users.run
+    expect(WebMock).to have_requested(:get, users_url).with(headers: { 'Authorization' => 'Bearer MINE' })
+    configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'header', name: 'X-Api-Key' },
+                               endpoints: { users: { default_headers: { 'x-api-key' => 'THEIRS' } } } })
+    ApiRecipes.svc.with(authorization: 'MINE').users.run
+    expect(WebMock).to have_requested(:get, users_url).with(headers: { 'X-Api-Key' => 'MINE' })
+  end
+
   def sent_without_authorization(url = users_url)
     have_requested(:get, url).with { |request| !request.headers.key?('Authorization') }
   end
@@ -196,6 +207,32 @@ describe 'Credentials through the DSL' do
         }
       end
       expect(WebMock).not_to have_requested(:any, /.*/)
+    end
+
+    it 'cannot be replaced by default_params: the configuration that names its parameter is refused' do
+      [{ default_params: { key: 'THEIRS' } }, { endpoints: { users: { default_params: { 'key' => 'THEIRS' } } } }].each do |more|
+        api = { host: 'api.example.test', auth: { type: 'query', name: 'key' }, endpoints: { users: nil } }.merge(more)
+        expect { configure_test_apis(svc: api) }
+          .to raise_error(ApiRecipes::ConfigurationError, /is the parameter of the credential/)
+      end
+    end
+
+    it 'is the only parameter with its name, and the last, when with or a class give one with that name' do
+      klass = Class.new do
+        include ApiRecipes
+        api :svc
+      end
+      # What http.rb receives: WebMock keeps one value for a name given twice.
+      sent = []
+      allow_any_instance_of(HTTP::Client).to receive(:request).and_wrap_original do |original, *arguments, **options|
+        sent << options[:params]
+        original.call(*arguments, **options)
+      end
+      ApiRecipes.svc.with(default_params: { key: 'THEIRS', a: 1 }).users.run
+      klass.svc.with(default_params: { 'key' => 'THEIRS' }).with(authorization: 'MINE').users(params: { key: 'ALSO-THEIRS' }).run
+      expect(sent).to eq([[%w[a 1], %w[key SECRET]], [%w[key MINE]]])
+      expect(WebMock).to have_requested(:get, "#{users_url}?a=1&key=SECRET")
+      expect(WebMock).to have_requested(:get, "#{users_url}?key=MINE")
     end
 
     it 'is added to params given as a Hash or not given' do

@@ -100,10 +100,13 @@ describe 'Portable recipes' do
         { "level#{number}" => { 'path' => "/#{'s' * 1900}", 'endpoints' => inner } }
       end
       many = (1..20_000).to_h { |number| ["e#{number}", nil] }
-      texts = [long_path, recipe_text('shop', 'endpoints' => deep), recipe_text('shop', 'endpoints' => many)]
+      resources = (1..9_000).to_h { |number| ["e#{number}", { 'resource' => true }] }
+      texts = [long_path, recipe_text('shop', 'endpoints' => deep), recipe_text('shop', 'endpoints' => many),
+               recipe_text('shop', 'endpoints' => resources)]
       reasons = ['a name or a value of a recipe has at most 2000 characters',
                  'the path of an endpoint, with the paths above it, has at most 4000 characters',
-                 'has 20000 endpoints: a recipe has at most 10000']
+                 'has 20000 endpoints: a recipe has at most 10000',
+                 'has 54000 endpoints: a recipe has at most 10000']
       texts.zip(reasons).each do |text, reason|
         path = installed(text)
         found = Timeout.timeout(10) { configure_problems(path) }
@@ -141,6 +144,18 @@ describe 'Portable recipes' do
         expect(configure_problems(installed(text)).first).to include('verify_with is not allowed in a recipe')
       end
       expect(ApiRecipes.apis).to eq([])
+    end
+  end
+
+  describe 'the credential of the application' do
+    it 'cannot be replaced by a parameter of the recipe: default_params that name the parameter of the credential are refused' do
+      text = recipe_text('shop', 'auth' => { 'type' => 'query', 'name' => 'key' },
+                                 'endpoints' => { 'orders' => { 'default_params' => { 'key' => 'theirs' } } })
+      code, _out, err = install_text(text, '--yes')
+      expect(code).to eq(1)
+      expect(err).to include('shop.endpoints.orders.default_params.key: is the parameter of the credential')
+      expect(File.exist?(destination)).to eq(false)
+      expect(configure_problems(installed(text)).first).to include('is the parameter of the credential')
     end
   end
 
@@ -310,6 +325,30 @@ describe 'Portable recipes' do
         expect(run_cli('check', path).first).to eq(1)
         expect(configure_problems(path).first).to include('contains a character that is not printed')
       end
+    end
+
+    it 'shows the parameters sent with every request and what an endpoint adds, and update shows what changes' do
+      expect(install_text(recipe_text, '--yes').first).to eq(0)
+      endpoints = { 'orders' => { 'default_headers' => { 'X-HTTP-Method-Override' => 'DELETE' }, 'endpoints' => {
+        'show' => { 'path' => '/:id', 'default_params' => { '_method' => 'delete' } }
+      } } }
+      @repository.publish('shop', recipe_text('shop', 'default_params' => { 'debug' => 1 }, 'endpoints' => endpoints,
+                                                      recipe: { 'version' => '1.0.1' }))
+      code, out, = run_cli('update', 'shop', '--dir', @dir, input: "n\n")
+      expect(code).to eq(1)
+      expect(out).to include("  headers:       X-HTTP-Method-Override: DELETE (shop.orders and below)\n",
+                             "  params:        debug: 1\n                 _method: delete (shop.orders.show)\n",
+                             "    headers: none -> X-HTTP-Method-Override: DELETE (shop.orders and below)\n",
+                             "    params: none -> debug: 1, _method: delete (shop.orders.show)\n")
+    end
+
+    it 'lists the calls that resource adds and that are not GET' do
+      _code, out, = install_text(recipe_text('shop', 'endpoints' => { 'orders' => { 'resource' => true } }))
+      expect(out).to include("  calls:         6, of which 4 are not GET:\n" \
+                             "    POST    shop.orders.create       /orders\n" \
+                             "    PATCH   shop.orders.update(id)   /orders/:id\n" \
+                             "    PUT     shop.orders.replace(id)  /orders/:id\n" \
+                             "    DELETE  shop.orders.delete(id)   /orders/:id\n")
     end
 
     it 'lists every call that is not a GET, whatever its name' do

@@ -22,7 +22,8 @@ describe 'Objects of the DSL' do
 
   def objects
     [ApiRecipes.svc, ApiRecipes.svc.users, ApiRecipes.svc.users.show(1, **options),
-     ApiRecipes.svc.with(authorization: 'Bearer SECRET-WITH', default_headers: { 'X-W' => 'SECRET-WITH' }),
+     ApiRecipes.svc.with(authorization: 'Bearer SECRET-WITH', default_headers: { 'X-W' => 'SECRET-WITH' },
+                         default_params: { 'w' => 'SECRET-WITH' }),
      ApiRecipes.svc.users.show(1).with(timeout: 5)]
   end
 
@@ -68,6 +69,22 @@ describe 'Objects of the DSL' do
       expect(JSON.parse(definition.to_json)['name']).to eq(definition.name.to_s)
     end
     expect(ApiRecipes.svc.definition.to_json).to include('"X-Default":"[FILTERED]"')
+  end
+
+  it 'shows and writes no value of default_params, nor of the headers and parameters of an endpoint' do
+    configure_test_apis(svc: { host: 'api.example.test', default_params: { 'always' => 'SECRET-DEFAULT-PARAM' },
+                               endpoints: { users: { default_headers: { 'X-Users' => 'SECRET-ENDPOINT-HEADER' },
+                                                     default_params: { 'only' => 'SECRET-ENDPOINT-PARAM' },
+                                                     endpoints: { show: { path: '/:id' } } } } })
+    shown = objects.flat_map do |object|
+      definition = object.definition
+      [object.inspect, object.to_s, PP.pp(object, +''), definition.inspect, PP.pp(definition, +''), definition.to_h.inspect,
+       definition.to_json, JSON.generate([definition])]
+    end
+    expect(shown.join("\n")).not_to include('SECRET')
+    expect(ApiRecipes.svc.definition.to_json).to include('"always":"[FILTERED]"', '"X-Users":"[FILTERED]"', '"only":"[FILTERED]"')
+    expect(ApiRecipes.svc.users.show(1).url.to_s).to eq('https://api.example.test/users/1')
+    expect { Marshal.dump(ApiRecipes.svc.users.definition) }.to raise_error(TypeError)
   end
 
   it 'shows no header and no variable value when the configuration is printed' do
