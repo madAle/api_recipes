@@ -88,6 +88,8 @@ A command turns an OpenAPI description into a recipe file, for example:
   names that can be changed in the generated file.
 - OpenAPI is the only imported format. Other formats can be converted to
   OpenAPI with existing tools.
+- `api_recipes routes` lists the calls that a recipe offers, with the verb and
+  the address: it shows what an import produced.
 
 ### Portable recipes
 

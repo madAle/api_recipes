@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: GitHub
+  version: '1.0'
+servers:
+  - url: https://api.github.com
+paths:
+  /users:
+    get:
+      operationId: users/list
+      responses:
+        '200': { description: ok }
+  /users/{username}:
+    get:
+      operationId: users/get-by-username
+      responses:
+        '200': { description: ok }
+  /users/{username}/repos:
+    get:
+      operationId: repos/list-for-user
+      responses:
+        '200': { description: ok }
+  /repos/{owner}/{repo}/issues:
+    get:
+      operationId: issues/list-for-repo
+      responses:
+        '200': { description: ok }
+    post:
+      operationId: issues/create
+      responses:
+        '201': { description: created }
+  /repos/{owner}/{repo}/issues/{issue_number}:
+    get:
+      operationId: issues/get
+      responses:
+        '200': { description: ok }
+    patch:
+      operationId: issues/update
+      responses:
+        '200': { description: ok }
