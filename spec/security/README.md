@@ -24,6 +24,7 @@ Spec files:
 | `dsl_logging_spec.rb` | what the logger receives |
 | `configuration_spec.rb` | local files, ERB, YAML, refused configurations |
 | `openapi_import_spec.rb` | `api_recipes import`: a hostile OpenAPI description and the recipe written from it |
+| `portable_recipes_spec.rb` | portable recipes: a hostile recipe or repository, with `recipes_paths`, `install`, `update` and `check` |
 
 ## Values put in the URL and in the headers
 
@@ -81,7 +82,7 @@ Spec files:
 | ERB is code: evaluated only for the files of `apis_files_paths` | no ERB anywhere else (observed: no code path evaluates ERB elsewhere, so no example fails by removing a protection) | `configuration_spec.rb` | `evaluates ERB in the files of apis_files_paths and nowhere else`, `never evaluates ERB found in a value of apis_configs or in a response` |
 | YAML is always read safely | `YAML.safe_load`, no Ruby objects | `configuration_spec.rb` | `does not build Ruby objects from YAML`, `reads YAML anchors and aliases without building objects, and refuses other tags`, `refuses a file that is not a mapping, is empty or is not UTF-8, without showing its content` |
 | `verify_with` calls a method, even a private one, of the calling object | allowed only in local sources, `api` and `with` | `configuration_spec.rb` | `lets verify_with call a private method of the calling object, given in api or in with` |
-| A `*.recipe.yml` passed to `apis_files_paths` | refused, whatever the case or the link, and its ERB is not run | `configuration_spec.rb` | `refuses a file named *.recipe.yml in apis_files_paths, whatever the case and the link, and does not run its ERB` |
+| A `*.recipe.yml` passed to `apis_files_paths`, where it would be evaluated with ERB | refused, whatever the case or the link, and its ERB is not run: a portable recipe goes in `recipes_paths` | `configuration_spec.rb` | `refuses a file named *.recipe.yml in apis_files_paths, whatever the case and the link, and does not run its ERB` |
 
 Also covered: a configuration that is refused
 before anything is built (a Hash that contains itself, a YAML alias to its own
@@ -108,6 +109,42 @@ loaded as a local file, where ERB is evaluated.
 | A small YAML description that describes a huge structure through aliases | refused while the text is parsed, before any object is built: aliases that together stand for more than ten million values (counted without expanding them), a key that is not plain text, a nesting deeper than 200 levels. Below that limit an alias is the same object, never a copy, and the importer never turns a mapping or a list into text | `openapi_import_spec.rb` | `refuses a description whose aliases describe more than ten million values`, `refuses a key that is an alias of a huge structure, instead of computing its hash for ever`, `never turns a mapping or a list of the description into text, wherever it is`, `reads a description that says a lot with YAML aliases, within the limit` (guards what must keep working) |
 | A description made to print without end, or to make the command fail with the text of a Ruby exception | at most 100 warnings are shown, then their number; one warning for each path that cannot be written, not for each operation; what the importer did not foresee is answered with one line and exit code 1 | `openapi_import_spec.rb` | `never prints megabytes of warnings`, `answers a defect of its own with a message, never with a stack trace` |
 
+## Portable recipes
+
+A portable recipe is written by someone else. These rows cover the file loaded
+with `recipes_paths` and the commands `install`, `update` and `check`. The
+examples run the commands against a Git repository in a temporary folder; the
+`file://` address is accepted there only because the spec helper replaces a
+constant.
+
+| Risk | Protection | Spec | Example |
+| --- | --- | --- | --- |
+| Code inside the recipe | a file of `recipes_paths` never goes through ERB, and neither does what the commands read; text with `<%` is refused, so it cannot wait for the day the file is given to `apis_files_paths` | `portable_recipes_spec.rb` | `code inside the recipe is never run by configure: a file of recipes_paths does not go through ERB`, `... is never run by install, update, check and routes, with or without --erb`, `... cannot wait in the file for the day it is given to apis_files_paths: text that ERB would run is refused` |
+| A recipe that builds Ruby objects, or describes a huge structure in a small text | plain YAML only: tags, anchors and aliases are refused while the text is parsed, before any object is built; at most 1 MiB, checked before parsing; at most 100 levels | `portable_recipes_spec.rb` | `code inside the recipe cannot be a Ruby object: the recipe is plain YAML, without tags`, `... cannot describe a huge structure with aliases: anchors and aliases are refused while the text is parsed`, `... cannot be larger than 1 MiB: the text is not parsed` |
+| The recipe reads a secret from the environment | observed: nothing gives the environment to a recipe; a variable takes its value from the code of the application or from its own default, as written | `portable_recipes_spec.rb` | `a variable of the recipe takes its value from the code of the application, never from the environment` |
+| The recipe makes the gem call a method of the application | `verify_with` is refused, on the api and on every endpoint | `portable_recipes_spec.rb` | `verify_with in the recipe is refused, on the api and on an endpoint: a recipe cannot make the gem call a method of the application` |
+| The recipe takes the place of an api the application has, and receives its credential | a name that another source or another recipe defines is an error, whatever the order; the configuration stays as it was | `portable_recipes_spec.rb` | `a recipe with the name of an api the application already has is refused, and never receives the credential of that api`, `... is refused also when the other api comes from another recipe` |
+| The recipe sends the credential to a host nobody looked at | `install` shows the protocol, the host as written and with the defaults of the variables, the port, the base and where the credential goes, then asks; only `y` or `yes` writes | `portable_recipes_spec.rb` | `where the requests and the credential go is shown by install before anything is written: protocol, host as written and with the defaults, kind of auth` |
+| A default moves the host (`api.example.{tld}` with `tld: test.evil.example`) | in a recipe a variable is the whole host, or the text after the last variable is fixed and starts with a dot | `portable_recipes_spec.rb` | `where the requests and the credential go cannot be moved by the default of a variable: a variable is the whole host or stands before fixed text` |
+| What `install` shows is changed by escape sequences, hidden characters or text written right to left | every name and every value of a recipe, at any depth, is visible text: control and format characters and line separators are refused; what the commands print goes through the same filter | `portable_recipes_spec.rb` | `what install shows cannot be changed by control or format characters: a recipe holds visible text only` |
+| A host written with letters of another alphabet | the host is ASCII only | `portable_recipes_spec.rb` | `what install shows cannot show a host that looks like another: letters of another alphabet are refused` |
+| What is shown differs from what is loaded: a key given twice, the merge key, a key that is not text | refused while the text is parsed | `portable_recipes_spec.rb` | `what install shows cannot differ from what is loaded: a key given twice, or a key that is not text, is refused` |
+| A recipe installed under the name of another | the name of the api, `recipe.name` and the name of the file are the same | `portable_recipes_spec.rb` | `what install shows is about the api that is installed: the name of the api, recipe.name and the name of the file are the same` |
+| The credential travels in the address | `install` and `check` warn about `auth.type: query` | `portable_recipes_spec.rb` | `what install shows says when the credential travels in the address, in install and in check` |
+| The credential travels without encryption | `install` and `check` warn about `protocol: http`, unless the recipe says that the api takes no credential | `portable_recipes_spec.rb` | `what install shows says when the credential travels without encryption, in install and in check` |
+| An endpoint with a harmless name and a verb that changes something (`show` with `verb: delete`) | `install` lists every call that is not a GET, with its verb and its path | `portable_recipes_spec.rb` | `what install shows lists every call that is not a GET, whatever its name` |
+| An update changes the host, the auth or the verbs | `update` shows those changes and asks before it replaces the file | `portable_recipes_spec.rb` | `an update shows what changes in the host, the auth and the verbs, and replaces nothing before the answer` |
+| A recipe file changed after it was installed, or never installed | the checksum of every file of `recipes_paths` is compared with the `recipes.lock` of its folder at every `configure`: a file that is missing from the lock or differs is not parsed and stops `configure`; `check` reports it | `portable_recipes_spec.rb` | `a recipe file changed after it was installed stops configure, and so does a file that was never installed; the configuration stays the one it was`, `... is reported by check, which exits with 1` |
+| A lock made to say more than it shows | read with the rules of a recipe, and only in the form the command writes | `portable_recipes_spec.rb` | `the lock is read as plain data with the rules of a recipe, and a lock that is not what the command writes stops configure` |
+| The name of a recipe used to write outside the folder | lowercase letters, digits, `-` and `_`, not starting with `-`; the file written is always `NAME.recipe.yml` in the folder | `portable_recipes_spec.rb` | `the name, the version and the address given to install cannot make it write outside the folder: the name of a recipe has no dots and no slashes`, `the files install writes are the recipe and the lock only, with the names the command chooses` |
+| A version or an address used to pass an option or a command to `git` | a version is digits, letters and dots; an address is `https://HOST/PATH` with a small set of characters; both are checked before `git` runs, and `git` is run without a shell, with the address after `--` | `portable_recipes_spec.rb` | `... cannot pass an option to git: a version is made of digits, letters and dots`, `... cannot be anything else than an https address: no other protocol, no option, no command`, `... never reaches a shell: git is run with its arguments one by one` |
+| The repository delivers a link, a folder or a submodule in place of the file | there is no working copy: the commit is fetched into an empty repository in a temporary folder, and the file is read from it only if its entry is a regular file | `portable_recipes_spec.rb` | `a hostile repository cannot make install read a link, a folder or a submodule in place of the file`, `... never gets a working copy: nothing of the repository is written on disk outside a temporary folder that is removed` |
+| The repository is reached with another protocol | `git` is told to allow `https` only, on the command line and in its environment, and not to follow redirects | `portable_recipes_spec.rb` | `a hostile repository is reached with https only: git itself refuses any other protocol, even if the check of the address is skipped` |
+| The server writes on the terminal through the messages of `git` | only the last line is shown, as visible text | `portable_recipes_spec.rb` | `a hostile repository cannot write on the terminal through the messages of git: they are shown as one line of visible text` |
+| The repository sends a huge file | the size is asked before the file is read: more than 1 MiB is not read | `portable_recipes_spec.rb` | `a hostile repository cannot send a recipe larger than 1 MiB: the file is not read` |
+| An address with a user name or a password ends up in `recipes.lock`, which is versioned | refused by `install`, and by `update` when it finds one in the lock | `portable_recipes_spec.rb` | `an address with a user name or a password is refused by install, so that it never reaches recipes.lock, which is versioned`, `... is refused by update when someone wrote it in the lock by hand` |
+| A link in the place of the recipe or of the lock makes the command write elsewhere | the command does not write through a link | `portable_recipes_spec.rb` | `the files install writes are never written through a link: a link in the place of the recipe or of the lock stops the command` |
+
 ## What the gem does not do
 
 The application must:
@@ -126,3 +163,16 @@ The application must:
   attributes that match a key, so `only:` is the list of attributes a server may set.
 - Decide how long a credential lives and where it is stored: the gem keeps it in
   memory, per object, and never writes it.
+- Read what `api_recipes install` and `api_recipes update` show before answering
+  yes. The gem checks the form of a recipe, not whose host it names: a recipe
+  that sends the credential to a well-formed host of an attacker is installed if
+  you accept it. `--yes` accepts without showing the question.
+- Version the installed recipes and `recipes.lock`, and review their changes like
+  code. The lock makes a change visible and stops the application; it does not
+  stop someone who can change both the file and the lock.
+- Trust a repository of recipes as far as it trusts whoever can push to it. A
+  tag can be moved: the commit in `recipes.lock` says what was installed, and
+  the checksum says what is loaded.
+- Know that `git` runs with its own configuration: its credential helper is what
+  lets `install` read a private repository, and it downloads the whole commit,
+  not only the file of the recipe, into a temporary folder.
