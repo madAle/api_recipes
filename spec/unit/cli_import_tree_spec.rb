@@ -1,5 +1,6 @@
 require 'spec_helper'
 require 'api_recipes/cli'
+require 'timeout'
 
 describe ApiRecipes::CLI::Import::Tree do
   let(:ok) { { 'responses' => { '200' => { 'description' => 'ok' } } } }
@@ -62,6 +63,8 @@ describe ApiRecipes::CLI::Import::Tree do
     'a trailing slash beside the same path without it' => ['GET /users', 'GET /users/', 'POST /users/', 'GET /users/{id}'],
     'only a trailing slash' => ['GET /items/', 'GET /items/{id}/'],
     'parameters with different names in the same place' => ['GET /a/{x}', 'GET /a/{y}/b', 'GET /a/{x}/b'],
+    'paths that are written in the same way' => ['GET /a/{x-y}/b', 'GET /a/{x_y}/b', 'POST /a/{x-y}/b', 'POST /a/{x_y}/b',
+                                                 'GET /c/{id_2}/{id}/{id}', 'GET /d/{p}/{p_2}/{p}/{p}'],
     'a segment named like an operation' => ['POST /issues', 'GET /issues/create', 'GET /issues/{id}', 'GET /issues/show'],
     'names of Ruby methods and of YAML values' => ['GET /send', 'GET /class', 'GET /with', 'GET /on', 'GET /no',
                                                    'GET /null', 'GET /404', 'GET /true', 'GET /definition/run'],
@@ -241,12 +244,46 @@ describe ApiRecipes::CLI::Import::Tree do
     end
   end
 
-  it 'leaves out what the path syntax of the gem cannot write, and says which' do
-    result = build(operations('GET /a/{id}_meta', 'GET /b/{x}v2/c', 'GET /fine/{id}'))
-    expect(imported_operations(result.nodes)).to eq([['GET', '/fine/P1']])
-    expect(result.operations).to eq(1)
-    expect(result.warnings).to include(match(%r{GET '/a/\{id\}_meta' cannot be written}),
-                                       match(%r{GET '/b/\{x\}v2/c' cannot be written}))
+  it 'leaves out what the path syntax of the gem cannot write, and says which once for each path' do
+    result = build(operations('GET /a/{id}_meta', 'POST /a/{id}_meta', 'GET /b/{x}v2/c', 'GET /fine/{id}',
+                              'GET /c//d', 'GET /e//', 'GET /*splat/x', 'GET /lit}eral'))
+    expect(imported_operations(result.nodes)).to match_array([['GET', '/fine/P1'], ['GET', '/lit}eral']])
+    expect(result.operations).to eq(2)
+    expect(result.warnings).to contain_exactly(
+      match(%r{\A'/a/\{id\}_meta' \(2 operations\) cannot be written.*right after a parameter}),
+      match(%r{\A'/b/\{x\}v2/c' \(1 operation\) cannot be written}),
+      match(%r{\A'/c//d' \(1 operation\) cannot be written.*empty segment}),
+      match(%r{\A'/e//' \(1 operation\) cannot be written.*empty segment}),
+      match(%r{\A'/\*splat/x' \(1 operation\) cannot be written.*starts with \*})
+    )
+  end
+
+  it 'keeps the two operations of two paths that are written in the same way' do
+    paths = { '/a/{x-y}/b' => { 'get' => { 'responses' => { '201' => {} } } },
+              '/a/{x_y}/b' => { 'get' => { 'responses' => { '202' => {} } } } }
+    result = build(paths)
+    expect(find(result.nodes, 'a').children.map { |node| [node.name, node.options] })
+      .to eq([['b', { path: '/:x_y/b', ok_code: 201 }], ['b_2', { path: '/:x_y/b', ok_code: 202 }]])
+    expect(result.warnings).to include(match(/'b'.*'b_2'/))
+  end
+
+  it 'makes no node for a path without operations' do
+    result = build({ '/empty' => { 'summary' => 'nothing here' }, '/a/b' => { 'parameters' => [] }, '/c' => { 'get' => {} } })
+    expect(result.nodes.map(&:name)).to eq(['c'])
+    expect(result.paths).to eq(1)
+  end
+
+  it 'does not read a path that the filters leave out' do
+    paths = { '/legacy' => { '$ref' => './legacy.yml#/x' }, '/users' => { 'get' => {} } }
+    expect(build(paths, except: ['/legacy']).nodes.map(&:name)).to eq(['users'])
+    expect(build(paths, only: ['users']).nodes.map(&:name)).to eq(['users'])
+    expect { build(paths) }.to raise_error(ApiRecipes::CLI::Import::Error, /another file/)
+  end
+
+  it 'finds its way among many siblings in little time' do
+    paths = (1..20_000).to_h { |n| ["/s#{n}", { 'get' => {} }] }
+    result = Timeout.timeout(5) { build(paths) }
+    expect(result.operations).to eq(20_000)
   end
 
   it 'ignores what is not an operation, and says once that servers of paths are not used' do

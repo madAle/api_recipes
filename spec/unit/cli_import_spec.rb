@@ -47,10 +47,10 @@ describe 'api_recipes import' do
     end
   end
 
-  it 'refuses a name that is not a method name' do
+  it 'refuses a name that is not a method name, as a wrong argument' do
     ['my api', '2nd', 'a-b', ''].each do |name|
       code, out, err = run_cli('import', small, '--name', name)
-      expect([code, out]).to eq([1, ''])
+      expect([code, out]).to eq([2, ''])
       expect(err).to match(/--name/)
     end
   end
@@ -183,6 +183,14 @@ describe 'api_recipes import' do
     code, out, err = run_cli('import', '/nonexistent/openapi.yml')
     expect([code, out]).to eq([2, ''])
     expect(err).to match(%r{/nonexistent/openapi\.yml: no such file})
+  end
+
+  it 'stops quietly when the reader of its output goes away' do
+    out = StringIO.new
+    allow(out).to receive(:write).and_raise(Errno::EPIPE)
+    err = StringIO.new
+    expect(ApiRecipes::CLI.run(['import', small], out: out, err: err)).to eq(0)
+    expect(err.string).not_to match(/EPIPE|cannot be written/)
   end
 
   it 'is described by the help' do

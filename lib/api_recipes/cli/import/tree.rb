@@ -22,12 +22,10 @@ module ApiRecipes
         SUCCESS_STATUS = /\A2\d\d\z/
 
         # A node while the tree is built. key tells apart two nodes of the same
-        # parent; base is the name before the numbers that keep siblings apart.
-        Entry = Struct.new(:base, :name, :key, :path, :verb, :get, :ok_code, :comment, :operation, :children) do
-          def child(key)
-            children.find { |entry| !entry.operation && entry.key == key }
-          end
-        end
+        # parent: it is the text of the description, so two paths that the gem
+        # writes in the same way stay two nodes. base is the name before the
+        # numbers that keep siblings apart; index finds a child node by its key.
+        Entry = Struct.new(:base, :name, :key, :path, :verb, :get, :ok_code, :comment, :operation, :children, :index)
 
         def self.build(document, only: [], except: [])
           new(document, only, except).build
@@ -57,7 +55,7 @@ module ApiRecipes
         private
 
         def entry(base, key, **fields)
-          Entry.new(base: base, key: key, children: [], **fields)
+          Entry.new(base: base, key: key, children: [], index: {}, **fields)
         end
 
         # ---- reading ----
@@ -67,29 +65,29 @@ module ApiRecipes
             @warnings << "the path #{Import.shown(path)} does not start with /: it was left out"
             return
           end
+          # A path that the filters leave out is not read: only counted, when
+          # its operations are in the description itself.
+          unless selected?(path)
+            @skipped += METHODS.count { |method| item[method].is_a?(Hash) } if item.is_a?(Hash)
+            return
+          end
           item = @document.resolve(item, "paths.#{Import.shown(path)}")
           unless item.is_a?(Hash)
             @warnings << "the path #{Import.shown(path)} is not a mapping: it was left out"
             return
           end
           methods = METHODS.select { |method| item[method].is_a?(Hash) }
-          unless selected?(path)
-            @skipped += methods.size
-            return
-          end
+          return if methods.empty?
 
           @paths += 1
           @servers ||= item.key?('servers') || methods.any? { |method| item[method].key?('servers') }
-          segments = path.split('/').reject(&:empty?)
-          unless writable?(segments)
-            methods.each do |method|
-              @warnings << "#{method.upcase} #{Import.shown(path)} cannot be written as a path of the gem " \
-                           '(text that starts with a letter, a digit or _ right after a parameter, or a segment ' \
-                           'that starts with *): it was left out'
-            end
+          problem = unwritable(path)
+          if problem
+            @warnings << "#{Import.shown(path)} (#{methods.size} operation#{'s' unless methods.size == 1}) cannot be " \
+                         "written as a path of the gem, because #{problem}: it was left out"
             return
           end
-          place(path, segments, item, methods)
+          place(path, path.split('/').reject(&:empty?), item, methods)
         end
 
         def selected?(path)
@@ -106,12 +104,19 @@ module ApiRecipes
 
         def parameter?(segment) = segment.match?(PARAMETER)
 
-        # The gem reads `:name` up to the last letter, digit or _, and `*name`
-        # at the start of a segment as a parameter that spans segments.
-        def writable?(segments)
-          segments.none? do |segment|
-            segment.match?(/\}\w/) || (!parameter?(segment) && segment.match?(/\A\*[A-Za-z_]/))
+        # Why the gem cannot write a path, or nil. The gem reads `:name` up to
+        # the last letter, digit or _; it reads `*name` at the start of a segment
+        # as a parameter that spans segments; and it joins two slashes into one.
+        def unwritable(path)
+          segments = path.split('/', -1).drop(1)
+          segments.pop if segments.last == ''
+          return 'it has an empty segment' if segments.include?('')
+          if segments.any? { |segment| segment.match?(/\{[^{}]*\}\w/) }
+            return 'text that starts with a letter, a digit or _ comes right after a parameter'
           end
+          return 'a segment starts with * and a name' if segments.any? { |segment| segment.match?(/\A\*[A-Za-z_]/) }
+
+          nil
         end
 
         def place(path, segments, item, methods)
@@ -123,8 +128,10 @@ module ApiRecipes
               pending << segment
               next
             end
-            written = written_path(pending + [segment], slash && index == segments.size - 1)
-            node = node.child(written) || add_child(node, entry(name_of(segment), written, path: written))
+            closing = slash && index == segments.size - 1
+            key = "#{(pending + [segment]).join('/')}#{'/' if closing}"
+            node = node.index[key] ||=
+              add_child(node, entry(name_of(segment), key, path: written_path(pending + [segment], closing)))
             pending = []
           end
           methods.each { |method| add_operation(node, method, pending, slash, path, item) }
@@ -169,11 +176,16 @@ module ApiRecipes
           "/#{text}#{'/' if slash}"
         end
 
+        # The name of a parameter with letters, digits and _ only, and with a
+        # number when the same path already has one with that name.
         def parameter_name(original, used)
-          name = original.gsub(/\W/, '_')
-          name = "_#{name}" unless name.match?(/\A[A-Za-z_]/)
-          count = used[name] = used.fetch(name, 0) + 1
-          count == 1 ? name : "#{name}_#{count}"
+          base = original.gsub(/\W/, '_')
+          base = "_#{base}" unless base.match?(/\A[A-Za-z_]/)
+          name = base
+          count = 1
+          name = "#{base}_#{count += 1}" while used.key?(name)
+          used[name] = true
+          name
         end
 
         def name_of(segment)

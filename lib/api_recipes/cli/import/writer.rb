@@ -13,6 +13,9 @@ module ApiRecipes
         API_KEYS = %i[protocol host port base_url auth variables].freeze
         ENDPOINT_KEYS = %i[path verb route ok_code].freeze
         COMMENT_COLUMN = 34
+        MAX_NAME = 1000
+        # Control characters, and the two separators that YAML reads as a new line.
+        LINE_BREAKING = /[[:cntrl:]\u2028\u2029]/
         INTERNAL = 'internal error: the recipe does not read back as it was written, so nothing was written'
 
         def initialize(name:, options:, nodes:, header: nil)
@@ -28,12 +31,18 @@ module ApiRecipes
           @lines << "# #{header}" unless header.empty?
           data = { @name => api }
           text = "#{@lines.join("\n")}\n"
-          raise Error, INTERNAL unless YAML.safe_load(text) == data
+          raise Error, INTERNAL unless read_back(text) == data
 
           text
         end
 
         private
+
+        def read_back(text)
+          YAML.safe_load(text)
+        rescue Psych::Exception
+          raise Error, INTERNAL
+        end
 
         def api
           line(0, "#{scalar(@name, '', 'the name of the api')}:")
@@ -101,7 +110,9 @@ module ApiRecipes
           if content.is_a?(String)
             raise Error, "#{place} is not valid text" unless content.valid_encoding?
             raise Error, "#{place} contains <%, which a recipe file would run as ERB" if content.include?('<%')
-            raise Error, "#{place} contains a control character" if content.match?(/[[:cntrl:]]/)
+            raise Error, "#{place} contains a control character" if content.match?(LINE_BREAKING)
+            # YAML does not read a name longer than 1024 characters.
+            raise Error, "#{place} is longer than #{MAX_NAME} characters" if what && content.length > MAX_NAME
           elsif !(content.is_a?(Integer) || content == true || content == false)
             raise Error, INTERNAL
           end

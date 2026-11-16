@@ -11,6 +11,7 @@ module ApiRecipes
       class Error < ApiRecipes::Error; end
 
       Result = Data.define(:text, :warnings, :summary)
+      MAX_WARNINGS = 100
 
       def initialize(path, name: nil, only: [], except: [], server: 0)
         @path = path
@@ -36,7 +37,7 @@ module ApiRecipes
         verify(text)
         warnings += server.warnings + security.warnings + tree.warnings
         warnings << 'no operation was imported' if tree.operations.zero?
-        Result.new(text: text, warnings: warnings, summary: summary(tree, warnings.size))
+        Result.new(text: text, warnings: shown_warnings(warnings), summary: summary(tree, warnings.size))
       end
 
       private
@@ -61,6 +62,13 @@ module ApiRecipes
         [name, warnings]
       end
 
+      # A description can be made to produce any number of warnings.
+      def shown_warnings(warnings)
+        return warnings if warnings.size <= MAX_WARNINGS
+
+        warnings.first(MAX_WARNINGS) + ["#{warnings.size - MAX_WARNINGS} more warnings were not shown"]
+      end
+
       # The text must be a recipe that the gem compiles.
       def verify(text)
         apis = Internals::Compiler.normalize(YAML.safe_load(text), :options_map)
@@ -81,6 +89,8 @@ module ApiRecipes
       # The text of a plain value of the description, or nil for a mapping or
       # a list. Mappings and lists are never turned into text: with YAML
       # aliases a small file can describe a structure too large to print.
+      # Every value read from a description goes through this method, shown or
+      # one_line, never through to_s or an interpolation.
       def self.text(value)
         case value
         when String then value
@@ -101,8 +111,10 @@ module ApiRecipes
       # Free text of the description (a title, a description, an operationId)
       # as it may appear in the recipe: one line, without control characters
       # and without the ERB delimiters, which a recipe file would evaluate.
+      # Every kind of space and of line separator becomes one space, and so do
+      # the characters that are not shown or that change the direction of text.
       def self.one_line(value, limit = 200)
-        text = self.text(value).to_s.scrub('?').gsub(/[[:cntrl:]\s]+/, ' ')
+        text = self.text(value).to_s.scrub('?').gsub(/[[:cntrl:][:space:]\p{Cf}\p{Zl}\p{Zp}]+/, ' ')
         text = text.gsub(/<%|%>/, '') while text.match?(/<%|%>/)
         text.strip[0, limit]
       end

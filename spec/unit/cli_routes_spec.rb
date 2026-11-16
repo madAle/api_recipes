@@ -81,6 +81,12 @@ describe 'api_recipes routes' do
     expect(code).to eq(2)
     expect(out.lines.size).to eq(7)
     expect(err).to match(%r{/nonexistent/recipe\.yml: no such file})
+    with_description("svc:\n  host: h.test\n", 'locked.yml') do |path|
+      File.chmod(0o000, path)
+      code, _, err = run_cli('routes', path)
+      expect(code).to eq(2)
+      expect(err).to match(/locked\.yml: cannot be read/)
+    end
   end
 
   it 'is described by the help' do

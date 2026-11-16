@@ -25,8 +25,8 @@ module ApiRecipes
 
       # Adds the calls of file to rows. Returns the exit code for this file.
       def read(file, rows, err)
-        unless File.file?(file)
-          err.puts "#{file}: #{File.exist?(file) ? 'is not a file' : 'no such file'}"
+        unless File.file?(file) && File.readable?(file)
+          err.puts "#{file}: #{File.file?(file) ? 'cannot be read' : (File.exist?(file) ? 'is not a file' : 'no such file')}"
           return 2
         end
 

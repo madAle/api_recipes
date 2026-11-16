@@ -75,7 +75,7 @@ module ApiRecipes
         parser.on('--server N', Integer) { |number| options[:server] = number }
         parser.on('--output FILE') { |file| output = file }
         paths = parser.parse(args)
-        problem = import_problem(paths, output)
+        problem = import_problem(paths, output, options[:name])
         if problem
           err.puts problem
           return 2
@@ -93,10 +93,18 @@ module ApiRecipes
       rescue OptionParser::ParseError => e
         err.puts e.message
         2
+      rescue StandardError => e
+        # The description is someone else's: what the importer did not foresee
+        # is answered with one line, never with the text of an exception.
+        err.puts "import failed (#{e.class}): this is a defect of api_recipes, not of the description"
+        1
       end
 
-      def import_problem(paths, output)
+      def import_problem(paths, output, name)
         return 'import needs one OpenAPI file' unless paths.size == 1
+        unless name.nil? || Internals::Compiler::METHOD_NAME.match?(name)
+          return '--name: must be the name of a method: letters, digits and _, not starting with a digit'
+        end
         return "#{paths.first}: no such file" unless File.exist?(paths.first)
         return "#{paths.first}: is not a file that can be read" unless File.file?(paths.first) && File.readable?(paths.first)
         return "#{output} already exists: remove it or choose another name" if output && File.exist?(output)
@@ -112,8 +120,11 @@ module ApiRecipes
           out.write(text)
         end
         true
+      rescue Errno::EPIPE
+        # The reader of STDOUT went away, as in `api_recipes import ... | head`.
+        true
       rescue SystemCallError => e
-        err.puts "#{output}: cannot be written (#{e.class.name.split('::').last})"
+        err.puts "#{output || 'the recipe'}: cannot be written (#{e.class.name.split('::').last})"
         false
       end
 

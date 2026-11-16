@@ -61,6 +61,17 @@ describe ApiRecipes::CLI::Import::Security do
     expect(result.auth).to eq('type' => 'bearer')
   end
 
+  it 'writes no auth when the global security is an empty list, which means that none is needed' do
+    result = read({ 'token' => { 'type' => 'http', 'scheme' => 'basic' } }, [])
+    expect([result.auth, result.warnings]).to eq([nil, []])
+  end
+
+  it 'does not fail on a path that points to another file: the paths are read elsewhere' do
+    result = read({ 'token' => { 'type' => 'http', 'scheme' => 'bearer' } }, :first,
+                  { '/legacy' => { '$ref' => './legacy.yml#/x' }, '/a' => { 'get' => { 'security' => [] } } })
+    expect(result.warnings).to contain_exactly(match(/1 operation declares its own security/))
+  end
+
   it 'uses the only scheme when there is no global security' do
     result = read({ 'token' => { 'type' => 'http', 'scheme' => 'basic' } }, nil)
     expect(result.auth).to eq('type' => 'basic')
@@ -99,6 +110,6 @@ describe ApiRecipes::CLI::Import::Security do
     }
     result = read({ 'main' => { 'type' => 'http', 'scheme' => 'bearer' } }, :first, paths)
     expect(result.auth).to eq('type' => 'bearer')
-    expect(result.warnings).to contain_exactly(match(/2 operations declare a security of their own/))
+    expect(result.warnings).to contain_exactly(match(/2 operations declare their own security/))
   end
 end

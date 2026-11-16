@@ -67,6 +67,22 @@ describe ApiRecipes::CLI::Import::Document do
     expect { doc.resolve({ '$ref' => 42 }, 'here') }.to raise_error(error, /here: \$ref must be a string/)
   end
 
+  it 'reads YAML written in flow style, which starts like JSON' do
+    expect(parse("{openapi: 3.0.3, info: {title: Flow, version: '1'}, paths: {}}").title).to eq('Flow')
+  end
+
+  it 'refuses binary values' do
+    expect { parse("openapi: 3.0.3\ninfo: {title: !!binary Y2Fmw6k=}\n") }.to raise_error(error, /binary data/)
+  end
+
+  it 'refuses a chain of more than 64 $ref' do
+    parameters = (1..70).to_h { |n| ["p#{n}", { '$ref' => "#/components/parameters/p#{n + 1}" }] }
+    doc = parse(openapi('components' => { 'parameters' => parameters.merge('p71' => { 'name' => 'q' }) }))
+    expect { doc.resolve({ '$ref' => '#/components/parameters/p1' }, 'here') }
+      .to raise_error(error, /here: more than 64 \$ref in a chain/)
+    expect(doc.resolve({ '$ref' => '#/components/parameters/p10' }, 'here')).to eq('name' => 'q')
+  end
+
   it 'refuses a cycle of $ref instead of following it forever' do
     doc = parse(openapi('components' => { 'parameters' => {
                           'a' => { '$ref' => '#/components/parameters/b' },
@@ -123,18 +139,33 @@ describe ApiRecipes::CLI::Import::Document do
   end
 
   it 'never turns a mapping or a list of the description into text' do
-    levels = (1..40).map { |n| "x#{n}: &x#{n} [*x#{n - 1}, *x#{n - 1}, *x#{n - 1}, *x#{n - 1}]" }
-    doc = parse("openapi: 3.0.3\nx0: &x0 [lol]\n#{levels.join("\n")}\ninfo: {title: *x40, version: *x40}\nswagger-like: *x40\n")
+    list = Class.new(Array) { %i[to_s inspect join].each { |name| define_method(name) { |*| raise 'printed' } } }.new([1])
+    mapping = Class.new(Hash) { %i[to_s inspect].each { |name| define_method(name) { |*| raise 'printed' } } }.new
+    doc = described_class.new('openapi' => '3.0.3', 'info' => { 'title' => list, 'version' => mapping })
     expect([doc.title, doc.version]).to eq([nil, nil])
     expect(doc.inspect.length).to be < 200
-    expect(ApiRecipes::CLI::Import.shown(doc.root['x40'])).to eq('a list')
-    expect(ApiRecipes::CLI::Import.one_line(doc.root['x40'])).to eq('')
+    expect(ApiRecipes::CLI::Import.shown(list)).to eq('a list')
+    expect(ApiRecipes::CLI::Import.shown(mapping)).to eq('a mapping')
+    expect(ApiRecipes::CLI::Import.one_line(list)).to eq('')
+  end
+
+  it 'counts what the aliases stand for without expanding them, and refuses more than ten million values' do
+    bomb = lambda do |depth|
+      levels = (1..depth).map { |n| "x#{n}: &x#{n} [*x#{n - 1}, *x#{n - 1}, *x#{n - 1}, *x#{n - 1}]" }
+      "openapi: 3.0.3\nx0: &x0 [lol]\n#{levels.join("\n")}\ninfo: {title: T, version: '1'}\n"
+    end
+    expect(parse(bomb.call(9)).title).to eq('T')
+    [12, 40, 400].each do |depth|
+      expect { Timeout.timeout(5) { parse(bomb.call(depth)) } }.to raise_error(error, /more than ten million values/)
+    end
+    recursive = parse("openapi: 3.0.3\ninfo: {title: T}\nx-loop: &a [*a, *a]\n")
+    expect(recursive.root['x-loop'].first).to equal(recursive.root['x-loop'])
   end
 
   it 'refuses a key that is not plain text, before Ruby computes its hash' do
-    levels = (1..40).map { |n| "x#{n}: &x#{n} [*x#{n - 1}, *x#{n - 1}, *x#{n - 1}, *x#{n - 1}]" }
+    levels = (1..9).map { |n| "x#{n}: &x#{n} [*x#{n - 1}, *x#{n - 1}, *x#{n - 1}, *x#{n - 1}]" }
     bomb = "x0: &x0 [lol]\n#{levels.join("\n")}\n"
-    ["#{bomb}openapi: 3.0.3\npaths: {*x40 : {}}\n", "openapi: 3.0.3\n? [a, b]\n: 1\n", "openapi: 3.0.3\n? {a: 1}\n: 1\n",
+    ["#{bomb}openapi: 3.0.3\npaths: {*x9 : {}}\n", "openapi: 3.0.3\n? [a, b]\n: 1\n", "openapi: 3.0.3\n? {a: 1}\n: 1\n",
      "openapi: 3.0.3\nx: &a text\n*a : 1\n"].each do |text|
       expect { Timeout.timeout(5) { parse(text) } }.to raise_error(error, /keys must be plain text/)
     end
@@ -144,7 +175,8 @@ describe ApiRecipes::CLI::Import::Document do
 
   it 'refuses a nesting too deep to be a description, instead of exhausting the stack' do
     expect { parse("openapi: 3.0.3\nx: #{'[' * 5000}#{']' * 5000}\n") }.to raise_error(error, /nested too deeply/)
-    expect { parse("{\"openapi\": \"3.0.3\", \"x\": #{'[' * 5000}#{']' * 5000}}") }.to raise_error(error, /not valid JSON/)
+    expect { parse("{\"openapi\": \"3.0.3\", \"x\": #{'[' * 5000}#{']' * 5000}}") }
+      .to raise_error(error, /not valid JSON|nested too deeply/)
     expect(parse("openapi: 3.0.3\nx: #{'[' * 150}#{']' * 150}\n").root).to include('x')
   end
 

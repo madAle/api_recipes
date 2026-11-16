@@ -8,8 +8,6 @@ module ApiRecipes
       class Security
         Result = Data.define(:auth, :warnings)
 
-        METHODS = %w[get put post delete options head patch trace].freeze
-
         def self.read(document)
           new(document).read
         end
@@ -23,7 +21,8 @@ module ApiRecipes
           components = @document.root['components']
           schemes = components.is_a?(Hash) && components['securitySchemes'].is_a?(Hash) ? components['securitySchemes'] : {}
           global = @document.root['security']
-          auth = if global.is_a?(Array) && global.any? { |requirement| requirement.is_a?(Hash) && !requirement.empty? }
+          # A global security that is an empty list says that none is needed.
+          auth = if global.is_a?(Array)
                    from_requirements(global, schemes)
                  elsif schemes.size == 1
                    auth_of(schemes.keys.first, schemes)
@@ -78,7 +77,7 @@ module ApiRecipes
         end
 
         def http(scheme)
-          case scheme['scheme'].to_s.downcase
+          case Import.text(scheme['scheme']).to_s.downcase
           when 'bearer' then { 'type' => 'bearer' }
           when 'basic' then { 'type' => 'basic' }
           else unsupported("the http scheme #{Import.shown(scheme['scheme'])}")
@@ -91,6 +90,14 @@ module ApiRecipes
           return unsupported('an apiKey without a name') unless scheme['name'].is_a?(String) && !scheme['name'].empty?
 
           { 'type' => scheme['in'], 'name' => scheme['name'] }
+        end
+
+        # A path that cannot be read is not counted here: the tree reports it,
+        # unless the filters leave it out.
+        def path_item(path, item)
+          @document.resolve(item, "paths.#{Import.shown(path)}")
+        rescue Error
+          nil
         end
 
         # The scheme names of a list of requirements: what two of them are
@@ -112,17 +119,17 @@ module ApiRecipes
 
           chosen = names_of(global)
           count = paths.sum do |path, item|
-            item = @document.resolve(item, "paths.#{Import.shown(path)}")
+            item = path_item(path, item)
             next 0 unless item.is_a?(Hash)
 
-            METHODS.count do |method|
+            Tree::METHODS.count do |method|
               operation = item[method]
               operation.is_a?(Hash) && operation.key?('security') && names_of(operation['security']) != chosen
             end
           end
           return if count.zero?
 
-          @warnings << "#{count} operation#{'s' unless count == 1} declare#{'s' if count == 1} a security of their own: " \
+          @warnings << "#{count == 1 ? '1 operation declares its' : "#{count} operations declare their"} own security: " \
                        'the recipe has one auth for the whole api'
         end
       end

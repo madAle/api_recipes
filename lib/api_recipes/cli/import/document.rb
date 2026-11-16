@@ -2,6 +2,7 @@
 
 require 'date'
 require 'json'
+require 'set'
 require 'yaml'
 
 module ApiRecipes
@@ -13,6 +14,8 @@ module ApiRecipes
       # often refer to themselves, are never walked.
       class Document
         SUPPORTED = /\A3\.[01](\.|\z)/
+        NOT_YAML = 'the description is not valid YAML'
+        MAX_REFS = 64
         READ_PROBLEMS = { Errno::ENOENT => 'no such file', Errno::EISDIR => 'is a directory',
                           Errno::EACCES => 'permission denied' }.freeze
 
@@ -37,10 +40,18 @@ module ApiRecipes
 
           private
 
+          # YAML written in flow style starts with a brace too: what is not
+          # JSON is read as YAML.
           def parse_json(text)
             JSON.parse(text)
           rescue JSON::ParserError
-            raise Error, 'the description is not valid JSON'
+            begin
+              parse_yaml(text)
+            rescue Error => e
+              raise e unless e.message.start_with?(NOT_YAML)
+
+              raise Error, 'the description is not valid JSON'
+            end
           end
 
           # Dates are the only values beyond plain YAML that a description
@@ -58,7 +69,7 @@ module ApiRecipes
           rescue Psych::DisallowedClass
             raise Error, 'the description contains something that is not plain data'
           rescue Psych::SyntaxError => e
-            raise Error, "the description is not valid YAML (line #{e.line})"
+            raise Error, "#{NOT_YAML} (line #{e.line})"
           end
 
           def check_version(data)
@@ -73,43 +84,79 @@ module ApiRecipes
           end
         end
 
-        # Refuses, while the text is parsed and before any object is built, a
-        # key that is not plain text and a nesting that is too deep.
+        # Refuses, while the text is parsed and before any object is built:
+        # a key that is not plain text, a nesting that is too deep, binary
+        # values, and aliases that together stand for more values than a
+        # description can have. Every anchor is given the number of values under
+        # it, aliases included, so the count is exact without expanding anything.
         class Shape < Psych::Handler
           MAX_DEPTH = 200
+          MAX_ALIASED = 10_000_000
+          BINARY = 'tag:yaml.org,2002:binary'
+
+          # One mapping or list that is being read.
+          Open = Struct.new(:kind, :children, :anchor, :size)
 
           def initialize
             super
             @open = []
+            @sizes = {}
+            @aliased = 0
           end
 
-          def scalar(*) = child(false)
+          def scalar(_value, anchor, tag, *)
+            if tag == BINARY
+              raise Error, 'the description contains binary data (!!binary): only text is read'
+            end
 
-          def alias(_anchor) = child(true)
+            child(false, 1)
+            @sizes[anchor] = 1 if anchor
+          end
 
-          def start_mapping(*) = start(:mapping)
+          # An alias of something still open is a structure that contains itself: it counts as one value.
+          def alias(anchor)
+            size = @sizes.fetch(anchor, 1)
+            @aliased += size
+            if @aliased > MAX_ALIASED
+              raise Error, 'the aliases of the description stand for more than ten million values: ' \
+                           'this is not a description of an api'
+            end
 
-          def start_sequence(*) = start(:sequence)
+            child(true, size)
+          end
 
-          def end_mapping = @open.pop
+          def start_mapping(anchor, *) = start(:mapping, anchor)
 
-          def end_sequence = @open.pop
+          def start_sequence(anchor, *) = start(:sequence, anchor)
+
+          def end_mapping = finish
+
+          def end_sequence = finish
 
           private
 
-          def start(kind)
-            child(true)
-            @open << [kind, 0]
+          def start(kind, anchor)
+            child(true, 0)
+            @open << Open.new(kind, 0, anchor, 1)
             raise Error, 'the description is nested too deeply' if @open.size > MAX_DEPTH
           end
 
-          # In a mapping the children come as key, value, key, value.
-          def child(composite)
-            kind, count = @open.last
-            return unless kind == :mapping
+          def finish
+            done = @open.pop
+            @sizes[done.anchor] = done.size if done.anchor
+            @open.last.size += done.size if @open.last
+          end
 
-            @open.last[1] = count + 1
-            return unless count.even? && composite
+          # In a mapping the children come as key, value, key, value.
+          def child(composite, size)
+            parent = @open.last
+            return unless parent
+
+            parent.size += size
+            return unless parent.kind == :mapping
+
+            parent.children += 1
+            return unless parent.children.odd? && composite
 
             raise Error, 'a key of the description is an alias, a mapping or a list: keys must be plain text'
           end
@@ -137,8 +184,9 @@ module ApiRecipes
                            'bundle the description into one file first'
             end
             raise Error, "#{where}: circular $ref #{Import.shown(ref)}" if seen&.include?(ref)
+            raise Error, "#{where}: more than #{MAX_REFS} $ref in a chain" if seen && seen.size >= MAX_REFS
 
-            (seen ||= []) << ref
+            (seen ||= Set.new) << ref
             node = fetch(ref, where)
           end
           node
