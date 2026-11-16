@@ -1,4 +1,4 @@
-## Unreleased
+## Version 3.0.0.beta2
 
 The second pre-release of 3.0 adds two commands. Nothing changes in the library.
 
