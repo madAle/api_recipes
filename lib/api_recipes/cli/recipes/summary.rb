@@ -22,6 +22,8 @@ module ApiRecipes
 
         def title = "#{@recipe.name} #{@recipe.version}"
 
+        def text = @recipe.text
+
         def lines
           meta = @api.recipe
           rows = [['summary', meta[:summary]], ['homepage', meta[:homepage]], ['from', @origin], ['address', address]]
@@ -77,11 +79,42 @@ module ApiRecipes
         # Each call as { call => verb }.
         def verbs = @api.routes.to_h { |route| [route.call, route.verb.to_s.upcase] }
 
+        # What this recipe changes in the recipe installed now, whose summary
+        # is previous (nil when it is not a valid recipe): the address, the
+        # credential and the verbs.
+        def changes_from(previous)
+          return ['  it replaces a file that is not a valid recipe'] if previous.nil?
+
+          found = [%w[address address], ['with defaults', 'filled_address'], %w[credential credential]].filter_map do |label, reader|
+            before = previous.public_send(reader)
+            after = public_send(reader)
+            "    #{label}: #{shown(before)} -> #{shown(after)}" unless before == after
+          end
+          found.concat(verb_changes(previous.verbs))
+          found << '    no change in the address, the credential or the verbs' if found.empty?
+          ["  changes from #{shown(previous.title, 100)}:"] + found
+        end
+
         private
 
         def shown(value, limit = 200) = self.class.shown(value, limit)
 
         def row(label, text) = "  #{"#{label}:".ljust(LABEL_WIDTH)}#{shown(text, 500)}"
+
+        def verb_changes(before)
+          after = verbs
+          found = after.filter_map do |call, verb|
+            if !before.key?(call)
+              "    new call that is not a GET: #{verb} #{shown(call)}" unless verb == 'GET'
+            elsif before[call] != verb
+              "    #{shown(call)}: #{before[call]} -> #{verb}"
+            end
+          end
+          added = (after.keys - before.keys).size
+          removed = (before.keys - after.keys).size
+          found << "    calls: #{added} added, #{removed} removed" unless added.zero? && removed.zero?
+          found
+        end
 
         def filled(text)
           defaults = @api.variables.transform_values { |spec| spec[:default] }.compact

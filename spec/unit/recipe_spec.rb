@@ -61,6 +61,23 @@ RSpec.describe ApiRecipes::Internals::Recipe do
       expect(problems(text).first).to start_with('contains <%: a recipe is never evaluated with ERB')
     end
 
+    it 'refuses a name or a value, at any depth, with a character that is not printed' do
+      message = /: contains a character that is not printed \(a control or a format character\): a recipe holds visible text only\z/
+      [
+        recipe_text('shop', recipe: { 'summary' => "two\nlines" }),
+        recipe_text('shop', recipe: { 'summary' => "right\u202Eto left" }),
+        recipe_text('shop', 'endpoints' => { "sh\u200Bow" => nil }),
+        recipe_text('shop', 'endpoints' => { 'show' => { 'path' => "/a\tb" } }),
+        recipe_text('shop', 'variables' => { 'tenant' => { 'description' => "line\u2028separator" } }),
+        recipe_text('shop', 'x-notes' => ['fine', { 'deep' => "bell\a" }]),
+        recipe_text("sh\u00ADop")
+      ].each do |text|
+        expect(problems(text)).to match([message]), text
+      end
+      expect(problems(recipe_text('shop', recipe: { 'summary' => "right\u202Eto left" })).first).to start_with('right?to left: ')
+      expect(problems(recipe_text('shop', recipe: { 'summary' => 'Caffè, 日本語 and a non-breaking space' }))).to eq([])
+    end
+
     it 'refuses a name that is not made of lowercase letters, digits, - and _' do
       %w[Shop shop.io -shop sh/op shöp].push('a' * 65, '').each do |name|
         expect(problems(recipe_text(name)).first).to start_with('the api name '), name
@@ -84,7 +101,7 @@ RSpec.describe ApiRecipes::Internals::Recipe do
       %w[1 1.2.0 2026.10 1.0.0.beta1 v2].each do |version|
         expect(problems(recipe_text('shop', recipe: { 'version' => version }))).to eq([]), version
       end
-      ['1..2', '.1', '1.', '1-2', '1 2', '1/2', '', '1' * 33, "1\n"].each do |version|
+      ['1..2', '.1', '1.', '1-2', '1 2', '1/2', '', '1' * 33].each do |version|
         expect(problems(recipe_text('shop', recipe: { 'version' => version })))
           .to eq(['recipe.version must be made of digits, letters and dots, at most 32 characters']), version.inspect
       end
@@ -100,9 +117,8 @@ RSpec.describe ApiRecipes::Internals::Recipe do
     end
 
     it 'checks the summary, the homepage and the other keys of recipe' do
-      expect(problems(recipe_text('shop', recipe: { 'summary' => "two\nlines" })))
-        .to eq(['recipe.summary must be one line of text, at most 200 characters'])
-      expect(problems(recipe_text('shop', recipe: { 'summary' => 'x' * 201 })).size).to eq(1)
+      expect(problems(recipe_text('shop', recipe: { 'summary' => 'x' * 201 })))
+        .to eq(['recipe.summary must be text, at most 200 characters'])
       expect(problems(recipe_text('shop', recipe: { 'summary' => 3 })).size).to eq(1)
       expect(problems(recipe_text('shop', recipe: { 'homepage' => 'https://example.test/docs' }))).to eq([])
       ['javascript:alert(1)', 'https://example.test/a b', 'ftp://example.test', 7].each do |homepage|

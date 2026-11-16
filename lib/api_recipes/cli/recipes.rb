@@ -1,14 +1,32 @@
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'api_recipes/cli/recipes/summary'
+require 'api_recipes/cli/recipes/git'
+require 'api_recipes/cli/recipes/lock_file'
 
 module ApiRecipes
   module CLI
     # The commands for portable recipes: check, install and update.
     class Recipes
       DEFAULT_DIRECTORY = 'config/api_recipes'
+      DEFAULT_SOURCE = 'https://github.com/madAle/api_recipes-cookbook'
       Recipe = Internals::Recipe
       RecipeLock = Internals::RecipeLock
+
+      # A recipe about to be installed: where it comes from, for the lock
+      # (source and commit, nil for a file) and for the reader (origin).
+      Incoming = Data.define(:recipe, :source, :commit, :origin)
+
+      # The command ends here, with this exit code and this message.
+      class Stop < StandardError
+        attr_reader :code
+
+        def initialize(code, message)
+          @code = code
+          super(message)
+        end
+      end
 
       def initialize(out:, err:, input: nil)
         @out = out
@@ -26,7 +44,153 @@ module ApiRecipes
         files.map { |file| check_file(file) }.max
       end
 
+      # Installs the recipe called target from the repository at from, at
+      # version or at the head; or the file at target, when target is not the
+      # name of a recipe. Shows what the recipe does and asks before writing
+      # in directory. Returns the exit code: 1 if the recipe is not acceptable,
+      # is not found or the answer is no, 2 if the arguments are wrong or
+      # something could not be read or written, else 0.
+      def install(target, version: nil, from: nil, directory: DEFAULT_DIRECTORY, yes: false)
+        guarded do
+          incoming = Recipe::NAME.match?(target) ? fetched(target, version, from || DEFAULT_SOURCE, '--from') : local(target, version, from)
+          place(incoming, directory, yes, 'Install')
+        end
+      end
+
+      # Replaces an installed recipe with the one its repository has now, or
+      # has at version, after showing what changes. Same exit codes as install.
+      def update(name, version: nil, directory: DEFAULT_DIRECTORY, yes: false)
+        guarded do
+          raise Stop.new(2, "#{Summary.shown(name, 80)} is not the name of a recipe") unless Recipe::NAME.match?(name)
+
+          entry = RecipeLock.read(directory)[name]
+          raise Stop.new(1, "#{name} is not installed in #{directory}") if entry.nil?
+          if entry.source.nil?
+            raise Stop.new(1, "#{name} was installed from a file: install the new file with `api_recipes install FILE`")
+          end
+
+          place(fetched(name, version, entry.source, "#{File.join(directory, RecipeLock::FILE_NAME)}: the source of #{name}"),
+                directory, yes, 'Update')
+        end
+      end
+
       private
+
+      def guarded
+        yield
+      rescue Stop => e
+        @err.puts e.message
+        e.code
+      rescue ConfigurationError => e
+        e.errors.each { |problem| @err.puts problem }
+        1
+      rescue Git::NotFound => e
+        @err.puts e.message
+        1
+      rescue Git::Failure => e
+        @err.puts e.message
+        2
+      rescue SystemCallError => e
+        @err.puts "could not write (#{e.class.name.split('::').last}): check the folder and its recipes.lock"
+        2
+      end
+
+      def fetched(name, version, address, what)
+        problem = Git.address_problem(address)
+        raise Stop.new(2, "#{what} #{problem}") if problem
+        unless version.nil? || (version.length <= Recipe::MAX_VERSION && Recipe::VERSION.match?(version))
+          raise Stop.new(2, '--version must be made of digits, letters and dots')
+        end
+
+        found = Git.new(address).fetch(name, version)
+        recipe = Recipe.parse(found.text, "#{name} in #{address}", file_name: "#{name}#{Recipe::SUFFIX}")
+        if version && recipe.version != version
+          raise Stop.new(1, "the tag #{name}-#{version} of #{address} holds version #{recipe.version}: nothing was written")
+        end
+
+        Incoming.new(recipe: recipe, source: address, commit: found.commit, origin: "#{address}, commit #{found.commit[0, 12]}")
+      end
+
+      def local(path, version, from)
+        raise Stop.new(2, '--from and --version go with the name of a recipe, not with a file') if version || from
+        unless File.file?(path) && File.readable?(path)
+          shown = Summary.shown(path)
+          raise Stop.new(2, "#{shown}: #{File.file?(path) ? 'cannot be read' : (File.exist?(path) ? 'is not a file' : 'no such file')}")
+        end
+
+        Incoming.new(recipe: Recipe.read(path), source: nil, commit: nil, origin: "the file #{Summary.shown(path)}")
+      end
+
+      # Shows the recipe, asks, then writes its file and the lock of directory.
+      def place(incoming, directory, yes, action)
+        recipe = incoming.recipe
+        destination = File.join(directory, "#{recipe.name}#{Recipe::SUFFIX}")
+        lock_path = File.join(directory, RecipeLock::FILE_NAME)
+        [destination, lock_path].each do |path|
+          raise Stop.new(2, "#{path} is a link: api_recipes does not write through links") if File.symlink?(path)
+        end
+        raise Stop.new(2, "#{directory} is not a folder") if File.exist?(directory) && !File.directory?(directory)
+
+        lock = RecipeLock.read(directory)
+        entry = RecipeLock::Entry.new(version: recipe.version, source: incoming.source, commit: incoming.commit,
+                                      sha256: recipe.sha256)
+        current = installed_text(destination)
+        summary = Summary.new(recipe, origin: incoming.origin)
+        if current == recipe.text && lock[recipe.name] == entry
+          @out.puts "#{summary.title} is already installed in #{directory}: nothing to do"
+          return 0
+        end
+
+        show(summary, destination, current, lock[recipe.name])
+        confirm("#{action} #{summary.title} in #{directory}?") unless yes
+        FileUtils.mkdir_p(directory)
+        write(destination, recipe.text) unless current == recipe.text
+        write(lock_path, LockFile.text(lock.entries.merge(recipe.name => entry)))
+        @out.puts "#{recipe.name} #{recipe.version} is installed in #{destination}"
+        0
+      end
+
+      def installed_text(destination)
+        return nil unless File.exist?(destination)
+        raise Stop.new(2, "#{destination} is not a file") unless File.file?(destination)
+
+        Recipe.read_text(destination).first
+      end
+
+      def show(summary, destination, current, entry)
+        summary.lines.each { |line| @out.puts line }
+        summary.warnings.each { |warning| @out.puts "  warning: #{warning}" }
+        return if current.nil? || current == summary.text
+
+        if entry && entry.sha256 != Recipe.digest(current)
+          @out.puts "  #{destination} was changed after it was installed: those changes will be lost"
+        end
+        summary.changes_from(installed_summary(current, destination)).each { |line| @out.puts line }
+      end
+
+      # The summary of the recipe that is installed now; nil when it is not a
+      # valid recipe.
+      def installed_summary(text, destination)
+        Summary.new(Recipe.parse(text, destination))
+      rescue ConfigurationError
+        nil
+      end
+
+      def confirm(question)
+        @out.print "#{question} [y/N] "
+        @out.flush if @out.respond_to?(:flush)
+        answer = @input&.gets.to_s.strip.downcase
+        raise Stop.new(1, 'nothing was written') unless %w[y yes].include?(answer)
+      end
+
+      # The new content takes the place of the file in one step.
+      def write(path, text)
+        temporary = "#{path}.#{Process.pid}.tmp"
+        File.open(temporary, File::WRONLY | File::CREAT | File::EXCL, 0o644) { |file| file.write(text) }
+        File.rename(temporary, path)
+      ensure
+        File.delete(temporary) if temporary && File.exist?(temporary)
+      end
 
       def check_file(file)
         unless File.file?(file) && File.readable?(file)

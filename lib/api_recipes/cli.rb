@@ -32,6 +32,20 @@ module ApiRecipes
             A file that contains ERB is evaluated only with --erb: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
+        install [--version VERSION] [--from URL] [--to DIR] [--yes] NAME|FILE
+            Installs the portable recipe called NAME from the cookbook
+            (https://github.com/madAle/api_recipes-cookbook) or from the Git repository at URL,
+            which must start with https:// and hold recipes/NAME.recipe.yml. Without --version
+            it takes the recipe at the head of the repository, with it the one at the tag
+            NAME-VERSION. Given a FILE, it installs that file. It shows where the requests and
+            the credential go and which calls are not GET, asks, then writes NAME.recipe.yml and
+            recipes.lock in DIR (config/api_recipes). --yes installs without asking.
+            Exits with 1 if the recipe is not valid, is not found or the answer is no, 2 if the
+            arguments are wrong, git failed or something could not be read or written.
+        update [--version VERSION] [--dir DIR] [--yes] NAME
+            Replaces the recipe NAME installed in DIR with the one its repository has now, or
+            has at VERSION, after showing what changes in the address, the credential and the
+            verbs. Same exit codes as install.
         check [--dir DIR] [FILE]...
             Checks that each FILE is a valid portable recipe. Without a FILE, checks that the
             recipes installed in DIR (config/api_recipes) are the ones written in its
@@ -63,6 +77,8 @@ module ApiRecipes
           routes(args, out, err)
         when 'check'
           check(args, out, err)
+        when 'install', 'update'
+          place(command, args, out, err, input)
         when nil
           err.puts USAGE
           2
@@ -144,6 +160,28 @@ module ApiRecipes
         parser.on('--dir DIR') { |dir| directory = dir }
         files = parser.parse(args)
         Recipes.new(out: out, err: err).check(files, directory: directory)
+      rescue OptionParser::ParseError => e
+        err.puts e.message
+        2
+      end
+
+      def place(command, args, out, err, input)
+        options = { directory: Recipes::DEFAULT_DIRECTORY, yes: false }
+        parser = OptionParser.new
+        parser.on('--version VERSION') { |version| options[:version] = version }
+        parser.on('--dir DIR') { |dir| options[:directory] = dir }
+        parser.on('--yes') { options[:yes] = true }
+        if command == 'install'
+          parser.on('--from URL') { |url| options[:from] = url }
+          parser.on('--to DIR') { |dir| options[:directory] = dir }
+        end
+        targets = parser.parse(args)
+        unless targets.size == 1
+          err.puts command == 'install' ? 'install needs the name of one recipe, or one file' : 'update needs the name of one recipe'
+          return 2
+        end
+
+        Recipes.new(out: out, err: err, input: input).public_send(command, targets.first, **options)
       rescue OptionParser::ParseError => e
         err.puts e.message
         2

@@ -81,11 +81,16 @@ RSpec.describe ApiRecipes::CLI::Recipes::Summary do
     expect(summary.warnings).to eq([])
   end
 
+  # A recipe with such characters is refused when it is read: this is what the
+  # summary does on its own, with an api compiled from a Hash.
   it 'shows text of the recipe without control and format characters' do
-    endpoints = { "sh‮ow" => { 'path' => "/a​b", 'verb' => 'post' } }
-    variables = { 'tenant' => { 'description' => "safe‮ text", 'default' => "e​u" } }
-    lines = summary('shop', 'host' => '{tenant}.example.test', 'variables' => variables, 'endpoints' => endpoints).lines
-    expect(lines.join("\n")).not_to match(/[‮ ​]/)
+    endpoints = { "sh\u202Eow" => { 'path' => "/a\u200Bb", 'verb' => 'post' } }
+    variables = { 'tenant' => { 'description' => "safe\u202E\u2028text", 'default' => "e\u200Bu" } }
+    config = recipe_data('shop', 'host' => '{tenant}.example.test', 'variables' => variables, 'endpoints' => endpoints)['shop']
+    definition = ApiRecipes::Internals::Compiler.compile(:shop, config)
+    recipe = Struct.new(:name, :version, :definition, :text).new('shop', '1.0.0', definition, '')
+    lines = described_class.new(recipe).lines
+    expect(lines.join("\n")).not_to match(/[\u202E\u2028\u200B]/)
     expect(lines).to include('  variables:     tenant (default e?u: safe??text)', '    POST  shop.sh?ow  /a%E2%80%8Bb')
   end
 

@@ -107,7 +107,13 @@ module ApiRecipes
         @text = text
         @sha256 = self.class.digest(text)
         refuse('contains <%: a recipe is never evaluated with ERB, and must not hold text that ERB would run') if text.include?('<%')
-        name, options = one_api(plain_data(text))
+        data = plain_data(text)
+        hidden = unprintable(data)
+        if hidden
+          refuse("#{PlainYaml.label(hidden)}: contains a character that is not printed (a control or a format character): " \
+                 'a recipe holds visible text only')
+        end
+        name, options = one_api(data)
         problems = name_problems(name, file_name) + recipe_problems(name, options['recipe']) +
                    verify_with_problems(name, options) + host_problems(options['host'])
         refuse(problems) unless problems.empty?
@@ -133,6 +139,16 @@ module ApiRecipes
         PlainYaml.load(text, max_bytes: MAX_BYTES)
       rescue PlainYaml::Refused => e
         refuse(e.message)
+      end
+
+      # The first name or value, at any depth, with a character that a
+      # terminal does not show as it is; nil when there is none.
+      def unprintable(value)
+        case value
+        when String then value.match?(PlainYaml::UNPRINTABLE) ? value : nil
+        when Array then value.each { |item| (found = unprintable(item)) && (return found) } && nil
+        when Hash then value.each { |key, item| (found = unprintable(key) || unprintable(item)) && (return found) } && nil
+        end
       end
 
       def one_api(data)
@@ -169,7 +185,10 @@ module ApiRecipes
           problems << "recipe.format #{PlainYaml.label(recipe['format'])} is not known to this version of api_recipes " \
                       "(it knows #{FORMAT}): update the gem"
         end
-        problems << "recipe.summary must be one line of text, at most #{MAX_TEXT} characters" unless line?(recipe['summary'])
+        summary = recipe['summary']
+        unless summary.nil? || (summary.is_a?(String) && summary.length <= MAX_TEXT)
+          problems << "recipe.summary must be text, at most #{MAX_TEXT} characters"
+        end
         homepage = recipe['homepage']
         unless homepage.nil? || (homepage.is_a?(String) && homepage.length <= MAX_TEXT && HOMEPAGE.match?(homepage))
           problems << 'recipe.homepage must be an http or https address, without spaces'
@@ -183,10 +202,6 @@ module ApiRecipes
         return [] if version.length <= MAX_VERSION && VERSION.match?(version)
 
         ["recipe.version must be made of digits, letters and dots, at most #{MAX_VERSION} characters"]
-      end
-
-      def line?(value)
-        value.nil? || (value.is_a?(String) && value.length <= MAX_TEXT && !value.match?(PlainYaml::UNPRINTABLE))
       end
 
       # verify_with names a method of the application: a recipe cannot ask for it.
