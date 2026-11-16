@@ -39,7 +39,7 @@ describe ApiRecipes::Internals::Request do
   end
 
   it 'puts the credential where auth says' do
-    ApiRecipes::Internals::LevelSet.write(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('KEY')) }
+    write_level(ApiRecipes, :svc) { |l| l.with(credential: ApiRecipes::Internals::Credential.authorization('KEY')) }
     new_request(base.merge(auth: { type: 'header', name: 'X-Api-Key' }), %i[users]).perform
     expect(WebMock).to have_requested(:get, 'https://api.example.test/users').with(headers: { 'X-Api-Key' => 'KEY' })
     request = new_request(base.merge(auth: { type: 'query', name: 'api_key' }), %i[users], options: { params: { page: 2 } })

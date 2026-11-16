@@ -53,20 +53,20 @@ describe 'Variables that the api does not declare' do
   describe 'variables=' do
     before { configure_test_apis(shopify: shopify, plain: plain) }
 
-    it 'raises on a global handle and keeps the level' do
-      ApiRecipes.shopify.variables = { shop: 'acme' }
-      expect { ApiRecipes.shopify.variables = { shpo: 'x' } }
-        .to raise_error(ApiRecipes::ConfigurationError) { |e| expect(problems(e)).to eq(["variables: #{unknown_shpo}"]) }
+    it 'raises for the values of the application and keeps the level' do
+      global_values(shopify: { variables: { shop: 'acme' } })
+      expect { global_values(shopify: { variables: { shpo: 'x' } }) }
+        .to raise_error(ApiRecipes::ConfigurationError) { |e| expect(problems(e)).to eq(["shopify.variables: #{unknown_shpo}"]) }
       expect(ApiRecipes.shopify.variables).to eq(shop: 'acme')
     end
 
     it 'raises on a class and on an instance and keeps their levels' do
       klass = Class.new do
         include ApiRecipes
-        api :shopify
+        api :shopify, variables: { shop: 'class' }
       end
-      klass.shopify.variables = { shop: 'class' }
-      expect { klass.shopify.variables = { shpo: 'x' } }.to raise_error(ApiRecipes::ConfigurationError, /shpo/)
+      expect { Class.new { include ApiRecipes }.api(:shopify, variables: { shpo: 'x' }) }
+        .to raise_error(ApiRecipes::ConfigurationError, /shpo/)
       expect(klass.shopify.variables).to eq(shop: 'class')
       object = klass.new
       object.shopify.variables = { shop: 'object' }
@@ -75,14 +75,14 @@ describe 'Variables that the api does not declare' do
     end
 
     it 'still clears the level with nil and sets declared names' do
-      ApiRecipes.shopify.variables = { 'shop' => 'acme' }
+      global_values(shopify: { variables: { 'shop' => 'acme' } })
       expect(ApiRecipes.shopify.variables).to eq(shop: 'acme')
-      ApiRecipes.shopify.variables = nil
+      global_values(shopify: { variables: nil })
       expect(ApiRecipes.shopify.variables).to eq({})
     end
 
     it 'says that none is declared' do
-      expect { ApiRecipes.plain.variables = { shop: 'a' } }
+      expect { global_values(plain: { variables: { shop: 'a' } }) }
         .to raise_error(ApiRecipes::ConfigurationError, /unknown variable 'shop' \(none declared\)/)
     end
   end
@@ -212,7 +212,7 @@ describe 'Variables that the api does not declare' do
     end
   end
 
-  describe 'config.variables' do
+  describe 'config.values' do
     let(:log) { StringIO.new }
 
     def configure_with(variables, apis = { shopify: shopify })
@@ -220,7 +220,7 @@ describe 'Variables that the api does not declare' do
       ApiRecipes.configure do |config|
         config.logger = logger
         config.apis_configs = apis
-        config.variables = variables
+        config.values = variables.to_h { |name, given| [name, { variables: given }] }
       end
     end
 
@@ -250,7 +250,7 @@ describe 'Variables that the api does not declare' do
 
     it 'warns about an api that is not configured, without failing' do
       configure_with({ shpoify: { shop: 'a' } })
-      expect(log.string).to include("variables are given for 'shpoify', which is not a configured api")
+      expect(log.string).to include("values are given for 'shpoify', which is not a configured api")
     end
 
     it 'does not warn when every api is configured' do

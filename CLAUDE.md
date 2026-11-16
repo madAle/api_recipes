@@ -15,6 +15,7 @@ bundle exec rspec spec/docs                     # the examples in README.md and 
 bundle exec ruby -Ilib exe/api_recipes upgrade app lib --config config/apis/github.yml
 bundle exec ruby -Ilib exe/api_recipes import spec/fixtures/openapi/github_small.yml --name github
 bundle exec ruby -Ilib exe/api_recipes routes spec/fixtures/openapi/github_small.expected.yml
+bundle exec ruby -Ilib exe/api_recipes check path/to/NAME.recipe.yml   # a portable recipe
 URI_VERSION='~> 1.0' bundle exec rspec          # pick the uri gem: '~> 1.0' or '< 1.0'
 gem build api_recipes.gemspec -o /tmp/check.gem # packaging check
 ```
@@ -33,11 +34,13 @@ fails under 90% line coverage.
 | `lib/api_recipes/response.rb` | wraps the http.rb response and adds `data`, `success?`, `fill` |
 | `lib/api_recipes/errors.rb` | error classes, all under `ApiRecipes::Error` |
 | `lib/api_recipes/internals/definition.rb` | the immutable tree that `definition` returns |
-| `lib/api_recipes/internals/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once |
+| `lib/api_recipes/internals/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once; expands `resource` into endpoints |
 | `lib/api_recipes/internals/path_template.rb`, `template.rb` | the `path` of an endpoint, and `{variable}` strings, with their encoding rules |
 | `lib/api_recipes/internals/handles.rb` | generates the subclasses of `Api` and `Endpoint` with one method per child |
 | `lib/api_recipes/internals/context.rb` | which tree, which owner and which `with` options a chain uses; resolves values |
 | `lib/api_recipes/internals/level.rb`, `credential.rb` | credentials and variables assigned to the module, a class or an object |
+| `lib/api_recipes/internals/plain_yaml.rb` | reads YAML that is only data: no anchors, aliases, tags, merge keys, repeated keys; used for recipes and locks |
+| `lib/api_recipes/internals/recipe.rb`, `recipe_lock.rb` | a portable recipe (`NAME.recipe.yml`) with the rules of its format, and the `recipes.lock` of its folder |
 | `lib/api_recipes/internals/registry.rb` | what `configure` produced, swapped in at once; the global apis |
 | `lib/api_recipes/internals/declaration.rb` | one `api :name` in a class or a module |
 | `lib/api_recipes/internals/request.rb` | builds the URL and the http.rb client, sends the request, checks the outcome |
@@ -48,11 +51,15 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli/import/tree.rb` | from the paths to the tree of endpoints: names, operations, comments, warnings |
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command |
+| `lib/api_recipes/cli/recipes.rb` | the `install`, `update` and `check` commands for portable recipes |
+| `lib/api_recipes/cli/recipes/git.rb` | reads one file from a Git repository: no working copy, no shell, `https` and `ssh` only |
+| `lib/api_recipes/cli/recipes/summary.rb`, `lock_file.rb` | what `install` and `update` show; the text of `recipes.lock` |
 | `spec/fixtures/openapi` | OpenAPI descriptions for the specs; `SOURCE.md` says where the real one comes from |
 | `spec/unit`, `spec/integration` | specs; integration specs stub HTTP with WebMock |
 | `spec/security` | one example per protection, and `README.md` that maps them |
 | `spec/docs/examples_spec.rb` | evaluates the examples of README.md and UPGRADING.md |
 | `spec/support/test_apis.rb` | shared configuration and helpers for specs |
+| `spec/support/recipe_helpers.rb` | helpers for portable recipes, and a Git repository in a temporary folder |
 | `spec/fixtures` | YAML files for configuration specs |
 | `examples` | runnable scripts that call public APIs |
 | `README.md`, `UPGRADING.md` | the user guide, and the guide for people coming from 2.x |
@@ -60,19 +67,28 @@ fails under 90% line coverage.
 
 ## How a call works
 
-1. `ApiRecipes.configure` loads the sources, compiles them into one immutable tree
-   per api and validates them. Only if that succeeds is the new registry swapped
+1. `ApiRecipes.configure` loads the sources, then the portable recipes of
+   `recipes_paths` (each checked against its `recipes.lock`), compiles them into
+   one immutable tree per api and validates them. Only if that succeeds is the new registry swapped
    in, together with one method per api on the `ApiRecipes` module. `api :name`
    in a class or a module defines the same method on it and on its instances.
 2. That method returns an `Api`. Each endpoint method returns a new `Endpoint`
    that knows its node of the tree and its path, built from the parent path, its
-   own `path` and the arguments. `[]` does the same by name, and the generated
+   own `path`, the arguments and the variables that the `path` uses. `[]` does the same by name, and the generated
    methods call it.
 3. Credentials and variables are not kept on these objects. They live in levels
-   attached to the owner of the call (the module, a class, an instance) and are
-   read, nearest first, when the request is built. `with` adds a level for one chain.
+   and are read, nearest first, when the request is built: the object that
+   makes the call, the class or module that declared the api, the whole
+   application. `with` adds a level for one chain. The last two are shared by
+   every thread, so only the place where the application starts gives them:
+   `config.values` for the application, kept in the registry that `configure`
+   swaps in together with the trees; the options of `api` for a class, kept in
+   its `Declaration`. Only the level of an object is stored on its owner
+   (`LevelSet`). The writers of `Api` work on an object and raise on a class,
+   a module and `ApiRecipes.name`.
 4. `run`, or a block, creates a `Internals::Request`, which builds the URL and the http.rb
-   client, sends the request, checks the outcome (`ok_code`, `on_bad_code`,
+   client with the default headers and parameters of the api, of `with` and of
+   the endpoint, sends the request, checks the outcome (`ok_code`, `on_bad_code`,
    `verify_with`) and returns a `Response`.
 
 Objects of the chain are created again at every step. The tree and the generated
@@ -86,6 +102,19 @@ classes are built once, by `configure`.
 - Internal classes live under `ApiRecipes::Internals`, so that `include ApiRecipes` does not shadow an application's own constants. Only `Api`, `Endpoint`, `Response`, `Configuration`, the errors and `VERSION` stay directly under `ApiRecipes`.
 - Ruby 3.3 syntax; the block parameter `it` is not allowed (Ruby 3.4).
 - The code of the commands lives under `ApiRecipes::CLI`, uses only the standard library and is not loaded by `require 'api_recipes'`. `api_recipes import` opens one file, never uses the network, and never turns a mapping or a list of the description into text: every value read from the description goes through `Import.text`, `Import.shown` or `Import.one_line`, never through `to_s` or an interpolation. With YAML aliases a small file can describe a huge structure; `Document::Shape` refuses the largest ones while the text is parsed.
+- A portable recipe is written by someone else. A file of `recipes_paths`, and
+  what `install`, `update` and `check` read, is read only by
+  `Internals::Recipe`: never with ERB, never with `YAML.safe_load` directly, and
+  the lock is compared before the file is parsed. Whatever comes from a recipe
+  or from a repository reaches the terminal through `Recipes::Summary.shown`.
+  `git` is run without a shell, with the options of `Recipes::Git#transport`,
+  and only after `Git.address_problem`: `https` without a user, or `ssh`
+  (`ssh://` and `user@host:path`) with a user, a host and a path that never
+  start with a hyphen. The specs reach a repository through `file://` because
+  `with_recipe_repository` replaces `Git::PROTOCOLS`: nothing in `lib/` may
+  accept another protocol. No spec starts `ssh`.
+- In a spec, write an invisible character as an escape (`"\u202E"`), never as
+  the character itself.
 - `Api` and `Endpoint` have only these public methods. `Api`: `[]`, `with`,
   `definition`, `authorization`, `authorization=`, `basic_auth`, `basic_auth=`,
   `variables`, `variables=`, `inspect`. `Endpoint`: `[]`, `run`, `url`, `with`,
@@ -99,6 +128,12 @@ classes are built once, by `configure`.
   protection is removed.
 - Never put a credential, a header, a body or a query string in a log line, an
   error message, `inspect` or `definition`.
+- Nothing writes the level of the application or of a class after the
+  application has started: no writer, no method that a request could call.
+  A value that changes from one request to the next belongs to `with` or to an
+  object. A request reads the registry once and takes the tree and the values
+  of the application from it: do not read `Registry.current` twice for one
+  request. Values of variables are kept as frozen text.
 - A regular expression that validates a name or a value uses `\A` and `\z`, never
   `^` and `$`.
 - Do not add monkey patches. `logger` and `http` are the only runtime

@@ -5,7 +5,7 @@ Version 3.0 keeps the way you use the gem: the YAML files, `ApiRecipes.configure
 `ApiRecipes.github.users.show('octocat').run` work as before. A YAML file that
 is valid for 2.x needs no change, apart from what part 2 describes: options and
 values that 2.x accepted without checking them, a placeholder in `base_url` and a
-`{word}` in a header value. What changes is how the gem behaves around them: it
+`{word}` in a header value or in a path. What changes is how the gem behaves around them: it
 checks more, it refuses more, and a few results are different.
 
 This guide has six parts:
@@ -92,10 +92,15 @@ configuration in place. Four things are worth knowing:
   `variables: { template: { default: '{id}' } }` with the header value
   `'{template}'`. Braces around anything else, such as a JSON value, are sent
   as they are.
+- A word in braces in the `path` of an endpoint, such as `/items/{id}`, is now a
+  variable too, and one that is not declared is an error. In 2.x the braces were
+  sent as text. If you meant a value that changes at every call, write a
+  placeholder, `/items/:id`. To keep the braces as text, write `\{id}`.
 - A file that is missing, empty, not valid YAML or not valid UTF-8 raises
   `ApiRecipes::RecipeFileError`, which names the file. Files are read with
   `YAML.safe_load`: plain values, symbols and aliases are accepted, and nothing
-  else. A file called `something.recipe.yml` is refused.
+  else. A file called `something.recipe.yml` is refused: it is a portable
+  recipe, and goes in `recipes_paths`.
 
 ### A class with its own destination needs its own credential
 
@@ -111,16 +116,41 @@ api 'github': the credential is bound to "https://api.github.com" but the reques
 or set it to nil to send none
 ```
 
-Set the credential on the class:
+Give the credential where the class declares the API:
 
 ```ruby
 class EnterpriseClient
   include ApiRecipes
-  api :github, host: 'ent.example.test'
+  api :github, host: 'ent.example.test', authorization: "Bearer #{ENV.fetch('ENTERPRISE_TOKEN')}"
+end
+```
+
+### Credentials are given when the application starts
+
+In 2.x the usual line was `ApiRecipes.github.authorization = '...'`, and code
+that served several users assigned it before each call. What `ApiRecipes.github`
+and a class use is shared by every thread of the process, so a request could
+leave with the token of another user. Now `authorization=`, `basic_auth=` and
+`variables=` raise `ApiRecipes::Error` on `ApiRecipes.github` and on a class,
+and the message says where the value goes:
+
+```ruby
+# the whole application: once, in configure
+ApiRecipes.configure do |config|
+  config.values = { github: { authorization: "Bearer #{ENV.fetch('GITHUB_TOKEN')}" } }
 end
 
-EnterpriseClient.github.authorization = "Bearer #{ENV.fetch('ENTERPRISE_TOKEN')}"
+# one class: where it declares the API
+class AdminClient
+  include ApiRecipes
+  api :github, authorization: "Bearer #{ENV.fetch('ADMIN_TOKEN')}"
+end
+
+# one user, one request: the chain, or an object of its own
+ApiRecipes.github.with(authorization: "Bearer #{user.token}").users.run
 ```
+
+The writers still work on an object, as in `client.github.authorization = ...`.
 
 ### `nil` or an empty path parameter
 
@@ -236,13 +266,13 @@ The warnings name the endpoint and never the value. `config.upgrade_warnings = f
 turns them off. Two more effects: a `:` in a value no longer breaks nested
 endpoints, and a suffix after a placeholder, as in `/:name.json`, is kept.
 
-### Credentials on a class or an instance take effect
+### Credentials on an instance take effect
 
-In 2.x `MyClass.github.authorization = '...'` was lost, because every call
-returned a new object. Now it is stored for the class, and an instance can have its
-own. If your code assigned one of them and relied on it having no effect, it now
-sends a credential. The nearest level wins: the chain (`with`), the object, its
-class and ancestors, then `ApiRecipes.github`. Assigning `nil` means "send none".
+In 2.x `client.github.authorization = '...'` was lost, because every call
+returned a new object. Now it is kept for that object. If your code assigned
+one and relied on it having no effect, it now sends a credential. The nearest
+level wins: the chain (`with`), the object, the class that declares the API,
+then the whole application. A credential given as `nil` means "send none".
 
 ### Logging
 
@@ -278,11 +308,15 @@ rescue ApiRecipes::ResponseCodeNotAsExpected => e
 end
 ```
 
-### Nested endpoints inherit `verify_with`
+### An endpoint looks for its options up the tree
 
-A nested endpoint written without options, under a parent with `verify_with`, did
-not inherit the verification in 2.x. Now every nested endpoint does, unless it
-sets its own.
+In 2.x an endpoint took `timeout`, `on_bad_code` and `mime_type` from the API,
+whatever the endpoint that contained it said, and one written without options
+did not take `verify_with` from its parent. Now an endpoint that does not set
+one of these four options looks for it in the endpoints that contain it, from
+the nearest, then in the API, and takes the first value it finds. Look at the
+endpoints that set one of them and also contain other endpoints: those now
+find it there. `ok_code` is read only on its endpoint.
 
 ### `apis_configs` after the files
 
@@ -385,19 +419,30 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   `ApiRecipes.github[:users][:show, 'octocat']`, whatever the name.
 - **`with`**: options for one chain or one request, without changing anything
   stored: `ApiRecipes.github.with(host: 'github.example.com')`.
-- **Credentials along a chain**: the chain, the object, the class and its
-  ancestors, then `ApiRecipes.github`. A credential is bound to its origin.
-- **`variables`**: `{name}` placeholders in `host`, `base_url` and the values of
-  `default_headers`, with values given at any of those levels.
+- **Credentials along a chain**: the chain, the object, the class that declares
+  the API, then the whole application. A credential is bound to its origin.
+- **`variables`**: `{name}` placeholders in `host`, `base_url`, the `path` of an
+  endpoint and the values of `default_headers` and `default_params`, with
+  values given at any of those levels.
+- **`default_params`**: query parameters sent with every request, as
+  `default_headers` does for headers. Both can be written on an endpoint, for
+  that endpoint and the ones below it.
+- **`resource`**: `resource: true` on an endpoint adds `show`, `create`,
+  `update`, `replace` and `delete` under it.
 - **`auth`**: says where the credential goes: the `Authorization` header, a header
   of your choice or a query parameter.
 - **`ok_code`** accepts a list of statuses, and `response.success?` tells whether a
   response passed the rule of its endpoint.
 - **`definition`**, `routes` and a safe `inspect` on APIs and endpoints.
 - **Validated configuration**, with every problem reported at once.
-- **`config.variables`**, **`config.upgrade_warnings`** and the logging options
-  described above.
-- **The `api_recipes` command**, with `upgrade`.
+- **`config.values`**, which gives each API its credential and the values of
+  its variables for the whole application, **`config.upgrade_warnings`** and
+  the logging options described above.
+- **The `api_recipes` command**, with `upgrade`, `import`, `routes`, `install`,
+  `update` and `check`.
+- **Portable recipes**: recipes written by others, installed with
+  `api_recipes install` and loaded with `config.recipes_paths`. See
+  [Portable recipes](README.md#portable-recipes) in the README.
 
 ## 6. Security
 

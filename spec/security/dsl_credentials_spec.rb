@@ -22,6 +22,116 @@ describe 'Credentials through the DSL' do
 
   def users_url = 'https://api.example.test/users'
 
+  it 'sends the credential, not a header of the same name that the api or an endpoint writes, whatever its case' do
+    configure_test_apis(svc: { host: 'api.example.test', default_headers: { 'AUTHORIZATION' => 'THEIRS' },
+                               endpoints: { users: { default_headers: { 'authorization' => 'THEIRS-TOO' } } } })
+    ApiRecipes.svc.with(authorization: 'Bearer MINE').users.run
+    expect(WebMock).to have_requested(:get, users_url).with(headers: { 'Authorization' => 'Bearer MINE' })
+    configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'header', name: 'X-Api-Key' },
+                               endpoints: { users: { default_headers: { 'x-api-key' => 'THEIRS' } } } })
+    ApiRecipes.svc.with(authorization: 'MINE').users.run
+    expect(WebMock).to have_requested(:get, users_url).with(headers: { 'X-Api-Key' => 'MINE' })
+  end
+
+  # What the whole application or a class uses is read by every thread. Code
+  # that serves several users cannot put the token or a variable of one of
+  # them there: only the place where the application starts writes it.
+  describe 'what every thread shares' do
+    let(:mixin) do
+      Module.new do
+        include ApiRecipes
+        api :svc
+      end
+    end
+
+    it 'cannot be assigned: the writers work on an object only' do
+      shared = [ApiRecipes.svc, ApiRecipes[:svc], client_class.svc, Class.new(client_class).svc, mixin.svc,
+                Class.new.extend(mixin).svc, client_class.singleton_class.instance_method(:svc).bind_call(client_class)]
+      shared.each do |api|
+        [-> { api.authorization = 'Bearer USER-A' }, -> { api.authorization = nil },
+         -> { api.basic_auth = { user: 'a', pass: 'SECRET' } }, -> { api.variables = { shop: 'user-a' } },
+         -> { api.variables = nil }].each do |assignment|
+          expect(&assignment).to raise_error(ApiRecipes::Error, /is shared by (the whole application|all its objects), in every thread/) { |error|
+            expect(error.message).not_to include('USER-A', 'SECRET', 'user-a')
+          }
+        end
+      end
+      # Nothing was written: the request of another user carries nothing of it.
+      [ApiRecipes.svc, client_class.svc, client_class.new.svc, Class.new { include ApiRecipes }.tap { |k| k.api :svc }.new.svc]
+        .each { |api| api.users.run }
+      expect(WebMock).to sent_without_authorization.times(4)
+      expect { ApiRecipes.shop.orders.url }.to raise_error(ApiRecipes::MissingVariable)
+    end
+
+    it 'cannot be assigned by a class that says it is not one' do
+      liar = Class.new do
+        include ApiRecipes
+        api :svc, authorization: 'Bearer CLASS'
+
+        def self.is_a?(_kind) = false
+
+        def self.kind_of?(_kind) = false
+
+        def self.instance_of?(_kind) = false
+      end
+      expect { liar.svc.authorization = 'Bearer STOLEN' }.to raise_error(ApiRecipes::Error, /shared by all its objects/)
+      expect { liar.svc.variables = {} }.to raise_error(ApiRecipes::Error, /shared by all its objects/)
+      liar.new.svc.users.run
+      expect(WebMock).to have_requested(:get, users_url).with(headers: { 'Authorization' => 'Bearer CLASS' })
+    end
+
+    it 'takes values inside the block of configure only, and a configure that gives none keeps those in force when it ends' do
+      expect { ApiRecipes.configuration.values = { svc: { authorization: 'Bearer LATER' } } }
+        .to raise_error(ApiRecipes::Error, /inside the block of ApiRecipes\.configure/)
+      expect { ApiRecipes.configure.values = { svc: { authorization: 'Bearer LATER' } } }
+        .to raise_error(ApiRecipes::Error, /inside the block of ApiRecipes\.configure/)
+      global_values(svc: { authorization: 'Bearer OLD' })
+      # One configure starts, another one gives a new credential, the first ends.
+      ApiRecipes.configure do |_first|
+        ApiRecipes.configure { |second| second.values = { svc: { authorization: 'Bearer ROTATED' } } }
+      end
+      ApiRecipes.configure { |config| config.print_urls = false }
+      ApiRecipes.svc.users.run
+      expect(WebMock).to have_requested(:get, users_url).with(headers: { 'Authorization' => 'Bearer ROTATED' }).once
+      expect(WebMock).not_to have_requested(:get, users_url).with(headers: { 'Authorization' => 'Bearer LATER' })
+    end
+
+    # A variable of the host given as an object that changes later would move
+    # the host, and the credential with it, after the values were given.
+    it 'holds its variables as text: an object that could change afterwards is refused, at every level' do
+      holder = Struct.new(:text) { def to_s = text }.new('acme')
+      [-> { global_values(shop: { variables: { shop: holder } }) },
+       -> { Class.new { include ApiRecipes }.api(:shop, variables: { shop: holder }) },
+       -> { client_class.new.shop.variables = { shop: holder } },
+       -> { ApiRecipes.shop.with(variables: { shop: holder }) }].each do |giving|
+        expect(&giving).to raise_error(ApiRecipes::ConfigurationError, /variables\.shop: must be a string/)
+      end
+      name = +'acme'
+      global_values(shop: { variables: { shop: name }, authorization: 'Bearer GLOBAL' })
+      klass = Class.new { include ApiRecipes }.tap { |k| k.api :shop, variables: { shop: name }, authorization: 'Bearer CLASS' }
+      name.replace('evil')
+      [ApiRecipes.shop.variables, klass.shop.variables].each do |variables|
+        expect(variables).to eq(shop: 'acme').and(be_frozen)
+        expect(variables[:shop]).to be_frozen
+      end
+      expect(ApiRecipes.shop.with(variables: { shop: :sym }).orders.url.to_s).to eq('https://sym.example.test/orders')
+      expect(ApiRecipes.shop.with(variables: { shop: 7 }).orders.url.to_s).to eq('https://7.example.test/orders')
+    end
+
+    it 'keeps the level of a class for an endpoint held across a reset!' do
+      silent = Class.new { include ApiRecipes }.tap { |k| k.api :svc, authorization: nil }
+      own = Class.new { include ApiRecipes }.tap { |k| k.api :svc, authorization: 'Bearer CLASS' }
+      held = [silent.new.svc.users, own.new.svc.users]
+      ApiRecipes.reset!
+      configure_test_apis(svc: { host: 'api.example.test', endpoints: { users: nil } })
+      global_values(svc: { authorization: 'Bearer GLOBAL' })
+      held.each(&:run)
+      expect(WebMock).to sent_without_authorization.once
+      expect(WebMock).to have_requested(:get, users_url).with(headers: { 'Authorization' => 'Bearer CLASS' }).once
+      expect(WebMock).not_to have_requested(:get, users_url).with(headers: { 'Authorization' => 'Bearer GLOBAL' })
+    end
+  end
+
   def sent_without_authorization(url = users_url)
     have_requested(:get, url).with { |request| !request.headers.key?('Authorization') }
   end
@@ -37,7 +147,7 @@ describe 'Credentials through the DSL' do
   end
 
   it 'lets an instance with no token of its own take the shared one, and never the token of a sibling' do
-    ApiRecipes.svc.authorization = 'Bearer SHARED'
+    global_values(svc: { authorization: 'Bearer SHARED' })
     a = client_class.new
     b = client_class.new
     a.svc.authorization = 'Bearer A'
@@ -61,7 +171,7 @@ describe 'Credentials through the DSL' do
   end
 
   it 'sends no token for a client whose token was set to nil, although a shared one exists' do
-    ApiRecipes.svc.authorization = 'Bearer SHARED'
+    global_values(svc: { authorization: 'Bearer SHARED' })
     client = client_class.new
     client.svc.authorization = nil
     client.svc.users.run
@@ -69,7 +179,7 @@ describe 'Credentials through the DSL' do
   end
 
   it 'does not send a shared token to another host, protocol or port selected with with' do
-    ApiRecipes.svc.authorization = 'Bearer SHARED'
+    global_values(svc: { authorization: 'Bearer SHARED' })
     [{ host: 'evil.test' }, { protocol: 'http' }, { port: 8443 }, { host: 'evil.test', port: 443, protocol: 'https' }].each do |options|
       expect { ApiRecipes.svc.with(options).users.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
       expect { ApiRecipes.svc.users.with(options) }.to raise_error(ApiRecipes::ConfigurationError, /unknown option/)
@@ -85,8 +195,8 @@ describe 'Credentials through the DSL' do
   end
 
   it 'does not send a token to a host a variable selects, when the token was set at a farther level' do
-    ApiRecipes.shop.variables = { shop: 'acme' }
-    ApiRecipes.shop.authorization = 'Bearer SHOP'
+    global_values(shop: { variables: { shop: 'acme' } })
+    global_values(shop: { authorization: 'Bearer SHOP' })
     expect { ApiRecipes.shop.with(variables: { shop: 'evil' }).orders.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
     client = client_class.new
     client.shop.variables = { shop: 'evil' }
@@ -97,13 +207,13 @@ describe 'Credentials through the DSL' do
   end
 
   it 'does not send a token whose own level cannot tell the host a variable selects' do
-    ApiRecipes.shop.authorization = 'Bearer SHOP'
+    global_values(shop: { authorization: 'Bearer SHOP' })
     expect { ApiRecipes.shop.with(variables: { shop: 'evil' }).orders.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
     expect(WebMock).not_to have_requested(:any, /.*/)
   end
 
   it 'does not let a class that changes the host receive the global token' do
-    ApiRecipes.svc.authorization = 'Bearer GLOBAL'
+    global_values(svc: { authorization: 'Bearer GLOBAL' })
     other = Class.new do
       include ApiRecipes
       api :svc, host: 'other.example.test'
@@ -161,11 +271,17 @@ describe 'Credentials through the DSL' do
       ["Bearer SECRET\n", "Bearer\r\nX-Injected: SECRET", "Bearer SECRET\0"].each do |value|
         expect { ApiRecipes.svc.with(authorization: value).users.run }
           .to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
-        expect { ApiRecipes.svc.authorization = value }
-          .to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+        [-> { global_values(svc: { authorization: value }) },
+         -> { new_client_class(svc: { authorization: value }) },
+         -> { new_client_class.new.svc.authorization = value }].each do |giving|
+          expect(&giving).to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+        end
       end
-      expect { ApiRecipes.svc.basic_auth = { user: 'u', pass: "SECRET\n" } }
-        .to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+      [-> { global_values(svc: { basic_auth: { user: 'u', pass: "SECRET\n" } }) },
+       -> { new_client_class(svc: { basic_auth: { user: 'u', pass: "SECRET\n" } }) },
+       -> { new_client_class.new.svc.basic_auth = { user: 'u', pass: "SECRET\n" } }].each do |giving|
+        expect(&giving).to raise_error(ApiRecipes::InvalidCredential) { |error| expect(error.message).not_to include('SECRET') }
+      end
       expect(WebMock).not_to have_requested(:any, /.*/)
     end
   end
@@ -173,12 +289,16 @@ describe 'Credentials through the DSL' do
   describe 'a credential that is not valid UTF-8' do
     it 'is refused as an invalid credential, without showing it' do
       value = "Bearer SECRET\xFF"
-      expect { ApiRecipes.svc.authorization = value }
-        .to raise_error(ApiRecipes::InvalidCredential, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      [-> { new_client_class.new.svc.authorization = value }, -> { global_values(svc: { authorization: value }) },
+       -> { new_client_class(svc: { authorization: value }) }].each do |giving|
+        expect(&giving).to raise_error(ApiRecipes::Error, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      end
       expect { ApiRecipes.svc.with(authorization: value).users.run }
         .to raise_error(ApiRecipes::ConfigurationError, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
-      expect { ApiRecipes.svc.basic_auth = { user: 'u', pass: "SECRET\xFF" } }
+      expect { new_client_class.new.svc.basic_auth = { user: 'u', pass: "SECRET\xFF" } }
         .to raise_error(ApiRecipes::InvalidCredential, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
+      expect { global_values(svc: { basic_auth: { user: 'u', pass: "SECRET\xFF" } }) }
+        .to raise_error(ApiRecipes::Error, /valid UTF-8/) { |error| expect(error.message).not_to include('SECRET') }
       expect(WebMock).not_to have_requested(:any, /.*/)
     end
   end
@@ -186,7 +306,7 @@ describe 'Credentials through the DSL' do
   describe 'a credential sent in the query' do
     before do
       configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'query', name: 'key' }, endpoints: { users: nil } })
-      ApiRecipes.svc.authorization = 'SECRET'
+      global_values(svc: { authorization: 'SECRET' })
     end
 
     it 'needs params given as a Hash, and says so without sending anything' do
@@ -196,6 +316,32 @@ describe 'Credentials through the DSL' do
         }
       end
       expect(WebMock).not_to have_requested(:any, /.*/)
+    end
+
+    it 'cannot be replaced by default_params: the configuration that names its parameter is refused' do
+      [{ default_params: { key: 'THEIRS' } }, { endpoints: { users: { default_params: { 'key' => 'THEIRS' } } } }].each do |more|
+        api = { host: 'api.example.test', auth: { type: 'query', name: 'key' }, endpoints: { users: nil } }.merge(more)
+        expect { configure_test_apis(svc: api) }
+          .to raise_error(ApiRecipes::ConfigurationError, /is the parameter of the credential/)
+      end
+    end
+
+    it 'is the only parameter with its name, and the last, when with gives one with that name' do
+      klass = Class.new do
+        include ApiRecipes
+        api :svc
+      end
+      # What http.rb receives: WebMock keeps one value for a name given twice.
+      sent = []
+      allow_any_instance_of(HTTP::Client).to receive(:request).and_wrap_original do |original, *arguments, **options|
+        sent << options[:params]
+        original.call(*arguments, **options)
+      end
+      ApiRecipes.svc.with(default_params: { key: 'THEIRS', a: 1 }).users.run
+      klass.svc.with(default_params: { 'key' => 'THEIRS' }).with(authorization: 'MINE').users(params: { key: 'ALSO-THEIRS' }).run
+      expect(sent).to eq([[%w[a 1], %w[key SECRET]], [%w[key MINE]]])
+      expect(WebMock).to have_requested(:get, "#{users_url}?a=1&key=SECRET")
+      expect(WebMock).to have_requested(:get, "#{users_url}?key=MINE")
     end
 
     it 'is added to params given as a Hash or not given' do

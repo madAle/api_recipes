@@ -33,12 +33,50 @@ module TestApis
     end
   end
 
-  # Anonymous class that declares the two test apis.
-  def new_client_class
+  # Gives values to the level of the whole application, as config.values
+  # does, on top of those the example gave before. A credential replaces the
+  # one of the other kind.
+  def global_values(values)
+    @global_values ||= {}
+    values.each do |name, given|
+      kept = @global_values[name.to_sym] || {}
+      kept = kept.except(:authorization, :basic_auth) if given.key?(:authorization) || given.key?(:basic_auth)
+      @global_values[name.to_sym] = kept.merge(given)
+    end
+    given = @global_values
+    ApiRecipes.configure { |config| config.values = given }
+  end
+
+  # For the specs that work below the DSL. Changes a level as the block says:
+  # the one of the application (owner ApiRecipes, key the api name), which the
+  # registry holds; the one of the class or module of a declaration (key the
+  # Declaration); or the one of an object, written through the Declaration.
+  def write_level(owner, key, &block)
+    internals = ApiRecipes::Internals
+    empty = internals::Level.new(credential: nil, variables: nil)
+    if owner.equal?(ApiRecipes)
+      registry = internals::Registry.current
+      levels = registry.levels.merge(key.to_sym => block.call(registry.level(key.to_sym) || empty))
+      internals::Registry.instance_variable_set(
+        :@current, internals::Registry.new(configs: registry.configs, definitions: registry.definitions,
+                                           handles: registry.handles, levels: levels, generation: registry.generation)
+      )
+    elsif owner.is_a?(Module)
+      raise ArgumentError, 'only the class or module of the declaration has a level' unless owner.equal?(key.declared_in)
+
+      key.instance_variable_set(:@level, block.call(key.level || empty))
+    else
+      internals::LevelSet.write(owner, key, &block)
+    end
+  end
+
+  # Anonymous class that declares the two test apis, with the values and the
+  # options each one is given.
+  def new_client_class(svc: {}, versioned: {})
     Class.new do
       include ApiRecipes
-      api :svc
-      api :versioned
+      api :svc, svc
+      api :versioned, versioned
     end
   end
 
@@ -66,7 +104,7 @@ module TestApis
     path = endpoint_path.reduce(context.base_path) do |parent_path, name|
       node = node.endpoints.fetch(name)
       own = remaining.shift(node.path_params.size)
-      [parent_path, node.template.expand(own, endpoint: node.full_name)].join('/').squeeze('/')
+      [parent_path, node.template.expand(own, endpoint: node.full_name, context: context)].join('/').squeeze('/')
     end
     ApiRecipes::Internals::Request.new(context: context, definition: node, path: path, options: options)
   end

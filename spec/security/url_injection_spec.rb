@@ -105,6 +105,51 @@ describe 'Values that try to change where a request goes' do
     expect(WebMock).to have_requested(:get, 'https://h.test/users').with(headers: { 'X-Tenant' => 'fine' }).once
   end
 
+  describe 'a variable in the path of an endpoint' do
+    before do
+      ApiRecipes.reset!
+      configure_test_apis(svc: { host: 'main.example.test', variables: { account: {} },
+                                 endpoints: { orders: { path: '/accounts/{account}/orders', endpoints: { show: { path: '/:id' } } },
+                                              admin: nil } })
+    end
+
+    ['../admin', 'a/../../admin', '?x=1', '#frag', "a\nb", 'a\\..\\b', '%2e%2e', '//evil.test', '@evil.test'].each do |value|
+      it "keeps the value #{value.inspect} inside its segment" do
+        ApiRecipes.svc.with(variables: { account: value }).orders.show(7).run
+        expect(requested_hosts).to eq(['main.example.test'])
+        expect(WebMock).to have_requested(:get, %r{\Ahttps://main\.example\.test(:443)?/accounts/[^/?#]+/orders/7\z})
+      end
+    end
+
+    it 'refuses, and does not neutralize, the values that name no segment or the current or parent one' do
+      [nil, '', '.', '..'].each do |value|
+        expect { ApiRecipes.svc.with(variables: { account: value }).orders.show(7).run }
+          .to raise_error(ApiRecipes::InvalidVariable)
+      end
+      expect(WebMock).not_to have_requested(:any, /.*/)
+    end
+  end
+
+  describe 'a parameter sent with every request' do
+    before do
+      ApiRecipes.reset!
+      configure_test_apis(svc: { host: 'main.example.test', variables: { version: { default: '1' } },
+                                 default_params: { 'api-version' => '{version}', 'a&b' => 'fixed&x=1' },
+                                 endpoints: { users: nil } })
+    end
+
+    ['1&admin=true', '1#fragment', '1/../../admin', "1\r\nX-Injected: yes", '1;role=admin', '1%26admin%3Dtrue'].each do |value|
+      it "sends the value #{value.inspect} as the value of one parameter" do
+        ApiRecipes.svc.with(variables: { version: value }).users.run
+        sent = WebMock::RequestRegistry.instance.requested_signatures.hash.keys.first
+        expect(sent.uri.host).to eq('main.example.test')
+        expect(sent.uri.path).to eq('/users')
+        expect(URI.decode_www_form(sent.uri.query)).to contain_exactly(['api-version', value], ['a&b', 'fixed&x=1'])
+        expect(sent.headers.keys).not_to include('X-Injected')
+      end
+    end
+  end
+
   # The gem checks the form of a host, not whom it belongs to: the application
   # must not give a user's value to with(host:) or to a variable that is the
   # whole host.

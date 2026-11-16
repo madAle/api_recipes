@@ -13,7 +13,7 @@ github:
   #   type: header              # none, bearer, basic, header or query. header and query need a name
   #   name: X-Access-Token
   # variables:                  # Optional. Declares {name} placeholders usable in host, base_url and the values of default_headers
-  #   shop:                     # Give a value with ApiRecipes.github.with(variables: { shop: 'acme' }) or config.variables
+  #   shop:                     # Give a value with ApiRecipes.github.with(variables: { shop: 'acme' }) or config.values
   #     default: acme           # Optional. Used when no value is given
   #     description: the name of the shop
 
@@ -24,10 +24,10 @@ github:
                                 # Example: path: TheUsersList  => path will be built in the form of /TheUsersList
       verb: get                 # Optional. Default: get
       ok_code: 200              # Optional. Default: from 200 to 299 HTTP status code are considered OK. Can be a list, such as [200, 304]
-      timeout: 2                # Optional. Overrides global property
-      on_bad_code:              # Optional. Overrides global property
-      mime_type:                # Optional. Overrides global property
-      verify_with:              # Optional. Overrides global property
+      timeout: 2                # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
+      on_bad_code:              # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
+      mime_type:                # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
+      verify_with:              # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
       endpoints:
         show:
           path: /:user_id       # You can use :some_param notation and provide the param when calling the route (see examples/simple_usage.rb)

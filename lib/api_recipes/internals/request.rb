@@ -45,7 +45,7 @@ module ApiRecipes
         logger = ApiRecipes.logger
         logger.info(address) if ApiRecipes.configuration.print_urls
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        http_response = send_request(client(credential, chain), address, send_options(credential, origin))
+        http_response = send_request(client(credential, chain), address, send_options(credential, origin, chain))
         elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000
         logger.debug("#{@definition.verb.to_s.upcase} #{address} -> #{http_response.code} (#{elapsed.round(1)}ms)")
         respond(http_response)
@@ -129,7 +129,7 @@ module ApiRecipes
 
       # default_headers, then the credential, then headers: of the request.
       def configured(credential, chain)
-        session = HTTP.headers(@context.headers(chain: chain)).timeout(setting(:timeout))
+        session = HTTP.headers(@context.headers(chain: chain, endpoint: @definition)).timeout(setting(:timeout))
         return session unless credential
 
         if credential.kind == :basic_auth
@@ -146,19 +146,36 @@ module ApiRecipes
         end
       end
 
-      def send_options(credential, origin)
+      # default_params, then params: of the request, then the credential
+      # when it travels in the query. A name is sent once: the later wins.
+      def send_options(credential, origin, chain)
         options = @options
-        if credential && credential.kind == :authorization && auth[:type] == :query
-          unless options[:params].nil? || options[:params].is_a?(Hash)
-            raise ConfigurationError.new(['params: must be a Hash when the credential is sent in the query'])
+        defaults = @context.params(chain: chain, endpoint: @definition)
+        in_query = credential && credential.kind == :authorization && auth[:type] == :query
+        if in_query || !defaults.empty?
+          params = given_params(options[:params], in_query)
+          unless defaults.empty?
+            given = params.map { |key, _| key.to_s }
+            params = defaults.reject { |name, _| given.include?(name) }.to_a + params
           end
-
-          params = options[:params].to_a.reject { |key, _| key.to_s == auth[:name] }
-          options = options.merge(params: params << [auth[:name], credential.value])
+          if in_query
+            params = params.reject { |key, _| key.to_s == auth[:name] }
+            params << [auth[:name], credential.value]
+          end
+          options = options.merge(params: params)
         end
         follow = options[:follow]
         options = options.merge(follow: protected_follow(follow, origin)) if follow.equal?(true) || follow.is_a?(Hash)
         options
+      end
+
+      # The params: of the request as pairs. They are joined with others by
+      # name, so they must be a Hash.
+      def given_params(params, in_query)
+        return params.to_a if params.nil? || params.is_a?(Hash)
+
+        why = in_query ? 'the credential is sent in the query' : 'the api has default_params'
+        raise ConfigurationError.new(["params: must be a Hash when #{why}"])
       end
 
       # http.rb puts in its errors the headers it cannot read and the value of

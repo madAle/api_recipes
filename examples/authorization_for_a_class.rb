@@ -5,22 +5,21 @@ ApiRecipes.configure do |config|
   config.apis_files_paths = ['examples/config/github.yml.erb']
 end
 
-# Let's create a simple class that uses ApiRecipes
-class MyFancyClass
-  include ApiRecipes
-
-  # Declare the apis that we're going to use
-  api :github
-end
-
 # Get your OAUTH token on Github.
 # Navigate Profile => Settings => Developer Settings => Personal Access Tokens => Generate new token
 # Copy the generated string and set the env variable
 # e.g.  GITHUB_OAUTH_TOKEN=your_token bundle exec ruby examples/authorization_for_a_class.rb
 
-# A credential belongs to a class, an instance or the ApiRecipes module. Here it is
-# set on the class: it is used by MyFancyClass and its instances, and by nobody else.
-MyFancyClass.github.authorization = "token #{ENV.fetch('GITHUB_OAUTH_TOKEN')}"
+# Let's create a simple class that uses ApiRecipes
+class MyFancyClass
+  include ApiRecipes
+
+  # Declare the apis that we're going to use. A credential belongs to the whole
+  # application, to a class, to an object or to one chain. Here the class gives
+  # it where it declares the api: it is used by MyFancyClass, its subclasses
+  # and their objects, and by nobody else.
+  api :github, authorization: "token #{ENV.fetch('GITHUB_OAUTH_TOKEN')}"
+end
 
 # From now on every MyFancyClass (and its instances) github's api request will
 # be authenticated through the provided Authorization header.

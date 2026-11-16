@@ -4,7 +4,10 @@ require 'spec_helper'
 describe 'Logging through the DSL' do
   let(:io) { StringIO.new }
   let(:json) { { 'Content-Type' => 'application/json' } }
-  let(:secrets) { %w[SECRET-TOKEN SECRET-USER SECRET-PASS SECRET-HEADER SECRET-DEFAULT SECRET-PARAM SECRET-BODY SECRET-COOKIE] }
+  let(:secrets) do
+    %w[SECRET-TOKEN SECRET-USER SECRET-PASS SECRET-HEADER SECRET-DEFAULT SECRET-PARAM SECRET-BODY SECRET-COOKIE
+       SECRET-ALWAYS SECRET-ENDPOINT]
+  end
 
   def configure(auth, **settings)
     log = io
@@ -12,7 +15,10 @@ describe 'Logging through the DSL' do
       config.log_to = log
       settings.each { |key, value| config.public_send("#{key}=", value) }
       config.apis_configs = { svc: { host: 'api.example.test', auth: auth, default_headers: { 'X-Default' => 'SECRET-DEFAULT' },
-                                     endpoints: { users: nil, show: { path: '/:id' } } } }
+                                     default_params: { 'always' => 'SECRET-ALWAYS' },
+                                     endpoints: { users: { default_params: { 'only' => 'SECRET-ENDPOINT' },
+                                                           default_headers: { 'X-Users' => 'SECRET-ENDPOINT' } },
+                                                  show: { path: '/:id' } } } }
     end
   end
 
@@ -28,7 +34,7 @@ describe 'Logging through the DSL' do
       before do
         configure(auth, log_level: :debug, print_urls: true)
         stub_request(:any, /\.test/).to_return(status: 200, body: '{"echo":"SECRET-BODY"}', headers: json)
-        ApiRecipes.svc.authorization = 'Bearer SECRET-TOKEN'
+        global_values(svc: { authorization: 'Bearer SECRET-TOKEN' })
       end
 
       it 'puts no secret in the debug lines and in the printed urls' do
@@ -43,7 +49,7 @@ describe 'Logging through the DSL' do
   it 'puts no secret in the debug lines for a basic_auth credential' do
     configure(nil, log_level: :debug, print_urls: true)
     stub_request(:any, /\.test/).to_return(status: 200, body: '{}', headers: json)
-    ApiRecipes.svc.basic_auth = { user: 'SECRET-USER', pass: 'SECRET-PASS' }
+    global_values(svc: { basic_auth: { user: 'SECRET-USER', pass: 'SECRET-PASS' } })
     ApiRecipes.svc.users.run
     expect(io.string).to include('GET https://api.example.test/users')
     %w[SECRET-USER SECRET-PASS U0VDUkVU].each { |secret| expect(io.string).not_to include(secret) }
@@ -52,7 +58,7 @@ describe 'Logging through the DSL' do
   it 'puts no secret in the log of a request that fails' do
     configure({ type: 'query', name: 'key' }, log_level: :debug)
     stub_request(:any, /\.test/).to_return(status: 500, body: 'SECRET-BODY')
-    ApiRecipes.svc.authorization = 'Bearer SECRET-TOKEN'
+    global_values(svc: { authorization: 'Bearer SECRET-TOKEN' })
     expect { ApiRecipes.svc.users(params: { token: 'SECRET-PARAM' }).run }.to raise_error(ApiRecipes::ResponseCodeNotAsExpected)
     secrets.each { |secret| expect(io.string).not_to include(secret) }
   end
@@ -72,7 +78,7 @@ describe 'Logging through the DSL' do
   it 'puts no value in the upgrade warnings, and nothing about the request' do
     configure(nil)
     stub_request(:any, /\.test/).to_return(status: 200, body: '{}', headers: json)
-    ApiRecipes.svc.authorization = 'Bearer SECRET-TOKEN'
+    global_values(svc: { authorization: 'Bearer SECRET-TOKEN' })
     ApiRecipes.svc.show('SECRET-PARAM/x').url
     ApiRecipes.svc.show('SECRET-PARAM%2Fx').url
     expect(io.string).to include("contains '/'")
@@ -85,7 +91,7 @@ describe 'Logging through the DSL' do
       config.apis_configs = { svc: { host: 'api.example.test', endpoints: { users: nil, show: { path: '/:id' } } } }
     end
     stub_request(:any, /\.test/).to_return(status: 200, body: '{}', headers: json)
-    ApiRecipes.svc.authorization = 'Bearer SECRET-TOKEN'
+    global_values(svc: { authorization: 'Bearer SECRET-TOKEN' })
     expect do
       ApiRecipes.svc.users.run
       ApiRecipes.svc.show('SECRET-PARAM/x').run

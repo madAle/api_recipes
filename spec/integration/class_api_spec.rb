@@ -6,14 +6,14 @@ describe 'An api declared in a class' do
 
   it 'sends the authorization set on the global api' do
     stub_request(:get, "#{base_url}/users").to_return(status: 200, body: '[]', headers: json)
-    ApiRecipes.svc.authorization = 'Bearer g'
+    global_values(svc: { authorization: 'Bearer g' })
     new_client_class.svc.users.run
     expect(WebMock).to have_requested(:get, "#{base_url}/users").with(headers: { 'Authorization' => 'Bearer g' })
   end
 
   it 'sends the basic auth set on the global api' do
     stub_request(:get, "#{base_url}/users").to_return(status: 200, body: '[]', headers: json)
-    ApiRecipes.svc.basic_auth = { user: 'u', pass: 'p' }
+    global_values(svc: { basic_auth: { user: 'u', pass: 'p' } })
     new_client_class.new.svc.users.run
     expect(WebMock).to have_requested(:get, "#{base_url}/users").with(headers: { 'Authorization' => 'Basic dTpw' })
   end

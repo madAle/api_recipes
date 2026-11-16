@@ -33,21 +33,25 @@ module ApiRecipes
 
           options = Compiler.normalize(options || {})
           method_name = method_for(options.delete(:as), name)
-          variables = options.delete(:variables)
           api_name = name.to_sym
           check_clash(klass, api_name, method_name)
-          variables = Registry.variable_values(variables)
+          # What the class gives to its level: values, not options of the tree.
+          given = options.slice(*Registry::VALUE_KEYS)
+          options = options.except(*Registry::VALUE_KEYS)
+          level = Registry.level_from(given, api_name.to_s)
+          variables = level.variables
           global = Registry.current.definitions[api_name]
           check_variables(api_name, variables, global)
           # The variables that the options use are those of the global api.
           # Without one yet, the tree compiled at the first use checks them.
-          errors = Compiler.check_options(options, :api, variables: global ? global.variables.keys : :any)
+          auth = global && global.auth
+          errors = Compiler.check_options(options, :api, variables: global ? global.variables.keys : :any,
+                                                         credential_param: auth && auth[:type] == :query ? auth[:name] : nil)
           raise ConfigurationError.new(errors) unless errors.empty?
 
-          declaration = new(klass, api_name, Compiler.frozen_copy(options), variables)
+          declaration = new(klass, api_name, Compiler.frozen_copy(options), variables, level.credential)
           declared = klass.instance_variable_get(IVAR)
           klass.instance_variable_set(IVAR, (declared.is_a?(Hash) ? declared : {}).merge(api_name => declaration).freeze)
-          declaration.write_variables
           klass.define_method(method_name) { declaration.api(self) }
           klass.define_singleton_method(method_name) { declaration.api(self) }
           method_name
@@ -105,12 +109,14 @@ module ApiRecipes
         end
       end
 
-      def initialize(klass, name, options, variables)
+      def initialize(klass, name, options, variables, credential = nil)
         @klass = klass
         @name = name
         @options = options
         @variables = variables
-        @variables_generation = nil
+        # What the class or module gives to its level, fixed here: nothing
+        # writes it afterwards, and no reset! removes it. See Api#authorization=.
+        @level = variables.nil? && credential.nil? ? nil : Level.new(credential: credential, variables: variables)
         @tree = nil
         @lock = Mutex.new
         @checked = ObjectSpace::WeakMap.new
@@ -118,6 +124,9 @@ module ApiRecipes
 
       # The class or module where `api` was called.
       def declared_in = @klass
+
+      # The level of that class or module, or nil.
+      attr_reader :level
 
       # The api for owner: the class or module, a subclass, an includer, or an
       # instance of one of them.
@@ -131,15 +140,7 @@ module ApiRecipes
       # The tree of this declaration under the configuration in force.
       def definition = current_tree.definition
 
-      # Writes the declared variables in the level of the class, again after
-      # a reset! of the levels.
-      def write_variables
-        return if @variables.nil?
-
-        LevelSet.write(@klass, self) { |level| level.with(variables: @variables) }
-        @variables_generation = LevelSet.generation
-      end
-
+      # The credential is never shown.
       def inspect = "#<#{self.class.name} #{@name}>"
 
       def to_s = inspect
@@ -156,7 +157,7 @@ module ApiRecipes
       # one, so asking for it never creates one (an object can also reach the
       # declaration through a method copied with define_method).
       def check_owner(owner, generation)
-        klass = owner.is_a?(Module) ? owner : owner.class
+        klass = Module === owner ? owner : owner.class
         unless @checked[klass] == generation
           holder = other_declarer(klass.ancestors)
           raise ApiNameClashError.new(klass, @name, holder) if holder
@@ -206,7 +207,6 @@ module ApiRecipes
         problems = Compiler.unknown_variables(@variables, definition, @name.to_s)
         raise ConfigurationError.new(problems) unless problems.empty?
 
-        write_variables if @variables_generation != LevelSet.generation
         @tree = Tree.new(generation: registry.generation, definition: definition, handles: handles, global: global,
                          api_class: handles.for(definition))
       end
