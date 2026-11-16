@@ -22,10 +22,10 @@ module ImportHelpers
   end
 
   # Runs the api_recipes command and returns [exit code, STDOUT, STDERR].
-  def run_cli(*argv)
+  def run_cli(*argv, input: '')
     out = StringIO.new
     err = StringIO.new
-    [ApiRecipes::CLI.run(argv.map(&:to_s), out: out, err: err), out.string, err.string]
+    [ApiRecipes::CLI.run(argv.map(&:to_s), out: out, err: err, input: StringIO.new(input)), out.string, err.string]
   end
 
   # Writes text in a new file of a temporary directory and yields its path.

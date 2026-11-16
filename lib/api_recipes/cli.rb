@@ -6,6 +6,7 @@ require 'api_recipes/version'
 require 'api_recipes/cli/upgrade'
 require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
+require 'api_recipes/cli/recipes'
 
 module ApiRecipes
   # The api_recipes command. It is not loaded by `require 'api_recipes'`.
@@ -29,7 +30,14 @@ module ApiRecipes
         routes [--erb] FILE...
             Lists the calls that the recipes in each FILE offer, with the verb and the address.
             A file that contains ERB is evaluated only with --erb: this runs the code in it.
+            A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
+        check [--dir DIR] [FILE]...
+            Checks that each FILE is a valid portable recipe. Without a FILE, checks that the
+            recipes installed in DIR (config/api_recipes) are the ones written in its
+            recipes.lock, as ApiRecipes.configure does when the application starts.
+            Exits with 1 if something is not valid or does not match, 2 if it could not read
+            something.
 
       Options:
         --version   print the version
@@ -38,7 +46,7 @@ module ApiRecipes
 
     class << self
       # Returns the exit code.
-      def run(argv, out: $stdout, err: $stderr)
+      def run(argv, out: $stdout, err: $stderr, input: $stdin)
         command, *args = argv
         case command
         when '--version', '-v'
@@ -53,6 +61,8 @@ module ApiRecipes
           import(args, out, err)
         when 'routes'
           routes(args, out, err)
+        when 'check'
+          check(args, out, err)
         when nil
           err.puts USAGE
           2
@@ -126,6 +136,17 @@ module ApiRecipes
       rescue SystemCallError => e
         err.puts "#{output || 'the recipe'}: cannot be written (#{e.class.name.split('::').last})"
         false
+      end
+
+      def check(args, out, err)
+        directory = Recipes::DEFAULT_DIRECTORY
+        parser = OptionParser.new
+        parser.on('--dir DIR') { |dir| directory = dir }
+        files = parser.parse(args)
+        Recipes.new(out: out, err: err).check(files, directory: directory)
+      rescue OptionParser::ParseError => e
+        err.puts e.message
+        2
       end
 
       def routes(args, out, err)

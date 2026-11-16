@@ -92,4 +92,26 @@ describe 'api_recipes routes' do
   it 'is described by the help' do
     expect(run_cli('--help')[1]).to include('routes [--erb] FILE...')
   end
+
+  it 'lists the calls of a portable recipe, read as data only and without its lock' do
+    Dir.mktmpdir do |dir|
+      path = write_recipe(dir, lock: false)
+      code, out, err = run_cli('routes', path)
+      expect(code).to eq(0)
+      expect(err).to eq('')
+      expect(out.lines.map(&:split)).to eq([%w[shop.orders GET https://shop.example.test/orders],
+                                            %w[shop.orders.show(id) GET https://shop.example.test/orders/:id],
+                                            %w[shop.orders.create POST https://shop.example.test/orders]])
+    end
+  end
+
+  it 'never evaluates a portable recipe with ERB, even with --erb' do
+    Dir.mktmpdir do |dir|
+      path = write_recipe(dir, 'shop', "<% raise 'evaluated' %>\n#{recipe_text}", lock: false)
+      code, out, err = run_cli('routes', '--erb', path)
+      expect(code).to eq(1)
+      expect(out).to eq('')
+      expect(err).to include('contains <%')
+    end
+  end
 end
