@@ -171,6 +171,15 @@ describe 'api_recipes convert' do
                              "billing_host: ENV.fetch('BILLING_HOST')")
     end
 
+    it 'leaves to the application a default of a variable that a tag gave' do
+      write('billing.yml', plain.sub("  timeout: 5\n", "  timeout: 5\n  variables:\n    region:\n      default: <%= ENV.fetch('REGION', 'eu') %>\n      description: where\n").sub('billing.example.test', "'{region}.example.test'"))
+      code, out, = run('convert', '--to', '.', 'billing.yml')
+      expect(code).to eq(0)
+      expect(recipe['variables']).to eq('region' => { 'description' => 'where' })
+      expect(out).to include('variables.region.default: came from an ERB tag: the application gives the variable from now on',
+                             "config.values = { billing: { variables: { region: ENV.fetch('REGION') } } }")
+    end
+
     it 'refuses a tag that gives a part of an option that only a whole variable can give' do
       write('billing.yml', plain.sub('timeout: 5', "timeout: 1<%= ENV['T'] %>"))
       code, _, err = run('convert', '--to', '.', 'billing.yml')

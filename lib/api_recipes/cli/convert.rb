@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'yaml'
+require 'securerandom'
 
 module ApiRecipes
   module CLI
@@ -35,8 +36,12 @@ module ApiRecipes
       DEFAULT_VERSION = '1.0.0'
       COMMENT = /<%#.*?%>/m
       OUTPUT = /<%=(.*?)-?%>/m
-      TOKEN = /__API_RECIPES_ERB_(\d+)__/
-      ENV_READ = /\A\s*ENV(?:\.fetch\(\s*|\[\s*)(['"])([A-Za-z_][A-Za-z0-9_]*)\1\s*(?:,\s*(.*?))?\s*[\])]\s*(?:\|\|\s*(.*?))?\s*\z/m
+      # A tag longer than this is not read as a read of the environment.
+      MAX_TAG = 300
+      # More values than a recipe can hold: aliases can make them from a few lines.
+      MAX_VALUES = 200_000
+      ENV_FETCH = /\AENV\.fetch\(\s*(?:'([A-Za-z_]\w*)'|"([A-Za-z_]\w*)")\s*(?:,\s*([^,()]+?)\s*)?\)\z/
+      ENV_INDEX = /\AENV\[\s*(?:'([A-Za-z_]\w*)'|"([A-Za-z_]\w*)")\s*\](?:\s*\|\|\s*([^|&]+?))?\z/
       # A header or a parameter with such a name holds a credential.
       CREDENTIAL = /auth|key|token|secret|passw|credential|signature|cookie|session/i
       SENT = %w[default_headers default_params].freeze
@@ -50,6 +55,9 @@ module ApiRecipes
         @file = file
         @wanted = name
         @version = version
+        # The mark of a tag: random, so that no file can write one.
+        @mark = "__API_RECIPES_ERB_#{SecureRandom.hex(8)}_"
+        @token = /#{@mark}(\d+)__/
       end
 
       def call
@@ -62,10 +70,13 @@ module ApiRecipes
         @envs = {}
         @expressions = {}
         @verify_with = []
+        @secret = []
+        @given = {}
         name, options = api(parsed(plain(source)))
         @name = name
         declared = options['variables']
-        declared.each_key { |variable| @origins[variable.to_s] = :declared } if declared.is_a?(Hash)
+        refuse('variables: must be a mapping of names') unless declared.nil? || declared.is_a?(Hash)
+        (declared || {}).each_key { |variable| @origins[variable.to_s] = :declared }
         refuse('the name of the api must be made of lowercase letters, digits, - and _ to be the name of a recipe') unless Internals::Recipe::NAME.match?(name)
         refuse('already has the key recipe: rename the file to NAME.recipe.yml and check it') if options.key?('recipe')
 
@@ -74,7 +85,7 @@ module ApiRecipes
         body['variables'] = (body['variables'] || {}).merge(@variables) unless @variables.empty?
         text = Text.new(name, ordered(body, API_ORDER)).to_yaml
         Result.new(name: name, version: @version, text: text, calls: checked(name, text), changes: @changes,
-                   variables: env_of(false), defaults: env_of(true), expressions: @expressions, verify_with: @verify_with)
+                   variables: env_of(false).merge(@given), defaults: env_of(true), expressions: @expressions, verify_with: @verify_with)
       end
 
       # What is said after the recipe is written in path: what changed from
@@ -135,13 +146,12 @@ module ApiRecipes
       # The text with each output tag replaced by a token, and the tags kept
       # aside. Nothing of a tag is run.
       def plain(text)
-        refuse('holds text that this command uses for itself') if TOKEN.match?(text)
         @tags = []
         plain = text.gsub(COMMENT) { |comment| comment.gsub(/[^\n]/, '') }
         plain = plain.gsub(OUTPUT) do
           code = Regexp.last_match(1)
           @tags << tag(code, Regexp.last_match.pre_match.count("\n") + 1)
-          "__API_RECIPES_ERB_#{@tags.size - 1}__#{"\n" * code.count("\n")}"
+          "#{@mark}#{@tags.size - 1}__#{"\n" * code.count("\n")}"
         end
         left = plain.gsub('<%%', '')
         return plain.gsub('<%%', '<%') unless left.include?('<%')
@@ -156,10 +166,11 @@ module ApiRecipes
       # What can be known of a tag without running it: the environment
       # variable it reads and the default written beside it.
       def tag(code, line)
-        match = ENV_READ.match(code)
-        return Tag.new(line: line, env: nil, default: nil, code: code.strip) unless match
+        code = code.strip
+        match = code.length <= MAX_TAG && (ENV_FETCH.match(code) || ENV_INDEX.match(code))
+        return Tag.new(line: line, env: nil, default: nil, code: code) unless match
 
-        Tag.new(line: line, env: match[2], default: literal(match[4] || match[3]), code: code.strip)
+        Tag.new(line: line, env: match[1] || match[2], default: literal(match[3]), code: code)
       end
 
       def literal(code)
@@ -175,6 +186,7 @@ module ApiRecipes
       def parsed(text)
         data = YAML.safe_load(text, permitted_classes: [Symbol], aliases: true)
         refuse('does not describe an api') unless data.is_a?(Hash) && !data.empty?
+        bounded(data)
         named = names_from_tags(data)
         unless named.empty?
           raise Refused.new(named.map { |line| "#{shown(@file)}:#{line}: an ERB tag gives a name: a recipe needs the name written" })
@@ -187,12 +199,24 @@ module ApiRecipes
         refuse('is not valid YAML')
       end
 
+      # Aliases make a huge structure from a few lines: it is counted before
+      # anything walks it whole.
+      def bounded(value, seen = [0])
+        seen[0] += 1
+        refuse('describes more values than a recipe can hold') if seen[0] > MAX_VALUES
+        case value
+        when Hash then value.each { |key, inner| bounded(key, seen) && bounded(inner, seen) }
+        when Array then value.each { |inner| bounded(inner, seen) }
+        end
+        true
+      end
+
       # The lines of the tags that stand where a name does.
       def names_from_tags(value, found = [])
         case value
         when Hash
           value.each do |key, inner|
-            key.to_s.scan(TOKEN) { found << @tags[Regexp.last_match(1).to_i].line }
+            key.to_s.scan(@token) { found << @tags[Regexp.last_match(1).to_i].line }
             names_from_tags(inner, found)
           end
         when Array then value.each { |inner| names_from_tags(inner, found) }
@@ -214,6 +238,7 @@ module ApiRecipes
         if @wanted
           raise Unusable, "#{shown(@file)}: does not describe an api called #{shown(@wanted)}" unless data.key?(@wanted)
 
+          refuse('does not describe an api') unless data[@wanted].nil? || data[@wanted].is_a?(Hash)
           return [@wanted, data[@wanted] || {}]
         end
         unless names.size == 1
@@ -229,6 +254,7 @@ module ApiRecipes
         options.each do |key, value|
           case key
           when 'verify_with' then left_out(key, value)
+          when 'variables' then out[key] = declared_variables(value)
           when 'host', 'base_url' then out[key] = with_variables(value, key, key)
           when *OPTION_KEYS then out[key] = option(value, key, key)
           when *SENT then out[key] = sent(value, key)
@@ -237,6 +263,21 @@ module ApiRecipes
           end
         end
         out
+      end
+
+      # The variables the file declares already. A default that a tag gives
+      # is given by the application from now on.
+      def declared_variables(value)
+        value.to_h do |name, spec|
+          next [name, spec] unless spec.is_a?(Hash) && holds_tag?(spec['default'])
+
+          match = /\A#{@token.source}\z/.match(spec['default'].to_s)
+          refuse("variables.#{shown(name)}.default: an ERB tag gives a part of the value: a recipe needs it written") unless match
+          @expressions[name.to_s] = @tags[match[1].to_i].code
+          @given[name.to_s] = @tags[match[1].to_i].env
+          @changes << "variables.#{shown(name)}.default: came from an ERB tag: the application gives the variable from now on"
+          [name, spec.reject { |key, _| key == 'default' }]
+        end
       end
 
       def endpoints(value, where)
@@ -277,7 +318,10 @@ module ApiRecipes
 
         value.to_h do |name, content|
           here = "#{where}.#{name}"
-          if CREDENTIAL.match?(name)
+          if content.to_s.length > Internals::Recipe::MAX_LENGTH
+            refuse("#{shown(here)}: is longer than the #{Internals::Recipe::MAX_LENGTH} characters a recipe allows for a value")
+          end
+          if CREDENTIAL.match?(name) && !given_by_variables?(content)
             [name, credential(content, here, name)]
           else
             [name, with_variables(content, here, name)]
@@ -285,10 +329,21 @@ module ApiRecipes
         end
       end
 
+      # A value that is already made of variables only, or of text and
+      # variables the file declares, holds nothing to hide.
+      def given_by_variables?(content)
+        return false unless content.is_a?(String) && !@token.match?(content)
+
+        names = content.scan(Internals::Template::VARIABLE).flatten
+        !names.empty? && names.all? { |name| @origins[name] == :declared }
+      end
+
       def credential(content, where, name)
-        tags = content.to_s.scan(TOKEN).flatten.map { |index| @tags[index.to_i] }
-        if tags.size == 1 && content.to_s.match?(/\A#{TOKEN.source}\z/)
+        tags = content.to_s.scan(@token).flatten.map { |index| @tags[index.to_i] }
+        if tags.size == 1 && content.to_s.match?(/\A#{@token.source}\z/)
           variable = variable_for(tags.first, name, default: false)
+          # The same environment variable may have been read elsewhere, with a default.
+          @variables[variable] = {}
           @changes << "#{shown(where)}: the ERB tag is now the variable {#{variable}}; the value is not in the recipe"
         else
           variable = declare(variable_name(name), nil, nil)
@@ -300,9 +355,9 @@ module ApiRecipes
 
       # A value where a recipe can have a variable.
       def with_variables(value, where, fallback)
-        return fixed(value, where) unless value.is_a?(String) && TOKEN.match?(value)
+        return fixed(value, where) unless value.is_a?(String) && @token.match?(value)
 
-        value.gsub(TOKEN) do
+        value.gsub(@token) do
           tag = @tags[Regexp.last_match(1).to_i]
           variable = variable_for(tag, fallback, default: true)
           kept = @variables[variable].key?('default') ? ', with the default written in the tag' : ''
@@ -313,6 +368,8 @@ module ApiRecipes
 
       def variable_for(tag, fallback, default:)
         name = declare(variable_name(tag.env || fallback), tag.env, default ? tag.default : nil)
+        @secret << name unless default
+        @variables[name] = {} if @secret.include?(name)
         @expressions[name] ||= tag.code
         name
       end
@@ -320,9 +377,9 @@ module ApiRecipes
       # A value written in the file, as the Ruby code that gives it again. A
       # tag inside it stays what it was: an interpolation.
       def written(content)
-        return content.inspect unless content.is_a?(String) && TOKEN.match?(content)
+        return content.inspect unless content.is_a?(String) && @token.match?(content)
 
-        parts = content.split(TOKEN).each_slice(2).flat_map do |text, index|
+        parts = content.split(@token).each_slice(2).flat_map do |text, index|
           [text.inspect[1..-2], index && "\#{#{@tags[index.to_i].code}}"]
         end
         "\"#{parts.compact.join}\""
@@ -332,9 +389,9 @@ module ApiRecipes
       # variable, which is all a recipe can have there.
       def option(value, where, fallback)
         return value unless holds_tag?(value)
-        return with_variables(value, where, fallback) if value.is_a?(String) && value.match?(/\A#{TOKEN.source}\z/)
+        return with_variables(value, where, fallback) if value.is_a?(String) && value.match?(/\A#{@token.source}\z/)
 
-        refuse("#{where}: an ERB tag gives a part of the value: a recipe needs it written, or given whole by one tag")
+        refuse("#{shown(where)}: an ERB tag gives a part of the value: a recipe needs it written, or given whole by one tag")
       end
 
       def variable_name(text)
@@ -370,7 +427,7 @@ module ApiRecipes
           return
         end
 
-        tag = value.is_a?(String) && (match = /\A#{TOKEN.source}\z/.match(value)) ? @tags[match[1].to_i] : nil
+        tag = value.is_a?(String) && (match = /\A#{@token.source}\z/.match(value)) ? @tags[match[1].to_i] : nil
         if tag && !tag.default.nil?
           out[key] = tag.default
           @changes << "#{shown(where)}: came from an ERB tag: the recipe has the default written in the tag"
@@ -383,14 +440,14 @@ module ApiRecipes
       def fixed(value, where)
         return value unless holds_tag?(value)
 
-        refuse("#{where}: an ERB tag gives a value that a recipe needs written")
+        refuse("#{shown(where)}: an ERB tag gives a value that a recipe needs written")
       end
 
       def holds_tag?(value)
         case value
-        when Hash then value.any? { |key, inner| TOKEN.match?(key.to_s) || holds_tag?(inner) }
+        when Hash then value.any? { |key, inner| @token.match?(key.to_s) || holds_tag?(inner) }
         when Array then value.any? { |inner| holds_tag?(inner) }
-        when String then TOKEN.match?(value)
+        when String then @token.match?(value)
         else false
         end
       end

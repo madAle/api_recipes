@@ -212,6 +212,14 @@ module ApiRecipes
       rescue Convert::Unusable, OptionParser::ParseError => e
         err.puts e.message
         2
+      rescue SystemStackError
+        err.puts 'the file is nested too deeply to be read'
+        1
+      rescue StandardError => e
+        # What the command did not foresee is answered with one line, never
+        # with the text of an exception, which could hold a value of the file.
+        err.puts "convert failed (#{e.class}): this is a defect of api_recipes, not of the file"
+        1
       end
 
       # The current directory is the root of a project: it has a Gemfile, or
