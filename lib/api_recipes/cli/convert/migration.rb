@@ -114,6 +114,7 @@ module ApiRecipes
           file = files.first
           text = @project.text(file)
           edited = edited_initializer(file, text)
+          @proposal = [file, text, edited] if edited && ruby?(edited)
           return nil unless edited && addable(file)
 
           unless ruby?(edited)
@@ -304,7 +305,7 @@ module ApiRecipes
         def by_hand
           recipe = File.join(@directory, "#{@result.name}#{Internals::Recipe::SUFFIX}")
           @out.puts '', 'What to do by hand', '', '1. Write the recipe and install it:'
-          Convert.show(@out, ["bundle exec api_recipes convert #{shown(@source)} --to #{@directory}",
+          Code.show(@out, ["bundle exec api_recipes convert #{shown(@source)} --to #{@directory}",
                               "bundle exec api_recipes install #{recipe} --yes"], :shell)
           configure_step
           number = 3
@@ -313,7 +314,7 @@ module ApiRecipes
 
             found = declaration_lines.first
             @out.puts "#{number}. #{found ? "On the line that declares the api (#{shown(found[0])}:#{found[1] + 1})" : 'Where a class declares the api'}, give verify_with:"
-            Convert.show(@out, ["api :#{@result.name}, verify_with: #{Internals::Compiler::METHOD_NAME.match?(method) ? ":#{method}" : '...'}"])
+            Code.show(@out, ["api :#{@result.name}, verify_with: #{Internals::Compiler::METHOD_NAME.match?(method) ? ":#{method}" : '...'}"])
             number += 1
           end
           @out.puts "#{number}. Remove the old description: #{old_description}"
@@ -322,12 +323,14 @@ module ApiRecipes
         # The lines for the block of ApiRecipes.configure, with the file, the
         # line and the name of the block parameter when there is one such file.
         def configure_step
+          return if whole_block
+
           files = @project.ruby_files.select { |file| @project.text(file).to_s.match?(/\bApiRecipes\.configure\b/) }
           text = files.size == 1 ? @project.text(files.first) : nil
           match = text && text.scan(CONFIGURE).size == 1 ? CONFIGURE.match(text) : nil
           unless match
             @out.puts '2. In the file that calls ApiRecipes.configure, inside its block, add:'
-            return Convert.show(@out, Snippet.new(@result, @source).lines)
+            return Code.show(@out, Snippet.new(@result, @source).lines)
           end
 
           file = files.first
@@ -339,11 +342,24 @@ module ApiRecipes
           if values && !@result.expressions.empty?
             @out.puts "2. In #{shown(file)}, inside the block of ApiRecipes.configure (line #{line}), add this to the Hash that " \
                       "#{config}.values is given at line #{values + 1}#{', and the line of recipes_paths' if recipes}:"
-            Convert.show(@out, snippet.entry + (recipes ? ['', "#{config}.recipes_paths = #{recipes}"] : []))
+            Code.show(@out, snippet.entry + (recipes ? ['', "#{config}.recipes_paths = #{recipes}"] : []))
           else
             @out.puts "2. In #{shown(file)}, inside the block of ApiRecipes.configure (line #{line}), add:"
-            Convert.show(@out, snippet.lines)
+            Code.show(@out, snippet.lines)
           end
+        end
+
+        # The block of ApiRecipes.configure as it is after the change, to
+        # put in the place of the one that is there. true when it was shown.
+        def whole_block
+          file, text, edited = @proposal
+          before = Code::ConfigureBlock.in(text)
+          after = Code::ConfigureBlock.in(edited)
+          return false unless before && after && !Code::UNSAFE.match?(after.lines.join("\n"))
+
+          @out.puts "2. In #{shown(file)}, replace the block of ApiRecipes.configure (lines #{before.first} to #{before.last}) with:"
+          Code.show(@out, after.lines)
+          true
         end
 
         def old_description
@@ -372,7 +388,7 @@ module ApiRecipes
             @out.puts '', 'Left to you'
             @left.each { |one| @out.puts "  - #{one}" }
             @result.verify_with.select { |place, method| place == 'verify_with' && Internals::Compiler::METHOD_NAME.match?(method) }.each do |_, method|
-              Convert.show(@out, ["api :#{@result.name}, verify_with: :#{method}"])
+              Code.show(@out, ["api :#{@result.name}, verify_with: :#{method}"])
             end
           end
           @out.puts '', 'Every change is in `git status` and `git diff`, and `git checkout` undoes it. Check the recipes with ' \

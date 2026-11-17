@@ -103,7 +103,7 @@ module ApiRecipes
           result.changes.each { |change| out.puts "  #{change}" }
         end
         out.puts '', 'In the file that calls ApiRecipes.configure, inside its block:'
-        show(out, Snippet.new(result, source).lines)
+        Code.show(out, Snippet.new(result, source).lines)
         unless result.defaults.empty?
           out.puts "Variables that have a default in the recipe: #{result.defaults.keys.join(', ')}. .compact leaves out " \
                    'the ones whose code gives nil.', ''

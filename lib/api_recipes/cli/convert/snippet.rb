@@ -9,8 +9,6 @@ module ApiRecipes
       # Only what a terminal would obey is left out: that value is given as
       # nil, with a comment that says where to copy it from.
       class Snippet
-        # What a terminal would obey, or would show in another order.
-        UNSAFE = /[^[:print:]\n\t]|[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/
         ENV_ONLY = /\AENV(\[\s*(['"])\w+\2\s*\]|\.fetch\(\s*(['"])\w+\3\s*\))\z/
         PLAIN = /\A("(?:[^"#\\]|\\.)*"|'[^'\\]*'|\d+)\z/
 
@@ -62,39 +60,7 @@ module ApiRecipes
         end
 
         # Everything is shown but what would change what the terminal shows.
-        def shown?(code, _ref) = !UNSAFE.match?(code)
-      end
-
-      # Colours for the code shown on a terminal. The text it is given holds
-      # nothing a terminal obeys: Snippet leaves that out.
-      module Paint
-        RUBY = /('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(#[^\n]*)|(\b[a-z_]\w*:(?!:))|((?<![:\w]):[a-z_]\w*)|(\b[A-Z]\w*)|(\b(?:nil|true|false|do|end)\b)/
-
-        def self.ruby(line)
-          line.gsub(RUBY) do
-            match = Regexp.last_match
-            code = if match[1] then 32
-                   elsif match[2] then 2
-                   elsif match[3] || match[4] then 36
-                   elsif match[5] then 33
-                   else 35
-                   end
-            "\e[#{code}m#{match[0]}\e[0m"
-          end
-        end
-
-        def self.shell(line) = line.sub(/\A(\S+(?: exec \S+)?)/) { "\e[1m#{Regexp.last_match(1)}\e[0m" }
-
-        # Whether out is a terminal that takes colours.
-        def self.on?(out) = out.respond_to?(:tty?) && out.tty? && !ENV.key?('NO_COLOR')
-      end
-
-      # Prints a block of code, indented, in colours on a terminal.
-      def self.show(out, lines, kind = :ruby)
-        paint = Paint.on?(out)
-        out.puts
-        lines.each { |line| out.puts(line.empty? ? '' : "    #{paint ? Paint.public_send(kind, line) : line}") }
-        out.puts
+        def shown?(code, _ref) = !Code::UNSAFE.match?(code)
       end
     end
   end

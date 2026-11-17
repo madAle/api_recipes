@@ -225,7 +225,7 @@ describe 'api_recipes convert, in a project' do
     end
   end
 
-  it 'gives the code to paste, with the file and the line, when it does not change the project' do
+  it 'gives the whole block of configure to paste over the one that is there, when it does not change the project' do
     project
     File.write('config/apis/billing.yml.erb', "#{billing}# a note\n")
     _, out, = convert('config/apis/billing.yml.erb')
@@ -238,18 +238,21 @@ describe 'api_recipes convert, in a project' do
           bundle exec api_recipes convert config/apis/billing.yml.erb --to config/api_recipes
           bundle exec api_recipes install config/api_recipes/billing.recipe.yml --yes
 
-      2. In config/initializers/api_recipes.rb, inside the block of ApiRecipes.configure (line 1), add:
+      2. In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure (lines 1 to 3) with:
 
-          config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
-          config.values = {
-            billing: { variables: {
-              billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
-              billing_port: (ENV['BILLING_PORT'] || 443),
-              billing_protocol: (ENV['BILLING_PROTOCOL'] || 'https'),
-              billing_client: ENV['BILLING_CLIENT'],
-              api_key_secret: (Settings.billing_secret)
-            }.compact }
-          }
+          ApiRecipes.configure do |config|
+            config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)] + Dir[File.expand_path('../apis/*.yml', __dir__)]
+            config.values = {
+              billing: { variables: {
+                billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
+                billing_port: (ENV['BILLING_PORT'] || 443),
+                billing_protocol: (ENV['BILLING_PROTOCOL'] || 'https'),
+                billing_client: ENV['BILLING_CLIENT'],
+                api_key_secret: (Settings.billing_secret)
+              }.compact }
+            }
+            config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
+          end
 
       3. On the line that declares the api (app/models/invoice.rb:3), give verify_with:
 
@@ -274,7 +277,7 @@ describe 'api_recipes convert, in a project' do
     terminal = StringIO.new
     terminal.define_singleton_method(:tty?) { true }
     ApiRecipes::CLI.run(%w[convert config/apis/billing.yml.erb], out: terminal, err: StringIO.new)
-    expect(terminal.string).to include("\e[36mbilling_client:\e[0m \e[33mENV\e[0m[\e[32m'BILLING_CLIENT'\e[0m]")
+    expect(terminal.string).to include("\e[36mbilling_client:\e[0m \e[33mENV\e[0m[\e[32m'BILLING_CLIENT'\e[0m]", "\e[33mApiRecipes\e[0m.configure \e[35mdo\e[0m |config|")
     expect(convert('config/apis/billing.yml.erb')[1]).not_to include("\e")
   end
 
