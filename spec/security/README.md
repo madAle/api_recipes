@@ -25,6 +25,7 @@ Spec files:
 | `configuration_spec.rb` | local files, ERB, YAML, refused configurations |
 | `openapi_import_spec.rb` | `api_recipes import`: a hostile OpenAPI description and the recipe written from it |
 | `portable_recipes_spec.rb` | portable recipes: a hostile recipe or repository, with `recipes_paths`, `install`, `update` and `check` |
+| `project_commands_spec.rb` | the commands that read the files of a project: `upgrade` with no argument and `convert` |
 
 ## Values put in the URL and in the headers
 
@@ -207,3 +208,24 @@ The application must:
 - Know that `git` runs with its own configuration: its credential helper is what
   lets `install` read a private repository, and it downloads the whole commit,
   not only the file of the recipe, into a temporary folder.
+
+## The commands that read the files of a project
+
+`api_recipes upgrade` with no argument finds the files to check by itself, and
+`api_recipes convert` writes a file meant for a shared repository from one of
+the project.
+
+| Risk | Protection | Spec | Example |
+| --- | --- | --- | --- |
+| Code in a file that `upgrade` found by itself | without `--erb` no ERB is run: each `<%= ... %>` is replaced by a token before the text is parsed, and a file with any other tag is reported and not read | `project_commands_spec.rb` | `upgrade with no argument never runs the ERB of a file it found by itself: output tags, other tags, comments`; `runs it only with --erb` |
+| A symbolic link that takes `upgrade` out of the project | a directory that is a symbolic link is not entered | `project_commands_spec.rb` | `upgrade with no argument does not leave the project through a symbolic link` |
+| Code in the file given to `convert` | the tags are replaced by tokens and never evaluated; the command has no `--erb` | `project_commands_spec.rb` | `convert never runs the ERB of the file, and has no option that does` |
+| A credential of the project copied into a recipe that is then shared | a header or a parameter named like a credential, of the api or of an endpoint, is written as a variable without a default: neither a value written in the file nor the default of a tag reaches the recipe or the terminal | `project_commands_spec.rb` | `convert never copies a credential into the recipe or onto the terminal: written in the file, or as the default of a tag`; `does not copy one written on an endpoint either` |
+| `convert` writing over a file | the recipe is created with `File::EXCL`, which also refuses a symbolic link | `project_commands_spec.rb` | `convert creates the recipe and never writes over a file, not even through a symbolic link` |
+| `convert` writing something that is not a portable recipe | the text is checked with the rules of a portable recipe before the file is created | `project_commands_spec.rb` | `convert writes only what passes as a portable recipe: a file that would not is refused and nothing is written` |
+| A name of the file that changes what the terminal shows | every name goes through `Recipes::Summary.shown` | `project_commands_spec.rb` | `convert does not send a name of the file to the terminal as it is written` |
+
+What `convert` does not do: it cannot recognise a secret written where its name
+does not say so, such as a token inside a `path` or in a header called
+`X-Client`. Read the recipe before sharing it; `api_recipes install` shows the
+headers and the parameters to whoever installs it.

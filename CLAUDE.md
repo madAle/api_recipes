@@ -17,6 +17,7 @@ bundle exec ruby -Ilib exe/api_recipes upgrade app lib --config config/apis/gith
 bundle exec ruby -Ilib exe/api_recipes import spec/fixtures/openapi/github_small.yml --name github
 bundle exec ruby -Ilib exe/api_recipes routes spec/fixtures/openapi/github_small.expected.yml
 bundle exec ruby -Ilib exe/api_recipes check path/to/NAME.recipe.yml   # a portable recipe
+bundle exec ruby -Ilib exe/api_recipes convert config/apis/github.yml   # from a file of a project to a portable recipe
 URI_VERSION='~> 1.0' bundle exec rspec          # pick the uri gem: '~> 1.0' or '< 1.0'
 gem build api_recipes.gemspec -o /tmp/check.gem # packaging check
 ```
@@ -53,6 +54,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli/import/tree.rb` | from the paths to the tree of endpoints: names, operations, comments, warnings |
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command |
+| `lib/api_recipes/cli/convert.rb` | the `convert` command: from a configuration file of a project to the text of a portable recipe |
 | `lib/api_recipes/cli/recipes.rb` | the `install`, `update` and `check` commands for portable recipes |
 | `lib/api_recipes/cli/recipes/git.rb` | reads one file from a Git repository: no working copy, no shell, `https` and `ssh` only |
 | `lib/api_recipes/cli/recipes/summary.rb`, `lock_file.rb` | what `install` and `update` show; the text of `recipes.lock` |
@@ -104,6 +106,14 @@ classes are built once, by `configure`.
 - Internal classes live under `ApiRecipes::Internals`, so that `include ApiRecipes` does not shadow an application's own constants. Only `Api`, `Endpoint`, `Response`, `Configuration`, the errors and `VERSION` stay directly under `ApiRecipes`.
 - Ruby 3.3 syntax; the block parameter `it` is not allowed (Ruby 3.4).
 - The code of the commands lives under `ApiRecipes::CLI`, uses only the standard library and is not loaded by `require 'api_recipes'`. `api_recipes import` opens one file, never uses the network, and never turns a mapping or a list of the description into text: every value read from the description goes through `Import.text`, `Import.shown` or `Import.one_line`, never through `to_s` or an interpolation. With YAML aliases a small file can describe a huge structure; `Document::Shape` refuses the largest ones while the text is parsed.
+- `api_recipes convert` and `api_recipes upgrade` without `--erb` never run
+  the ERB of a file: a tag is replaced by a token before the text is parsed.
+  `convert` has no option that evaluates ERB, because its result is meant for a
+  shared repository: a header or a parameter that `Convert::CREDENTIAL` matches
+  is written as a variable, never with its value, and what the command prints
+  holds names, shown with `Recipes::Summary.shown`, never a value of the file.
+  The recipe is checked with `Internals::Recipe` before it is written, and the
+  file is created with `File::EXCL`.
 - A portable recipe is written by someone else. A file of `recipes_paths`, and
   what `install`, `update` and `check` read, is read only by
   `Internals::Recipe`: never with ERB, never with `YAML.safe_load` directly, and

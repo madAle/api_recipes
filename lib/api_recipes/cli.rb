@@ -1,12 +1,14 @@
 # frozen_string_literal: true
 
 require 'optparse'
+require 'fileutils'
 require 'api_recipes'
 require 'api_recipes/version'
 require 'api_recipes/cli/upgrade'
 require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
 require 'api_recipes/cli/recipes'
+require 'api_recipes/cli/convert'
 
 module ApiRecipes
   # The api_recipes command. It is not loaded by `require 'api_recipes'`.
@@ -35,6 +37,16 @@ module ApiRecipes
             A file that contains ERB is evaluated only with --erb: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
+        convert [--name NAME] [--version VERSION] [--to DIR] FILE
+            Writes NAME.recipe.yml, a portable recipe, from the configuration FILE of a
+            project, in DIR (the current folder). The file is created, never replaced.
+            Nothing in FILE is run: an ERB tag becomes a variable where a recipe can have
+            one, and is left out elsewhere. A header or a parameter named like a credential
+            is never copied: it becomes a variable. verify_with is left out. --name chooses
+            the api when FILE describes several; --version is the version of the recipe
+            (1.0.0). It says what changed and what the application gives from now on.
+            Exits with 1 if FILE cannot become a recipe, 2 if the arguments are wrong or
+            something could not be read or written.
         install [--version VERSION] [--from URL] [--to DIR] [--yes] NAME|FILE
             Installs the portable recipe called NAME from the cookbook
             (https://github.com/madAle/api_recipes-cookbook) or from the Git repository at URL,
@@ -85,6 +97,8 @@ module ApiRecipes
           import(args, out, err)
         when 'routes'
           routes(args, out, err)
+        when 'convert'
+          convert(args, out, err)
         when 'check'
           check(args, out, err)
         when 'install', 'update'
@@ -161,6 +175,47 @@ module ApiRecipes
         true
       rescue SystemCallError => e
         err.puts "#{output || 'the recipe'}: cannot be written (#{e.class.name.split('::').last})"
+        false
+      end
+
+      def convert(args, out, err)
+        options = {}
+        directory = '.'
+        parser = OptionParser.new
+        parser.on('--name NAME') { |name| options[:name] = name }
+        parser.on('--version VERSION') { |version| options[:version] = version }
+        parser.on('--to DIR') { |dir| directory = dir }
+        files = parser.parse(args)
+        unless files.size == 1
+          err.puts 'convert needs one configuration file'
+          return 2
+        end
+
+        result = Convert.new(files.first, **options).call
+        file_name = "#{result.name}#{Internals::Recipe::SUFFIX}"
+        path = directory == '.' ? file_name : File.join(directory, file_name)
+        return 2 unless place_recipe(result.text, directory, path, err)
+
+        Convert.report(result, files.first, path).each { |line| out.puts line }
+        0
+      rescue Convert::Refused => e
+        e.reasons.each { |reason| err.puts reason }
+        1
+      rescue Convert::Unusable, OptionParser::ParseError => e
+        err.puts e.message
+        2
+      end
+
+      # The recipe is created in its folder, never replaced.
+      def place_recipe(text, directory, path, err)
+        FileUtils.mkdir_p(directory)
+        File.open(path, File::WRONLY | File::CREAT | File::EXCL) { |file| file.write(text) }
+        true
+      rescue Errno::EEXIST
+        err.puts "#{path} already exists: remove it, or choose another folder with --to"
+        false
+      rescue SystemCallError => e
+        err.puts "#{path}: cannot be written (#{e.class.name.split('::').last})"
         false
       end
 

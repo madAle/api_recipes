@@ -6,6 +6,12 @@
   such as a bare `rescue`, only to the files that use the gem. A declared api
   that no file describes is pointed out. With paths and `--config` it works as
   before, and a directory is searched for `*.rake` files too.
+- `api_recipes convert FILE` writes a portable recipe from a configuration file
+  of a project: it adds the key `recipe`, turns an ERB tag into a variable
+  where a recipe can have one and leaves it out elsewhere, never copies a
+  header or a parameter named like a credential, leaves `verify_with` out and
+  says what the application gives from now on. It runs nothing of the file,
+  checks the result as a portable recipe and never replaces a file.
 - `api_recipes upgrade` checks a configuration file that contains ERB without
   running its code: what a `<%= ... %>` tag gives is left out and counted, the
   rest is checked. `--erb` still evaluates the file. A file called

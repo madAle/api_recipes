@@ -883,6 +883,59 @@ A repository of recipes keeps each one in `recipes/NAME.recipe.yml`. A
 published version is the tag `NAME-VERSION`, for example `billing-1.2.0`.
 `api_recipes routes billing.recipe.yml` lists the calls of a recipe.
 
+### From a file of your project
+
+When the API is already described in a file of your project, `convert` writes
+the portable recipe from it:
+
+    $ api_recipes convert config/apis/billing.yml --to ../api-recipes/recipes
+    billing 1.0.0 is written in ../api-recipes/recipes/billing.recipe.yml: 12 calls
+
+    What changed from config/apis/billing.yml
+      host: the ERB tag is now the variable {billing_host}, with the default written in the tag
+      port: came from an ERB tag with no default that can be read without running it: left out, so the default of the gem applies; write the value in the recipe if it is always the same
+      default_headers.X-Api-Key: the ERB tag is now the variable {billing_key}; the value is not in the recipe
+      verify_with: left out, a recipe cannot carry it: give it where a class declares the api, as `api :billing, verify_with: ...`
+
+    In the application, the variables that have no default:
+      config.values = { billing: { variables: { billing_key: ENV.fetch('BILLING_KEY') } } }
+
+    Variables with a default, to give only where the value is another:
+      billing_host: ENV.fetch('BILLING_HOST')
+
+    Read the file, then check it: api_recipes check ../api-recipes/recipes/billing.recipe.yml
+
+- The command adds the key `recipe`, with the name of the API, `--version`
+  (default `1.0.0`) and the format. When the file describes several APIs,
+  `--name` chooses one. Anchors, aliases and merge keys are written out.
+- **Nothing in the file is run**, and there is no option that runs it. An
+  `<%= ... %>` tag in the `host`, in the `base_url`, in a `path`, or in the value
+  of a header or of a parameter becomes a variable. It is named after the
+  environment variable when the tag is `ENV['NAME']` or `ENV.fetch('NAME')`,
+  and after its place otherwise; a default written in the tag as plain text or
+  as a number becomes the default of the variable. Anywhere else a recipe
+  cannot have a variable: the option takes the default written in the tag, or
+  is left out. A tag that is not `<%= ... %>`, or that gives the name of an
+  option, stops the command, which says the line.
+- **A credential is never copied.** A header or a parameter whose name
+  contains `auth`, `key`, `token`, `secret`, `passw`, `credential`,
+  `signature`, `cookie` or `session` becomes a variable without a default,
+  whether its value was written in the file or came from a tag. To send one as
+  the credential of the API, replace it with [`auth`](#authorization) in the
+  recipe. The command cannot know a secret written anywhere else: read the file
+  before you share it.
+- `verify_with` is left out, wherever it is.
+- The result is checked as a portable recipe before it is written, and the
+  file is created, never replaced. What the command prints holds names, never
+  a value of your file.
+- The command does not publish: the recipe reaches a repository with `git`,
+  through the review that every recipe gets.
+
+The protocol and the port of a recipe are fixed. For a service whose address
+changes with the environment, the host can be a variable; when the protocol or
+the port change too, give them where a class declares the API, as in
+`api :billing, protocol: 'http', port: 3000`, or keep the file of the project.
+
 ## Where an API is available
 
 ### On the `ApiRecipes` module
