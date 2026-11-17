@@ -1,4 +1,8 @@
-## Unreleased
+## Version 3.0.0.beta4
+
+The fourth pre-release of 3.0 makes the passage from 2.x automatic: `upgrade`
+finds what to check by itself, `convert` moves an api of a project to a
+portable recipe, and a variable can give every option of a request.
 
 - A `{variable}` can give the `protocol`, the `port`, the `timeout`,
   `on_bad_code`, `mime_type`, the `verb` and `ok_code`. The value is looked for
