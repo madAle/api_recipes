@@ -514,7 +514,9 @@ It finds by itself what to check, and says what it checked:
   depends on the code around it, the replacement is shown under the finding.
   The code holds what the line assigned, the value of a credential too, so
   that it works when pasted: `--no-code` leaves it out, as in a CI whose
-  output is kept. A line is never printed as it is.
+  output is kept. A line is never printed as it is, and the command copies
+  only what it is sure of: one whole expression, with no `if`, `unless`,
+  `rescue`, `and` or `or` after it, on a line that is always run.
 
 ```
 app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition

@@ -217,8 +217,28 @@ describe 'api_recipes upgrade' do
       end
     end
 
+    it 'is given only for what is written whole and is always run' do
+      lines = ["ApiRecipes.github.authorization = ENV['GH'] if ENV['GH']", "ApiRecipes.jira.authorization = [a, b].join(' ') rescue nil",
+               "ApiRecipes.stripe.basic_auth = { user: 'a', pass: 'b' }; puts 'x'", 'ApiRecipes.x2.authorization = a and b',
+               "if ENV['DEV']\n  ApiRecipes.print_urls = true\nend", "self.class.svc.basic_auth = { user: u } if u", "x.tap do |l|\n  ApiRecipes.shop.authorization = t\nend"]
+      project('a.rb' => "#{lines.join("\n")}\nApiRecipes.billing.authorization = ENV['B'] || 'none'\n") do
+        code, out, = run('upgrade', 'a.rb')
+        expect(code).to eq(1)
+        expect(out).to include("Inside the block of ApiRecipes.configure:\n\n    config.values = {\n      billing: { authorization: ENV['B'] || 'none' }\n    }\n")
+        expect(out).not_to include('github:', 'jira:', 'stripe:', 'x2:', 'shop:', 'config.print_urls =', '.with(')
+      end
+    end
+
+    it 'keeps in the block it gives the lines it does not understand' do
+      project('a.rb' => "ApiRecipes.configure do |config|\n  config.logger = Logger.new($stdout).tap do |l|\n    ApiRecipes.print_urls = true\n  end\n  next if ENV['SKIP']\nend\nApiRecipes.github.authorization = token\n") do
+        _, out, = run('upgrade', 'a.rb')
+        expect(out).to include("Inside the block of ApiRecipes.configure:\n\n    config.values = {\n      github: { authorization: token }\n    }\n")
+        expect(out).not_to include('replace the block')
+      end
+    end
+
     it 'is left out with --no-code, and for a line that goes on, or that a terminal would obey' do
-      project('a.rb' => "ApiRecipes.github.authorization = 'SECRET'\nApiRecipes.print_urls = [\nApiRecipes.billing.authorization = '\u202Ex'\n") do
+      project('a.rb' => "ApiRecipes.github.authorization = 'SECRET'\nApiRecipes.print_urls = [\n  true\n].first\nApiRecipes.billing.authorization = '\u202Ex'\n") do
         _, out, = run('upgrade', '--no-code', 'a.rb')
         expect(out).not_to include('SECRET', 'Code to paste')
         _, out, = run('upgrade', 'a.rb')

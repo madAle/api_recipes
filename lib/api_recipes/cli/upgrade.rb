@@ -70,8 +70,8 @@ module ApiRecipes
       FIXES = {
         print_urls: /\bApiRecipes\.print_urls#{WRITTEN}/,
         global_writer: /\bApiRecipes(?:(?:\.|::)(?<api>\w+)|\[\s*[:'"](?<api>\w+)['"]?\s*\])\.(?<key>authorization|basic_auth)#{WRITTEN}/,
-        writer: /(?<receiver>[\w.@:\[\]'"]+)\.(?<api>\w+)\.(?<key>authorization|basic_auth)#{WRITTEN}/,
-        base_configs: /(?<receiver>[\w.@:\[\]'"]+)\.base_configs\b/,
+        writer: /(?<![^\s(=,])(?<receiver>[\w.@:\[\]'"]+)\.(?<api>\w+)\.(?<key>authorization|basic_auth)#{WRITTEN}/,
+        base_configs: /(?<![^\s(=,])(?<receiver>[\w.@:\[\]'"]+)\.base_configs\b/,
         route: /\.route\.fill\((?<code>.*)\)/
       }.freeze
       # Code longer than this is not copied into the code to paste.
@@ -241,7 +241,7 @@ module ApiRecipes
           rules.each do |rule|
             next unless rule.pattern.match?(line)
 
-            found << Finding.new(file: file, line: number, kind: rule.kind, message: rule.message, hint: hint(rule.fix, line, file, number))
+            found << Finding.new(file: file, line: number, kind: rule.kind, message: rule.message, hint: hint(rule.fix, line, file, number, text))
           end
         end
         found
@@ -273,18 +273,35 @@ module ApiRecipes
         code
       end
 
-      # Whether code is one whole Ruby expression. It is read, never run.
+      # Whether code is one whole Ruby expression, and not one that a word
+      # after it changes (if, unless, rescue, and, or). It is read, never run.
       def expression?(code)
-        require 'prism'
-        result = Prism.parse("(#{code}\n)")
-        result.success? && result.value.statements.body.size == 1
-      rescue LoadError
-        !code.match?(/([,\\({\[|+.&]|\bdo)\z/)
+        tree = Code.tree(code)
+        return false unless tree && tree.statements.body.size == 1
+
+        node = tree.statements.body.first
+        return false if [Prism::IfNode, Prism::UnlessNode, Prism::RescueModifierNode, Prism::WhileNode, Prism::UntilNode].any? { |kind| node.is_a?(kind) }
+
+        !((node.is_a?(Prism::AndNode) || node.is_a?(Prism::OrNode)) && %w[and or].include?(node.operator_loc.slice))
+      end
+
+      # Whether the statement on line is always run when its file is: a
+      # statement of the file itself, or of the block of ApiRecipes.configure,
+      # not one inside a condition or another block.
+      def always_run?(file, text, line)
+        @direct ||= {}
+        @direct[file] ||= begin
+          tree = Code.tree(text)
+          top = tree ? tree.statements.body.map { |node| node.location.start_line } : []
+          block = Code::ConfigureBlock.in(text)
+          top + (block ? block.statement_lines : [])
+        end
+        @direct[file].include?(line)
       end
 
       # The lines shown under a finding. A value given when the application
       # starts is kept aside: all of them go in one block of configure.
-      def hint(fix, line, file, number)
+      def hint(fix, line, file, number, text)
         match = FIXES[fix]&.match(line)
         case fix
         when :request then ['response.uri                # the address of the request', 'response.original_response  # the http.rb response']
@@ -298,7 +315,9 @@ module ApiRecipes
            "#{match[:receiver]}.#{match[:api]}.with(#{match[:key]}: #{code})"]
         when :print_urls, :global_writer
           code = match && code_of(match)
-          @startup << { file: file, line: number, api: fix == :print_urls ? nil : match[:api], key: fix == :print_urls ? 'print_urls' : match[:key], code: code } if code
+          return nil unless code && always_run?(file, text, number)
+
+          @startup << { file: file, line: number, api: fix == :print_urls ? nil : match[:api], key: fix == :print_urls ? 'print_urls' : match[:key], code: code }
           nil
         end
       end

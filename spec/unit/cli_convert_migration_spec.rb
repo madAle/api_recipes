@@ -254,7 +254,7 @@ describe 'api_recipes convert, in a project' do
             config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
           end
 
-      3. On the line that declares the api (app/models/invoice.rb:3), give verify_with:
+      3. Where the api is declared (app/models/invoice.rb:3), give verify_with:
 
           api :billing, verify_with: :expected_response?
 
@@ -415,6 +415,87 @@ describe 'api_recipes convert, in a project' do
         boot
         expect(ApiRecipes.apis).to contain_exactly(:billing, :other)
       end
+    end
+
+    it 'takes out of the list the element that names the file, wherever it is, and nothing else' do
+      project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/other.yml', 'config/apis/billing.yml.erb'] + Dir['config/more/*.yml']\nend\n",
+              'config/apis/other.yml' => "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(File.read('config/initializers/api_recipes.rb')).to include("config.apis_files_paths = ['config/apis/other.yml'] + Dir['config/more/*.yml']\n")
+    end
+
+    it 'changes nothing when it cannot read how the project loads its files' do
+      ["config.apis_files_paths = %w[config/apis/billing.yml.erb config/apis/other.yml]",
+       "config.apis_files_paths = %w[billing].map { |n| \"config/apis/\#{n}.yml.erb\" }",
+       "config.apis_files_paths = ['config/legacy/billing.yml.erb', 'config/apis/billing.yml.erb']",
+       "config.apis_files_paths = ['config/apis/billing.yml.erb', *names.map { |n| \"config/apis/\#{n}.yml\" }]",
+       "config.apis_files_paths = FILES", "config.print_urls = true"].each do |assignment|
+        FileUtils.rm_rf(Dir.children('.'))
+        project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  #{assignment}\nend\n")
+        before = snapshot
+        code, out, err = convert('config/apis/billing.yml.erb')
+        expect([code, err]).to match([1, /apis_files_paths is (given, at line 2, in a way this command cannot read|not assigned in the block)/])
+        expect(out).to include('What to do by hand')
+        expect(snapshot).to eq(before)
+      end
+    end
+
+    it 'changes nothing when it cannot read all of the Hash given to config.values' do
+      { "config.values = { other: {\n    authorization: 'x',\n  } }" => 'whose closing brace does not start a line',
+        "config.values = {\n    **CREDS\n  }" => 'has a key that is not written as a name, or a **',
+        "config.values = {\n    API => { authorization: 'x' }\n  }" => 'has a key that is not written as a name, or a **' }.each do |assignment, reason|
+        FileUtils.rm_rf(Dir.children('.'))
+        project('config/initializers/api_recipes.rb' => initializer.sub("end\n", "  #{assignment}\nend\n"))
+        before = snapshot
+        code, out, err = convert('config/apis/billing.yml.erb')
+        expect([code, err]).to match([1, /#{Regexp.escape(reason)}/])
+        expect(out).to include("add this to the Hash that config.values is given at line 3, and the line of recipes_paths:\n\n    billing: { variables: {\n")
+        expect(snapshot).to eq(before)
+      end
+    end
+
+    it 'changes nothing when the block of configure can end before its last line' do
+      project('config/initializers/api_recipes.rb' => initializer.sub("end\n", "  next if ENV['SKIP_REST']\nend\n"))
+      before = snapshot
+      expect(convert('config/apis/billing.yml.erb')).to match([1, /What to do by hand/, /can end before its last line/])
+      expect(snapshot).to eq(before)
+    end
+
+    it 'takes lines out of the file that calls configure only when git has it as it is, and edits no file that git only heard of' do
+      list = "ApiRecipes.configure do |config|\n  config.apis_files_paths = [\n    'config/apis/billing.yml.erb',\n    'config/apis/other.yml'\n  ]\nend\n"
+      project('config/apis/other.yml' => "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+      File.write('config/initializers/api_recipes.rb', list)
+      before = snapshot
+      expect(convert('config/apis/billing.yml.erb')).to match([1, /What to do by hand/, /api_recipes.rb is not committed in git as it is now/])
+      expect(snapshot).to eq(before)
+      git('checkout', '-q', '.')
+      File.write('app/models/later.rb', model.sub('Invoice', 'Later'))
+      git('add', '-N', 'app/models/later.rb')
+      code, out, = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(0)
+      expect(out).to include('Left to you')
+      expect(File.read('app/models/later.rb')).to eq(model.sub('Invoice', 'Later'))
+    end
+
+    it 'gives verify_with only to a declaration of a class or a module, and to none when it cannot read one of them' do
+      project('app/models/invoice.rb' => "class Invoice\n  include ApiRecipes\n  api :billing\n  def again = api(:billing)\nend\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(File.read('app/models/invoice.rb')).to eq("class Invoice\n  include ApiRecipes\n  api :billing, verify_with: :expected_response?\n  def again = api(:billing)\nend\n")
+      FileUtils.rm_rf(Dir.children('.'))
+      project('app/models/other.rb' => "class Other\n  include ApiRecipes\n  api :billing, **OPTIONS\nend\n")
+      code, out, = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(0)
+      expect(out).to include('Left to you')
+      expect(File.read('app/models/invoice.rb')).to eq(model)
+      expect(File.read('app/models/other.rb')).to include("api :billing, **OPTIONS\n")
+    end
+
+    it 'adds lines with the line ends and the indentation of the file' do
+      project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\r\n\tconfig.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)]\r\nend\r\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      text = File.binread('config/initializers/api_recipes.rb')
+      expect(text.scan(/(?<!\r)\n/)).to eq([])
+      expect(text).to include("\tconfig.values = {\r\n\t\tbilling: { variables: {\r\n\t\t\tbilling_host: ")
     end
 
     it 'changes nothing when the old file is named somewhere it cannot take it out of' do

@@ -106,7 +106,11 @@ module ApiRecipes
         # says of a file that is neither skipped nor assumed unchanged.
         def tracked?(file)
           out, status = git('ls-files', '-v', '--error-unmatch', '--', file)
-          plain?(file) && status&.success? && out.start_with?('H ')
+          return false unless plain?(file) && status&.success? && out.start_with?('H ')
+
+          # A file only announced to git (add -N) has nothing to go back to.
+          _, known = git('cat-file', '-e', "HEAD:./#{Pathname.new(file).cleanpath}")
+          known&.success? ? true : false
         end
 
         # Whether git has the file committed as it is now.
@@ -197,46 +201,56 @@ module ApiRecipes
           edits << [block.end_offset, block.end_offset, added.map(&:last).join] unless added.empty?
           return if @blocking.size > problems
 
+          edits = edits.map { |from, to, added_text| [from, to, added_text.gsub("\n", "\r\n")] } if text.include?("\r\n")
           @proposal = [text, Code.edited(text, edits)]
-          plan(@initializer, @proposal.last, 'recipes_paths and config.values') if addable(@initializer)
+          taken_out = edits.any? { |from, to, _| to > from }
+          plan(@initializer, @proposal.last, 'recipes_paths and config.values') if taken_out ? removable(@initializer) : addable(@initializer)
         end
 
         # The lines that give the variables of this api, one variable a line.
         # compact: a variable whose code gives nil is not given.
-        def entry(indent)
+        def entry(indent, unit)
           pairs = @result.expressions.map do |name, code|
-            "#{indent}  #{name}: #{code.match?(SIMPLE_CODE) || code.match?(PLAIN_CODE) ? code : "(#{code})"}"
+            "#{indent}#{unit}#{name}: #{code.match?(SIMPLE_CODE) || code.match?(PLAIN_CODE) ? code : "(#{code})"}"
           end
           "#{indent}#{Snippet.new(@result, @source).key}: { variables: {\n#{pairs.join(",\n")}\n#{indent}}.compact }\n"
         end
 
         # The edits that give the values: a new config.values, or one more
-        # entry in the Hash it is given, when that is written as a Hash that
-        # does not have this api yet.
+        # entry in the Hash it is given. That Hash is edited only when the
+        # command can read all of it: every key written as a name, none of
+        # them this api, and its closing brace alone at the start of a line.
         def values_edits(block, text)
           return [] if @result.expressions.empty?
 
           config = block.config
+          unit = block.indent.include?("\t") ? "\t" : '  '
           given = block.assignments(:values)
           if given.empty?
             return blocked("#{config}.values is assigned where the block does not always run it") if block.assigned_anywhere?(:values)
 
-            return [[block.end_offset, block.end_offset, "#{block.indent}#{config}.values = {\n#{entry("#{block.indent}  ")}#{block.indent}}\n"]]
+            return [[block.end_offset, block.end_offset, "#{block.indent}#{config}.values = {\n#{entry("#{block.indent}#{unit}", unit)}#{block.indent}}\n"]]
           end
 
           hash = given.size == 1 ? given.first.arguments&.arguments&.first : nil
           return blocked("#{config}.values is not given one Hash written between braces: this command does not edit it") unless hash.is_a?(Prism::HashNode)
-          return blocked("#{config}.values already has #{@result.name}: this command does not merge into it") if hash.elements.any? { |element| key_of(element) == @result.name }
+
+          keys = hash.elements.map { |element| key_of(element) }
+          if keys.include?(:unknown)
+            return blocked("#{config}.values has a key that is not written as a name, or a **: this command cannot tell whether #{@result.name} is among them")
+          end
+          return blocked("#{config}.values already has #{@result.name}: this command does not merge into it") if keys.include?(@result.name)
 
           closing = hash.closing_loc
           line = text.lines[closing.start_line - 1]
-          return blocked("#{config}.values is given a Hash that does not end with a line of its own") unless closing.start_line > hash.opening_loc.start_line && line.strip.start_with?('}')
+          alone = closing.start_line > hash.opening_loc.start_line && line.b[0...closing.start_column].strip.empty?
+          return blocked("#{config}.values is given a Hash whose closing brace does not start a line") unless alone
 
           indent = line[/\A[ \t]*/]
           start = closing.start_offset - closing.start_column
           last = hash.elements.last
           comma = last && !text.b[last.location.end_offset...start].include?(',') ? [[last.location.end_offset, last.location.end_offset, ',']] : []
-          comma + [[start, start, entry("#{indent}  ")]]
+          comma + [[start, start, entry("#{indent}#{unit}", unit)]]
         end
 
         def blocked(reason)
@@ -271,42 +285,84 @@ module ApiRecipes
                   "read: it must give #{@target}")
         end
 
-        # When the old file goes, the line that names it must go too: a name
-        # in the list given to apis_files_paths is taken out of it, and any
-        # other mention of the file stops the command.
+        # When the old file goes, what names it must go too. The command must
+        # be able to read how the project loads its files: apis_files_paths
+        # given patterns of Dir, or a list written between brackets, from
+        # which the one element that names the file is taken out. Anything
+        # else, and any other mention of the file in the code, stops it.
         def files_edits(block, text)
           return [] unless whole_file?
 
           name = File.basename(@source)
+          given = block.assignments(:apis_files_paths)
+          if given.empty?
+            blocked("#{block.config}.apis_files_paths is not assigned in the block, or only sometimes: this command cannot see how " \
+                    "the project loads #{shown(name)}, which would be deleted")
+          end
           edits = []
-          mentions = @project.ruby_files.flat_map do |file|
-            @project.text(file).to_s.lines.each_with_index.select { |line, _| line.include?(name) }.map { |_, index| [file, index + 1] }
+          covered = []
+          given.each do |node|
+            found = named_in(node.arguments&.arguments&.first, name, text)
+            if found.nil?
+              blocked("#{block.config}.apis_files_paths is given, at line #{node.location.start_line}, in a way this command cannot " \
+                      "read: it cannot tell whether it names #{shown(name)}, which would be deleted")
+            elsif found != :none
+              edits << found.first
+              covered << found.last
+            end
           end
-          mentions.each do |file, line|
-            element = file == @initializer && listed(block, line)
-            edit = element && removal(element, text)
-            next edits << edit if edit
+          @project.ruby_files.each do |file|
+            @project.text(file).to_s.lines.each_with_index do |line, index|
+              next unless line.include?(name)
+              next if file == @initializer && covered.any? { |lines| lines.cover?(index + 1) }
 
-            @blocking << "#{shown(file)}:#{line} names #{shown(name)}, which would be deleted: take the name out first"
+              @blocking << "#{shown(file)}:#{index + 1} names #{shown(name)}, which would be deleted: take the name out first"
+            end
           end
-          edits.uniq
+          edits
         end
 
-        # The element of the list given to apis_files_paths that is on line.
-        def listed(block, line)
-          block.assignments(:apis_files_paths).each do |node|
-            list = node.arguments&.arguments&.first
-            next unless list.is_a?(Prism::ArrayNode)
+        # Whether value, given to apis_files_paths, names the file called
+        # name. :none when it does not; [edit, lines] to take out the one
+        # element that does; nil when the command cannot read value.
+        def named_in(value, name, text)
+          return :none if pattern?(value)
 
-            element = list.elements.find { |one| one.location.start_line <= line && one.location.end_line >= line }
-            return [list, element] if element
+          if value.is_a?(Prism::CallNode) && value.name == :+ && value.arguments&.arguments&.size == 1
+            sides = [named_in(value.receiver, name, text), named_in(value.arguments.arguments.first, name, text)]
+            return nil if sides.include?(nil) || sides.count { |side| side != :none } > 1
+
+            return sides.find { |side| side != :none } || :none
           end
-          nil
+          return nil unless value.is_a?(Prism::ArrayNode) && value.opening_loc&.slice == '['
+          return nil unless value.elements.all? { |element| written?(element) || pattern?(element.is_a?(Prism::SplatNode) ? element.expression : element) }
+
+          named = value.elements.select { |element| written?(element) && element.slice.include?(name) }
+          return :none if named.empty?
+          return nil unless named.size == 1
+
+          edit = removal(value, named.first, text)
+          edit && [edit, named.first.location.start_line..named.first.location.end_line]
+        end
+
+        # Dir['...*...'] or Dir.glob('...*...'): files found when the
+        # application starts, not named one by one.
+        def pattern?(node)
+          node.is_a?(Prism::CallNode) && node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name == :Dir &&
+            %i[[] glob].include?(node.name) && node.block.nil? && node.slice.include?('*') && !node.slice.include?('#{')
+        end
+
+        # One file named with text only: 'a/b.yml', File.expand_path('a/b.yml', __dir__), Rails.root.join('a', 'b.yml').
+        def written?(node)
+          return true if node.is_a?(Prism::StringNode)
+          return false unless node.is_a?(Prism::CallNode) && %i[expand_path join].include?(node.name) && node.block.nil? && node.arguments
+
+          node.arguments.arguments.all? { |one| one.is_a?(Prism::StringNode) || (one.is_a?(Prism::CallNode) && one.name == :__dir__) }
         end
 
         # The edit that takes element out of its list, or nil when it shares
         # its lines with something else.
-        def removal((list, element), text)
+        def removal(list, element, text)
           others = list.elements - [element]
           if list.location.start_line == list.location.end_line
             return [list.location.start_offset, list.location.end_offset, "[#{others.map(&:slice).join(', ')}]"]
@@ -326,12 +382,14 @@ module ApiRecipes
         # ---- verify_with ----
 
         # A recipe cannot carry verify_with: the one of the api goes on each
-        # `api :name` of the code, right after what the call is given.
+        # `api :name` that a class or a module declares, right after what the
+        # call is given. When one of them is written in a way the command
+        # cannot read, none is changed and the step is left to the person.
         def plan_verify_with
           @result.verify_with.each do |place, method|
             calls = place == 'verify_with' && Internals::Compiler::METHOD_NAME.match?(method.to_s) ? declarations : []
             files = calls.map(&:first).uniq
-            unless !calls.empty? && files.all? { |file| tracked?(file) && File.writable?(full(file)) }
+            unless !calls.empty? && calls.all? { |_, node| readable?(node) } && files.all? { |file| tracked?(file) && File.writable?(full(file)) }
               @left << "#{shown(place)}: was left out of the recipe and could not be written in the code: give it where a class " \
                        "declares the api, as `api :#{@result.name}, verify_with: ...`, or the answers are no longer verified"
               next
@@ -347,7 +405,8 @@ module ApiRecipes
         # Where the arguments of a call end: before its closing parenthesis.
         def at(node) = node.closing_loc ? node.closing_loc.start_offset : node.arguments.location.end_offset
 
-        # [file, node] for each call `api :name` that gives no verify_with.
+        # [file, node] for each `api :name` of a class or a module that gives
+        # no verify_with.
         def declarations(planned: true)
           @project.ruby_files.flat_map do |file|
             text = planned ? text_of(file) : @project.text(file)
@@ -359,12 +418,34 @@ module ApiRecipes
           tree = Code.tree(text)
           return [] unless tree
 
-          Code.nodes(tree) do |node|
-            node.is_a?(Prism::CallNode) && node.name == :api && node.receiver.nil? && node.block.nil? &&
-              (first = node.arguments&.arguments&.first).is_a?(Prism::SymbolNode) && first.unescaped == @result.name &&
-              !node.slice.include?('verify_with')
-          end
+          owners = Code.nodes(tree) { |node| node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) }
+          owners.flat_map { |owner| declared_in(owner.body) }.uniq
         end
+
+        # The calls `api :name` in the body of a class or a module: not inside
+        # a method, a block or another class, which have a body of their own.
+        def declared_in(node, found = [])
+          return found if node.nil? || [Prism::DefNode, Prism::BlockNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode].any? { |kind| node.is_a?(kind) }
+
+          arguments = node.is_a?(Prism::CallNode) && node.name == :api && node.receiver.nil? ? node.arguments&.arguments : nil
+          if arguments && arguments.first.is_a?(Prism::SymbolNode) && arguments.first.unescaped == @result.name
+            found << node unless options_of(node)&.include?('verify_with')
+          end
+          node.compact_child_nodes.each { |child| declared_in(child, found) }
+          found
+        end
+
+        # The names of the options a call gives, or nil when it gives them in
+        # a way the command cannot read: a **, a Hash in braces, a block.
+        def options_of(node)
+          rest = node.arguments.arguments.drop(1)
+          return nil unless node.block.nil? && rest.all? { |one| one.is_a?(Prism::KeywordHashNode) }
+
+          keys = rest.flat_map(&:elements).map { |element| element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) ? element.key.unescaped : nil }
+          keys.include?(nil) ? nil : keys
+        end
+
+        def readable?(node) = !options_of(node).nil?
 
         # ---- the old description ----
 
@@ -405,24 +486,39 @@ module ApiRecipes
         # ---- writing ----
 
         # Installs the recipe and writes every planned text. When a step
-        # fails, every file is put back as it was.
+        # fails, whatever the reason, every file is put back as it was.
         def apply
           paths = [@target, @lock, *@planned.keys].uniq
-          before = paths.to_h { |path| [path, File.exist?(full(path)) ? File.binread(full(path)) : nil] }
+          before = paths.to_h { |path| [path, File.exist?(full(path)) ? [File.binread(full(path)), File.stat(full(path)).mode] : nil] }
           made = !File.directory?(full(@directory))
           install
           @planned.each { |file, text| text.nil? ? File.delete(full(file)) : File.write(full(file), text) }
           true
-        rescue SystemCallError, Refused => e
-          before.each do |path, bytes|
-            bytes ? File.binwrite(full(path), bytes) : FileUtils.rm_f(full(path))
-          rescue SystemCallError
-            @err.puts "#{shown(path)} could not be put back as it was"
-          end
-          Dir.rmdir(full(@directory)) if made && Dir.exist?(full(@directory)) && Dir.empty?(full(@directory))
-          @err.puts "the project could not be changed (#{e.is_a?(Refused) ? e.message : e.class.name.split('::').last}): " \
-                    'every file was put back as it was'
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          lost = restore(before, made)
+          reason = e.is_a?(Refused) ? e.message : e.class.name.split('::').last
+          @err.puts "the project could not be changed (#{reason}): " \
+                    "#{lost.empty? ? 'every file was put back as it was' : "these files could not be put back: #{lost.map { |path| shown(path) }.join(', ')}"}"
+          raise unless e.is_a?(SystemCallError) || e.is_a?(Refused)
+
           false
+        end
+
+        # Returns the paths that could not be put back.
+        def restore(before, made)
+          lost = before.reject do |path, saved|
+            if saved
+              File.binwrite(full(path), saved.first)
+              File.chmod(saved.last & 0o7777, full(path))
+            else
+              FileUtils.rm_f(full(path))
+            end
+            true
+          rescue SystemCallError
+            false
+          end.keys
+          Dir.rmdir(full(@directory)) if made && Dir.exist?(full(@directory)) && Dir.empty?(full(@directory))
+          lost
         end
 
         def install
@@ -455,8 +551,8 @@ module ApiRecipes
           @result.verify_with.each do |place, method|
             next unless place == 'verify_with'
 
-            file, node = declarations(planned: false).first
-            @out.puts "#{number}. #{file ? "On the line that declares the api (#{shown(file)}:#{node.location.start_line})" : 'Where a class declares the api'}, give verify_with:"
+            places = declarations(planned: false).map { |file, node| "#{shown(file)}:#{node.location.start_line}" }
+            @out.puts "#{number}. #{places.empty? ? 'Where a class declares the api' : "Where the api is declared (#{places.join(', ')})"}, give verify_with:"
             Code.show(@out, ["api :#{@result.name}, verify_with: #{Internals::Compiler::METHOD_NAME.match?(method.to_s) ? ":#{method}" : '...'}"])
             number += 1
           end
@@ -473,18 +569,20 @@ module ApiRecipes
             return Code.show(@out, after.lines)
           end
 
-          block = @initializer && Code::ConfigureBlock.in(text_of(@initializer))
-          unless block && block.problem.nil?
+          block = @initializer && Code::ConfigureBlock.in(@project.text(@initializer))
+          unless block&.config
             @out.puts "2. In #{@initializer ? shown(@initializer) : 'the file that calls ApiRecipes.configure'}, inside the block of ApiRecipes.configure, add:"
-            return Code.show(@out, Snippet.new(@result, @source).lines)
+            recipes = @initializer ? "Dir[File.expand_path('#{recipes_glob}', __dir__)]" : "Dir['#{@directory}/*#{Internals::Recipe::SUFFIX}']"
+            return Code.show(@out, Snippet.new(@result, @source, recipes: recipes).lines)
           end
 
           recipes = block.assigned_anywhere?(:recipes_paths) ? nil : "Dir[File.expand_path('#{recipes_glob}', __dir__)]"
           snippet = Snippet.new(@result, @source, config: block.config, recipes: recipes)
-          values = block.line_of(:values)
+          values = block.line_of(:values) || (block.assigned_anywhere?(:values) ? 'another line' : nil)
+          values = "line #{values}" if values.is_a?(Integer)
           if values && !@result.expressions.empty?
             @out.puts "2. In #{shown(@initializer)}, inside the block of ApiRecipes.configure (line #{block.first}), add this to the Hash that " \
-                      "#{block.config}.values is given at line #{values}#{', and the line of recipes_paths' if recipes}:"
+                      "#{block.config}.values is given at #{values}#{', and the line of recipes_paths' if recipes}:"
             Code.show(@out, snippet.entry + (recipes ? ['', "#{block.config}.recipes_paths = #{recipes}"] : []))
           else
             @out.puts "2. In #{shown(@initializer)}, inside the block of ApiRecipes.configure (line #{block.first}), add:"
@@ -517,8 +615,8 @@ module ApiRecipes
             @out.puts '', 'Left to you'
             @left.each { |one| @out.puts "  - #{one}" }
           end
-          @out.puts '', 'Every change is in `git status` and `git diff`: `git checkout` undoes the edits, and the new files are ' \
-                        "in #{@directory}. Check the recipes with `api_recipes check`, then start the application."
+          @out.puts '', 'Every change is in `git status` and `git diff`. Check the recipes with `api_recipes check`, then start ' \
+                        'the application.'
         end
       end
     end

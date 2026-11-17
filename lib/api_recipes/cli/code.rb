@@ -111,6 +111,9 @@ module ApiRecipes
           Code.nodes(@call.block) { |node| node.is_a?(Prism::CallNode) && node.name == :"#{name}=" }.any?
         end
 
+        # The lines where the statements of the block start.
+        def statement_lines = @statements.map { |node| node.location.start_line }
+
         # The line that assigns config.name, counted from 1, or nil.
         def line_of(name) = assignments(name).first&.location&.start_line
 
@@ -138,6 +141,8 @@ module ApiRecipes
           return 'does not take its one parameter, as in `do |config|`' unless @config
           return 'is written on one line' if @first == @last
           return 'has a rescue or an ensure' unless block.body.nil? || block.body.is_a?(Prism::StatementsNode)
+          early = Code.nodes(block) { |node| [Prism::NextNode, Prism::BreakNode, Prism::ReturnNode].any? { |kind| node.is_a?(kind) } }
+          return 'can end before its last line, with next, break or return' unless early.empty?
           return 'does not end with a line of its own' unless @lines[@last - 1].strip.match?(/\A(end|\})\z/)
 
           nil

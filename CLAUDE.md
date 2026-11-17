@@ -131,8 +131,10 @@ classes are built once, by `configure`.
   out every change in memory, each on the text the changes before it left,
   writes none when one is not possible or when a result is not valid Ruby, and
   puts every file back when a write fails. It adds lines only to a plain file
-  that git tracks (`H` in `git ls-files -v`), and deletes a file or takes
-  lines out of it only when git has it committed as it is now. `git` is run
+  that git tracks (`H` in `git ls-files -v`, and present in `HEAD`), and
+  deletes a file or takes lines out of it only when git has it committed as
+  it is now. It edits only the shapes it reads whole, listed in the README:
+  a new shape is refused, with the code to paste, never guessed. `git` is run
   with `Migration::GIT`, so that it runs no program the repository names. When it changes the project it prints nothing of
   what the file holds; when it does not, it prints the steps and the code to
   paste.

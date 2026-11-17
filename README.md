@@ -952,7 +952,7 @@ called.
       verify_with: left out, a recipe cannot carry it: give it where a class declares the api, as `api :billing, verify_with: ...`
       default_headers.Api-Key-Client: the ERB tag is now the variable {billing_client}; the value is not in the recipe
 
-    Every change is in `git status` and `git diff`: `git checkout` undoes the edits, and the new files are in config/api_recipes. Check the recipes with `api_recipes check`, then start the application.
+    Every change is in `git status` and `git diff`. Check the recipes with `api_recipes check`, then start the application.
 
 The project works as before, and the values still come from where they came:
 the code of each tag is moved, as it is written, to `config.values`.
@@ -1004,24 +1004,32 @@ What the command does:
   of that API when it describes others, because a recipe never takes the place
   of an API that another source defines.
 - **`verify_with`**, which a recipe cannot carry, is given to each `api :name`
-  of the code. One that a tag gave, or that an endpoint had, is left to you.
+  that a class or a module declares. One that a tag gave, or that an endpoint
+  had, is left to you, as it is when one of the declarations gives its options
+  in a way the command cannot read, such as `**options`.
 - **When it changes the project it prints names and paths**, nothing of what
   the file holds.
 
 It changes your files only when that is safe, and all at once or not at all:
 
-- Lines are added only to a plain file of the project that git tracks. A file
-  is deleted, or lines are taken out of it, only when git has it committed as
-  it is now. A symbolic link, and a file that git was told to skip, are never
+- Lines are added only to a plain file of the project that is in the last
+  commit of git. A file is deleted, or lines are taken out of it, only when
+  git has it committed as it is now. A symbolic link, and a file that git was told to skip, are never
   changed. Outside a git repository the project is not changed.
-- Ruby is read as a tree, never matched as lines and never run. The call to
-  `ApiRecipes.configure` is edited when the project has exactly one, with a
-  block `do |config|` on several lines and without a `rescue`. `config.values`
-  is added, or one entry is added to the Hash it is given, when that Hash is
-  written between braces and does not have the API yet. A name of the old
-  file in the list given to `apis_files_paths` is taken out; any other mention
-  of the old file, another file that describes the API, or a `recipes_paths`
-  the command cannot read, stops it.
+- Ruby is read as a tree, never matched as lines and never run, and the
+  command edits only what it can read whole:
+  - the call to `ApiRecipes.configure`, when the project has exactly one, with
+    a block `do |config|` on several lines that has no `rescue` and cannot end
+    early with `next`, `break` or `return`;
+  - `config.values`, which is added, or which gets one more entry when it is
+    given a Hash between braces whose keys are all written as names, none of
+    them the API, and whose closing brace starts a line;
+  - `config.apis_files_paths`, when the old file is deleted: it must be given
+    patterns of `Dir`, or a list between brackets of names written as text,
+    from which the one element that names the file is taken out.
+
+  Anything else stops it: another mention of the old file in the code, another
+  file that describes the API, a `recipes_paths` it cannot read.
 - Every Ruby file it changes must still be Ruby with the change, and when a
   write fails every file is put back as it was.
 - When a step is not possible, nothing is written, the command says why, and
