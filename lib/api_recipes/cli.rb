@@ -20,13 +20,15 @@ module ApiRecipes
       Usage: api_recipes COMMAND [options]
 
       Commands:
-        upgrade [--config FILE]... [--erb] [PATH]...
+        upgrade [--config FILE]... [--erb] [--no-code] [PATH]...
             Without arguments, in the root of a project: finds its Ruby files and the files
             that describe an api, and looks for what changed in api_recipes 3.0. It says what
             it checked. With arguments: the Ruby files under each PATH, and each configuration
             FILE checked with the 3.0 rules. It never changes a file. A file that contains ERB
             is checked without running its code, leaving out what its tags give; --erb
-            evaluates it instead: this runs the code in it.
+            evaluates it instead: this runs the code in it. Where what to write is known it
+            gives the code to paste, with the whole block of ApiRecipes.configure; --no-code
+            leaves the code out.
             Exits with 1 if it finds something, 2 if it could not read something, 0 otherwise.
         import [--name NAME] [--only GLOB]... [--except GLOB]... [--server N] [--output FILE] FILE
             Writes a recipe from the OpenAPI 3.0 or 3.1 description in FILE (YAML or JSON), on
@@ -294,10 +296,12 @@ module ApiRecipes
         configs = []
         erb = false
         parser = OptionParser.new
+        code = true
         parser.on('--config FILE') { |file| configs << file }
         parser.on('--erb') { erb = true }
+        parser.on('--no-code') { code = false }
         paths = parser.parse(args)
-        return Upgrade.new(paths, config: configs, erb: erb).report(out, err) unless paths.empty? && configs.empty?
+        return Upgrade.new(paths, config: configs, erb: erb, code: code).report(out, err) unless paths.empty? && configs.empty?
 
         unless File.file?('Gemfile')
           err.puts 'upgrade without arguments checks the project in the current directory, and there is no Gemfile ' \
@@ -305,7 +309,7 @@ module ApiRecipes
           return 2
         end
 
-        Upgrade.for_project(Upgrade::Project.new, erb: erb).report(out, err)
+        Upgrade.for_project(Upgrade::Project.new, erb: erb, code: code).report(out, err)
       rescue OptionParser::ParseError => e
         err.puts e.message
         2

@@ -55,6 +55,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli/import/tree.rb` | from the paths to the tree of endpoints: names, operations, comments, warnings |
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command |
+| `lib/api_recipes/cli/code.rb` | the code a command gives to paste: how it is shown, in colours on a terminal, and the block of `ApiRecipes.configure` of a file |
 | `lib/api_recipes/cli/convert.rb` | the `convert` command: from a configuration file of a project to the text of a portable recipe |
 | `lib/api_recipes/cli/convert/migration.rb` | what `convert` changes in a project: the installed recipe, `config.values` in the file that calls `configure`, the old description |
 | `lib/api_recipes/cli/recipes.rb` | the `install`, `update` and `check` commands for portable recipes |
@@ -117,7 +118,10 @@ classes are built once, by `configure`.
   code to paste that it prints when it does not change the project
   (`Convert::Snippet`) is the one exception, decided by the maintainer: it
   holds the code of the tags and the values written in the file, so that it
-  works when pasted, and leaves out only what `Snippet::UNSAFE` matches.
+  works when pasted, and leaves out only what `Code::UNSAFE` matches. The code
+  that `upgrade` gives to paste follows the same decision: it holds what a
+  line assigned, never a line as it is, only whole Ruby expressions, and
+  `--no-code` leaves it out.
   The mark that stands for a tag is random, so that no file can write one.
   The recipe is checked with `Internals::Recipe` before it is written, and the
   file is created with `File::EXCL`.

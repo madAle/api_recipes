@@ -27,6 +27,10 @@
 - A file called `NAME.recipe.yml` that both `apis_files_paths` and
   `recipes_paths` name is left to `recipes_paths`, so that one pattern can
   match the old files and the recipes of one folder.
+- `api_recipes upgrade` gives the code to paste where what to write is known:
+  the whole block of `ApiRecipes.configure` with the values that lines of the
+  application gave when it started, and the replacement under the other
+  findings. `--no-code` leaves it out.
 - `api_recipes upgrade` checks a configuration file that contains ERB without
   running its code: what a `<%= ... %>` tag gives is left out and counted, the
   rest is checked. `--erb` still evaluates the file. A file called

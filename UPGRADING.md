@@ -506,8 +506,15 @@ It finds by itself what to check, and says what it checked:
   is not guessed: the command says so, and reads it only with `--erb`, which
   evaluates the file. That runs the code in it, and outside your application a
   value read from the environment may be missing.
-- The command prints the file, the line and what to do, never the text of the
-  line, which could hold a secret.
+- **It gives the code to paste** where what to write is known. The values
+  that lines such as `ApiRecipes.print_urls = ...` and
+  `ApiRecipes.github.authorization = ...` gave when the application started
+  are put together in the whole block of `ApiRecipes.configure`, to paste over
+  the one that is there, with the file and its lines. Where what to write
+  depends on the code around it, the replacement is shown under the finding.
+  The code holds what the line assigned, the value of a credential too, so
+  that it works when pasted: `--no-code` leaves it out, as in a CI whose
+  output is kept. A line is never printed as it is.
 
 ```
 app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
@@ -518,6 +525,19 @@ Checked 214 Ruby files, 6 of them use api_recipes
 Checked 2 configuration files: config/apis/billing.yml, config/apis/github.yml
 app/models/shop.rb:4: declares the api 'shopify', and no configuration file found here describes it
 config/apis/billing.yml: 2 values come from ERB and were not checked
+
+Code to paste
+
+In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure (lines 1 to 3) with:
+
+    ApiRecipes.configure do |config|
+      config.apis_files_paths = Dir['config/apis/*.yml']
+      config.values = {
+        github: { authorization: "Bearer #{ENV['GITHUB_TOKEN']}" }
+      }
+    end
+
+Then remove the lines that gave these values: config/initializers/github.rb:1
 
 (the list of what the command cannot find)
 
@@ -548,6 +568,7 @@ least one finding, even if something could not be read; otherwise it is 2 when
 something could not be read, and 0 when there is nothing to change. It can run
 in a CI.
 
-The command does not rewrite code. What matters most depends on values that exist
-only when the program runs, and an automatic rewrite would give a false sense of
-safety. For those, use the warnings that the gem logs.
+The command does not rewrite code: it gives the code to paste where it is sure
+of it. What matters most depends on values that exist only when the program
+runs, and an automatic rewrite would give a false sense of safety. For those,
+use the warnings that the gem logs.
