@@ -360,9 +360,9 @@ describe 'Portable recipes' do
                                                       recipe: { 'version' => '1.0.1' }))
       code, out, = run_cli('update', 'shop', '--dir', @dir, input: "n\n")
       expect(code).to eq(1)
-      expect(out).to include("  headers:       X-HTTP-Method-Override: DELETE (shop.orders and below)\n",
+      expect(out).to include("  headers:       X-HTTP-Method-Override: DELETE (shop.orders and the endpoints it contains)\n",
                              "  params:        debug: 1\n                 _method: delete (shop.orders.show)\n",
-                             "    new header: X-HTTP-Method-Override: DELETE (shop.orders and below)\n",
+                             "    new header: X-HTTP-Method-Override: DELETE (shop.orders and the endpoints it contains)\n",
                              "    new parameter: debug: 1\n    new parameter: _method: delete (shop.orders.show)\n")
     end
 

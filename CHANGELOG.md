@@ -1,3 +1,10 @@
+## Unreleased
+
+- `api_recipes install` and `update` say `(NAME and the endpoints it contains)`
+  beside a header or a parameter that an endpoint adds. The documents describe
+  `default_headers` and `default_params` of an endpoint as what a request finds
+  when it looks up the tree.
+
 ## Version 3.0.0.beta4
 
 The fourth pre-release of 3.0 makes the passage from 2.x automatic: `upgrade`
@@ -212,7 +219,8 @@ looks for them in your code.
   URL, status and duration.
 - `run` with a block returns the `Response`.
 - The message of the error of `verify_with` no longer contains the response body.
-- A nested endpoint without options inherits `verify_with` from its parent.
+- A nested endpoint without options finds `verify_with` on the endpoint that
+  contains it.
 - The sources of the configuration apply in the order they are assigned.
 - An endpoint named like a method of the object is no longer skipped or
   replacing it: a warning is logged and it is reached with `[]`.

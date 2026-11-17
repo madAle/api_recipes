@@ -427,8 +427,9 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   `protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
   `ok_code`, with values given at any of those levels.
 - **`default_params`**: query parameters sent with every request, as
-  `default_headers` does for headers. Both can be written on an endpoint, for
-  that endpoint and the ones below it.
+  `default_headers` does for headers. Both can be written on an endpoint: a
+  request looks for them on its endpoint, then on each endpoint that contains
+  it, then on the API.
 - **`resource`**: `resource: true` on an endpoint adds `show`, `create`,
   `update`, `replace` and `delete` under it.
 - **`auth`**: says where the credential goes: the `Authorization` header, a header

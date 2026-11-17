@@ -138,7 +138,7 @@ RSpec.describe ApiRecipes::CLI::Recipes::Summary do
     lines = summary('shop', 'default_headers' => { 'Accept' => 'application/json' }, 'endpoints' => endpoints).lines
     expect(lines).to include('  headers:       Accept: application/json',
                              '                 X-HTTP-Method-Override: DELETE (shop.orders.show)',
-                             '  params:        state: open (shop.orders and below)')
+                             '  params:        state: open (shop.orders and the endpoints it contains)')
   end
 
   it 'says so when it cuts a name or a value: nothing is left out without a sign' do

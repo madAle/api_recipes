@@ -296,8 +296,10 @@ All options are listed in the [options reference](#options-reference).
 ### Headers and parameters sent with every request
 
 `default_headers` are sent with every request, and `default_params` are added
-to every query string. Both can also be written on an endpoint: there they hold
-for that endpoint and for the ones below it, on top of those of the API.
+to every query string. Both can also be written on an endpoint. A request
+looks for them up the tree: on its endpoint, then on each endpoint that
+contains it, then on the API, and sends what it finds, the nearest winning
+for a name written more than once.
 
 ```yaml
 billing:
@@ -1962,8 +1964,8 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `on_bad_code` | looked for up the tree | `raise` or `ignore` |
 | `mime_type` | looked for up the tree | content type used by `response.data` |
 | `verify_with` | looked for up the tree | method that decides whether a response is a success |
-| `default_headers` | none | headers added to those of the API, for this endpoint and the ones below it |
-| `default_params` | none | query parameters added to those of the API, for this endpoint and the ones below it |
+| `default_headers` | none | headers of this endpoint; a request finds them here when it looks up the tree, before those of the API |
+| `default_params` | none | query parameters of this endpoint; a request finds them here when it looks up the tree, before those of the API |
 | `resource` | `no` | `yes` adds the endpoints `show`, `create`, `update`, `replace` and `delete`; a list adds only the ones it names |
 | `endpoints` | none | nested endpoints |
 

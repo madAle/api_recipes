@@ -125,8 +125,8 @@ recipe can hold.
 - A `{name}` variable in the `path` of an endpoint, for a value that many calls
   share and no call should repeat: `/accounts/{account}/orders`.
 - `default_params`, the query parameters sent with every request, and
-  `default_headers` and `default_params` on an endpoint, for that endpoint and
-  the ones below it.
+  `default_headers` and `default_params` on an endpoint, which a request finds
+  when it looks up the tree from its own endpoint.
 - `resource: true`, which adds the endpoints of a REST resource (`show`,
   `create`, `update`, `replace`, `delete`) under an endpoint.
 - An option is written once, at the highest place where it holds: an endpoint
