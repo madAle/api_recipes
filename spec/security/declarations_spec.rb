@@ -37,9 +37,8 @@ describe 'Declarations of an api in modules, subclasses and objects' do
   it 'refuses a subclass that includes a module declaring the api of its superclass' do
     parent = Class.new do
       include ApiRecipes
-      api :svc
+      api :svc, authorization: 'Bearer B-CLASS'
     end
-    parent.svc.authorization = 'Bearer B-CLASS'
     evil = declaring_module(:svc, host: 'evil.test')
     child = Class.new(parent) { include evil }
     expect { child.new.svc.users.run }.to raise_error(ApiRecipes::ApiNameClashError, /already declared/)
@@ -60,15 +59,14 @@ describe 'Declarations of an api in modules, subclasses and objects' do
     object.singleton_class.include(ApiRecipes)
     expect { object.singleton_class.api :svc, host: 'evil.test' }
       .to raise_error(ApiRecipes::ApiNameClashError, /singleton class/)
-    klass.api :svc
-    klass.svc.authorization = 'Bearer A-CLASS'
+    klass.api :svc, authorization: 'Bearer A-CLASS'
     object.svc.users.run
     expect(WebMock).to have_requested(:get, 'https://api.example.test/users').with(headers: { 'Authorization' => 'Bearer A-CLASS' })
     expect(WebMock).not_to have_requested(:any, /evil\.test/)
   end
 
   it 'does not send the global credential to the host of a class tree' do
-    ApiRecipes.svc.authorization = 'Bearer GLOBAL'
+    global_values(svc: { authorization: 'Bearer GLOBAL' })
     klass = Class.new do
       include ApiRecipes
       api :svc, host: 'other.example.test'
@@ -79,7 +77,7 @@ describe 'Declarations of an api in modules, subclasses and objects' do
   end
 
   it 'lets a module declare an api for the classes that include it, with the variables of the module' do
-    shop = declaring_module(:shopify, variables: { shop: 'acme' })
+    shop = declaring_module(:shopify, variables: { shop: 'acme' }, authorization: 'token-module')
     first = Class.new { include shop }
     second = Class.new { include shop }
     a = first.new
@@ -90,7 +88,6 @@ describe 'Declarations of an api in modules, subclasses and objects' do
     b.shopify.orders.run
     expect(WebMock).to have_requested(:get, 'https://acme.example.test/orders').with(headers: { 'X-Token' => 'token-a' }).once
     expect(WebMock).to have_requested(:get, 'https://acme.example.test/orders').with(headers: { 'X-Token' => 'token-b' }).once
-    shop.shopify.authorization = 'token-module'
     expect([first.new.shopify.authorization, second.new.shopify.authorization]).to eq(%w[token-module token-module])
     expect(shop.shopify.orders.url.to_s).to eq('https://acme.example.test/orders')
     second.new.shopify.orders.run
@@ -98,11 +95,10 @@ describe 'Declarations of an api in modules, subclasses and objects' do
   end
 
   it 'lets an object use a module it was extended with, when its class declares nothing' do
-    shop = declaring_module(:shopify, variables: { shop: 'acme' })
+    shop = declaring_module(:shopify, variables: { shop: 'acme' }, authorization: 'token-module')
     object = Class.new.new
     object.extend(shop)
     expect(object.shopify.orders.url.to_s).to eq('https://acme.example.test/orders')
-    shop.shopify.authorization = 'token-module'
     object.shopify.orders.run
     expect(WebMock).to have_requested(:get, 'https://acme.example.test/orders').with(headers: { 'X-Token' => 'token-module' })
   end

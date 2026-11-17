@@ -3,9 +3,12 @@ require 'yaml'
 
 # Take a look at examples/config/github.yml.erb  for a full list of available options
 
+# Setup Basic Auth. The credential of the whole application is given to
+# configure, once
 ApiRecipes.configure do |config|
   config.apis_files_paths = ['examples/config/github.yml.erb']
   config.print_urls = true
+  config.values = { github: { basic_auth: { user: ENV.fetch('GITHUB_USERNAME'), pass: ENV.fetch('GITHUB_PASSWORD') } } }
 end
 
 # Let's create a simple class that uses ApiRecipes
@@ -15,9 +18,6 @@ class MyFancyClass
   # Declare the apis that we're going to use
   api :github
 end
-
-# Setup Basic Auth. Credentials are set on the api of the ApiRecipes module
-ApiRecipes.github.basic_auth = { user: ENV.fetch('GITHUB_USERNAME'), pass: ENV.fetch('GITHUB_PASSWORD') }
 
 # From now on every github's api request will be authenticated with basic auth,
 # including those made by MyFancyClass and its instances

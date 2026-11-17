@@ -62,7 +62,7 @@ describe 'Configuration files and secrets' do
       File.symlink(shared, link)
       [shared, upper, link].each do |path|
         expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }
-          .to raise_error(ApiRecipes::RecipeFileError, /not supported by this version/)
+          .to raise_error(ApiRecipes::RecipeFileError, /is a portable recipe \(\.recipe\.yml\): give it to recipes_paths/)
       end
     end
   end
@@ -237,7 +237,7 @@ describe 'Configuration files and secrets' do
     configure_test_apis
     client = new_client_class.new
     client.svc.authorization = 'Bearer SECRET'
-    ApiRecipes.svc.basic_auth = { user: 'u', pass: 'SECRET' }
+    global_values(svc: { basic_auth: { user: 'u', pass: 'SECRET' } })
     shown = [client, client.svc, client.svc.users, client.svc.definition, client.svc.definition.to_h,
              ApiRecipes.svc, ApiRecipes.configuration, client.svc.with(authorization: 'Bearer SECRET')].map(&:inspect)
     expect(shown.join).not_to include('SECRET')
@@ -245,7 +245,13 @@ describe 'Configuration files and secrets' do
 
   it 'does not put a credential with a line break in an error' do
     configure_test_apis
-    expect { ApiRecipes.svc.authorization = "Bearer SECRET\n" }
-      .to raise_error(ApiRecipes::InvalidCredential) { |e| expect(e.message).not_to include('SECRET') }
+    given = [
+      -> { ApiRecipes.configure { |config| config.values = { svc: { authorization: "Bearer SECRET\n" } } } },
+      -> { Class.new { include ApiRecipes }.api(:svc, authorization: "Bearer SECRET\n") },
+      -> { new_client_class.new.svc.authorization = "Bearer SECRET\n" }
+    ]
+    given.each do |giving|
+      expect(&giving).to raise_error(ApiRecipes::InvalidCredential) { |e| expect(e.message).not_to include('SECRET') }
+    end
   end
 end

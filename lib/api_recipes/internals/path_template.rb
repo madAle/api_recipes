@@ -3,7 +3,8 @@
 module ApiRecipes
   module Internals
     # The `path` of one endpoint, parsed once. Fixed text is percent-encoded at
-    # parse time; placeholder values are encoded at expand time.
+    # parse time; the values of placeholders and of {variables} are encoded at
+    # expand time.
     class PathTemplate
       NAME = /[A-Za-z_]\w*/
       FIXED_KEPT = /\A(?:[A-Za-z0-9\-._~!$&'()*+,;=:@\/]|%\h\h)/
@@ -24,21 +25,29 @@ module ApiRecipes
 
       def initialize(string)
         @parts = parse_parts(string).freeze
-        names = @parts.select { |kind, _| kind != :text }.map(&:last)
+        names = @parts.select { |kind, _| %i[param splat].include?(kind) }.map(&:last)
         repeated = names.find { |name| names.count(name) > 1 }
         raise ArgumentError, "placeholder '#{repeated}' is repeated in '#{string}'" if repeated
         @param_names = names.freeze
+        @variable_names = @parts.select { |kind, _| kind == :variable }.map(&:last).uniq.freeze
       end
 
-      attr_reader :param_names
+      # param_names: the placeholders, which take an argument each, in order.
+      # variable_names: the {variables} of the api, each once.
+      attr_reader :param_names, :variable_names
 
       # The block, if given, is called with the name of a parameter, :slash when
       # its value (not a splat) contains '/' or :encoded when it contains a
       # sequence %XX, and the endpoint. It never receives the value.
-      def expand(values, endpoint:)
+      #
+      # context gives the values of the variables (variables) and the name of
+      # the api (definition.name). It is asked once, and only by a path that
+      # has a variable.
+      def expand(values, endpoint:, context: nil)
         remaining = values.dup
         out = +''
         index = 0
+        variables = nil
         # No &block parameter and no block inside this loop: either would allocate
         # a Proc at every call. The values are read from their encoded form: a '/'
         # in the value is '%2F' there, and a sequence %XX is '%25' and two hex
@@ -59,6 +68,14 @@ module ApiRecipes
             encoded = encode_splat(remaining.shift, content, endpoint)
             out << encoded
             yield content, :encoded, endpoint if block_given? && encoded.include?('%25') && encoded.match?(ENCODED_SEQUENCE)
+          when :variable
+            raise ArgumentError, 'a path with variables needs a context' if context.nil?
+
+            variables ||= context.variables
+            api = context.definition.name
+            raise MissingVariable.new(api, content) unless variables.key?(content)
+
+            out << Template.segment(variables[content], content, api)
           end
         end
         out
@@ -70,6 +87,7 @@ module ApiRecipes
           when :text then content
           when :param then ":#{content}"
           when :splat then "*#{content}"
+          when :variable then "{#{content}}"
           end
         end.join
       end
@@ -86,6 +104,13 @@ module ApiRecipes
           if rest.start_with?('\\:')
             text << ':'
             index += 2
+          elsif rest.start_with?('\\{')
+            text << '%7B'
+            index += 2
+          elsif (match = rest.match(/\A\{(#{NAME})\}/o))
+            flush(parts, text)
+            parts << [:variable, match[1].to_sym]
+            index += match[0].length
           elsif (match = rest.match(/\A:(#{NAME})/o))
             flush(parts, text)
             parts << [:param, match[1].to_sym]

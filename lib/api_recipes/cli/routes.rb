@@ -3,7 +3,8 @@
 module ApiRecipes
   module CLI
     # The routes command: the calls that the recipes in some files offer, one
-    # per line, with the verb and the address.
+    # per line, with the verb and the address. A file called NAME.recipe.yml is
+    # a portable recipe, read as data only.
     class Routes
       def initialize(files, erb: false)
         @files = Array(files)
@@ -30,7 +31,11 @@ module ApiRecipes
           return 2
         end
 
-        apis = Configuration.new.read_recipe_file(file, erb: @erb)
+        apis = if file.end_with?(Internals::Recipe::SUFFIX)
+                 Internals::Recipe.read(file, compile: false).apis
+               else
+                 Configuration.new.read_recipe_file(file, erb: @erb)
+               end
         Internals::Compiler.compile_all(apis).each_value do |api|
           api.routes.each { |route| rows << [route.call, route.verb.to_s.upcase, route.url] }
         end

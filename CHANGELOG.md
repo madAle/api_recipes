@@ -1,3 +1,103 @@
+## Version 3.0.0.beta3
+
+The third pre-release of 3.0 adds portable recipes: recipes written by others,
+which are data only, and the commands that install them.
+
+- `config.recipes_paths` loads the installed recipes. A file there is called
+  `NAME.recipe.yml`, holds one api with the key `recipe` (its `name` and
+  `version`), is never evaluated with ERB and is read as plain YAML: no anchors,
+  aliases, tags or merge keys, no key given twice, only visible text, comments
+  included, and limits on its size. It cannot
+  carry `verify_with`, cannot take the name of an api that another source
+  defines, and a variable of its `host` cannot decide where the host ends.
+- Every file of `recipes_paths` must match the checksum that the `recipes.lock`
+  of its folder holds for it. A file changed after it was installed, or never
+  installed, raises `ApiRecipes::ConfigurationError`.
+- `api_recipes install NAME` reads `recipes/NAME.recipe.yml` from the
+  [cookbook](https://github.com/madAle/api_recipes-cookbook), or from the Git
+  repository given with `--from`, at the head or at the tag `NAME-VERSION` given
+  with `--version`. It shows the address, where the credential goes, the
+  headers sent with every request, the variables and every call that is not a
+  GET, then asks before it writes the
+  recipe and `recipes.lock` in `config/api_recipes`, or in the folder given with
+  `--to`. `api_recipes install FILE` installs a file. The download is done by
+  `git`, over `https` or `ssh` only, without a working copy.
+- `api_recipes update NAME` replaces an installed recipe with the one its
+  repository has now, after showing what changes in the address, the
+  credential, the headers and the verbs.
+- `api_recipes check` compares the installed recipes with `recipes.lock`;
+  `api_recipes check FILE` says whether a file is a valid portable recipe.
+- `api_recipes routes` also reads a portable recipe.
+- A `*.recipe.yml` given to `apis_files_paths` is still refused; the message now
+  says to give it to `recipes_paths`.
+- A private repository of recipes works over `https` with the credentials that
+  `git` already has for its host, and over `ssh` with the keys that `ssh`
+  already uses: the address is `user@host:path` or `ssh://user@host/path`.
+  On a terminal `git` asks for the user name and the password it does not
+  have, as it does for a clone; without a terminal nothing is asked. When the
+  credentials are missing or refused, when `ssh` does not know the host, has no
+  key the host accepts or warns that the key of the host has changed, the
+  message says so. `install` and `update` say which address they read before
+  `git` connects to it.
+
+**The credential and the variables of the whole application and of a class
+are given when the application starts, and nowhere else.**
+`ApiRecipes.github.authorization = ...`, `basic_auth=` and `variables=` now
+raise `ApiRecipes::Error` on `ApiRecipes.github`, on a class and on a module:
+what they hold is shared by every thread, and code that assigned it for each
+user could send the token of one user with the request of another. Give them
+to `config.values = { github: { authorization: ..., variables: { ... } } }`
+inside `ApiRecipes.configure`, and to `api :github, authorization: ...` in a
+class. The writers still work on an object, and `with` gives a value to one
+chain. `config.values` replaces `config.variables` and is assigned inside the
+block of `configure` only; a `configure` changes the descriptions and those
+values in one step. A subclass no longer has a level of its own: it uses the
+one of the class that declares the API. The value of a variable is a String, a
+Symbol or a number, kept as text: any other object is a configuration error.
+
+**An endpoint that does not set `timeout`, `on_bad_code` or `mime_type` now
+looks for it up the tree**, as it already did for `verify_with`: in the
+endpoints that contain it, from the nearest, then in the API. The first value
+found is used. In the previous pre-releases and in 2.x the value came from the
+API. An option is written once, at the highest place where it holds; `ok_code`
+is read only on its endpoint.
+
+It also adds ways of describing an API with less text. They are part of what a
+recipe can hold:
+
+- A `{name}` in the `path` of an endpoint is a variable of the API, as in
+  `host` and `base_url`: `/accounts/{account}/orders`. Its value is encoded as
+  one segment, and `.`, `..` and an empty value raise
+  `ApiRecipes::InvalidVariable`. `definition` has `path_variables`.
+  **A word in braces in a path was text in the previous pre-releases and in
+  2.x: it is now a variable, and one that is not declared is a configuration
+  error. Write `\{word}` to keep the braces as text.**
+- `default_params` sends query parameters with every request, as
+  `default_headers` does for headers. A value can contain variables. The
+  `params:` of a request win on the same name. With `auth.type: query` the
+  parameter of the credential cannot be set there. `with` takes
+  `default_params` too. `definition` hides the values in `to_h` and `inspect`.
+- `default_headers` and `default_params` can be written on an endpoint, on top
+  of those of the API. An endpoint looks for them up the tree, one name at a
+  time, as for its other options.
+- The name of a header is compared as HTTP does, without its case and with
+  `_` read as `-`, wherever a nearer level replaces it: an endpoint, `with` and
+  the options of a class. `with(default_headers: { 'accept' => ... })` replaces
+  the `Accept` of the API and no longer adds a second header. The same name
+  written twice in one `default_headers` is a configuration error.
+- `\{` keeps a brace as text in a `base_url` too.
+- `resource: true` on an endpoint adds the endpoints `show`, `create`,
+  `update`, `replace` and `delete` under it; a list adds only the ones it
+  names. An endpoint written with one of those names completes the generated
+  one.
+- `api_recipes install` and `update` show the parameters sent with every
+  request and the headers and parameters that an endpoint adds. A name or a
+  value that is cut is followed by its length, and the address is shown whole.
+  `update` compares headers and parameters as they are written, and shows one
+  line for each that is new, changed or no longer sent, with the whole values.
+- A recipe can hold at most 100,000 headers and parameters on its endpoints,
+  counting for each endpoint that adds some those of the endpoints above it.
+
 ## Version 3.0.0.beta2
 
 The second pre-release of 3.0 adds two commands. Nothing changes in the library.

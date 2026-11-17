@@ -131,46 +131,83 @@ describe 'restored objects' do
 end
 
 describe ApiRecipes::Internals::Levels do
-  def write(owner, key, value)
-    ApiRecipes::Internals::LevelSet.write(owner, key) { |level| level.with(variables: { n: value }.freeze) }
-  end
-
   def values(chain) = chain.map { |kind, level| [kind, level.variables[:n]] }
 
-  it 'walks from the instance to the global api' do
+  def numbered(value) = ->(level) { level.with(variables: { n: value }.freeze) }
+
+  # A set put on a class or a module by force: nothing of the library writes one.
+  def force(owner, key, value)
+    sets = ApiRecipes::Internals::LevelSet
+    level = ApiRecipes::Internals::Level.new(credential: nil, variables: { n: value }.freeze)
+    owner.instance_variable_set(sets::IVAR, sets.new({ key => level }.compare_by_identity, sets.generation))
+  end
+
+  it 'goes from the object to the class that declared the api, then to the application' do
     parent = Class.new
     child = Class.new(parent)
     object = child.new
     declaration = ApiRecipes::Internals::Declaration.new(parent, :svc, {}, nil)
-    [object, child, parent, ApiRecipes].each_with_index do |owner, index|
-      ApiRecipes::Internals::LevelSet.write(owner, owner.equal?(ApiRecipes) ? :svc : declaration) do |level|
-        level.with(variables: { n: index }.freeze)
-      end
-    end
+    write_level(object, declaration, &numbered(0))
+    force(child, declaration, 1)
+    write_level(parent, declaration, &numbered(2))
+    write_level(ApiRecipes, :svc, &numbered(3))
     chain = described_class.chain(object, :svc, declaration)
-    expect(chain.map(&:first)).to eq(%i[instance class class global])
-    expect(chain.map { |_, level| level.variables[:n] }).to eq([0, 1, 2, 3])
-    expect(described_class.chain(child, :svc, declaration).map(&:first)).to eq(%i[class class global])
+    expect(chain.map(&:first)).to eq(%i[instance class global])
+    # The set forced on child, which did not declare the api, is not read.
+    expect(values(chain)).to eq([[:instance, 0], [:class, 2], [:global, 3]])
+    expect(values(described_class.chain(child, :svc, declaration))).to eq([[:class, 2], [:global, 3]])
+    expect(values(described_class.chain(parent, :svc, declaration))).to eq([[:class, 2], [:global, 3]])
     expect(described_class.chain(ApiRecipes, :svc, nil).map(&:first)).to eq(%i[global])
+    expect(chain).to be_frozen
+    expect(chain.registry).to equal(ApiRecipes::Internals::Registry.current)
   end
 
-  it 'returns only the levels written through the declaration, then the one of the module that declared it' do
+  it 'refuses to write a set on a class, a module or the ApiRecipes module' do
+    declaration = ApiRecipes::Internals::Declaration.new(Class.new, :svc, {}, nil)
+    [Class.new, Module.new, ApiRecipes, Class.new.singleton_class, declaration.declared_in].each do |owner|
+      expect { ApiRecipes::Internals::LevelSet.write(owner, declaration, &numbered(1)) }
+        .to raise_error(ApiRecipes::Error, 'a level is written on an object, not on a class or a module')
+      expect(owner.instance_variable_get(ApiRecipes::Internals::LevelSet::IVAR)).to be_nil
+    end
+  end
+
+  it 'returns only the levels of the declaration: the one written through it on the object and the one of the module that declared it' do
     declarer = Module.new
     declaration = ApiRecipes::Internals::Declaration.new(declarer, :svc, {}, nil)
-    other = ApiRecipes::Internals::Declaration.new(Module.new, :svc, {}, nil)
+    other_declarer = Module.new
+    other = ApiRecipes::Internals::Declaration.new(other_declarer, :svc, {}, nil)
     klass = Class.new
     object = klass.new
-    [object, klass, declarer].each { |owner| write(owner, other, 'other') }
-    write(klass, :svc, 'by name')
-    write(ApiRecipes, :svc, 'global')
+    write_level(object, other, &numbered('other'))
+    write_level(other_declarer, other, &numbered('other'))
+    [klass, declarer].each { |owner| force(owner, other, 'other') }
+    write_level(ApiRecipes, :svc, &numbered('global'))
     expect(values(described_class.chain(object, :svc, declaration))).to eq([[:global, 'global']])
-    write(declarer, declaration, 'module')
-    write(klass, declaration, 'class')
-    expect(values(described_class.chain(object, :svc, declaration)))
-      .to eq([[:class, 'class'], [:class, 'module'], [:global, 'global']])
+    write_level(declarer, declaration, &numbered('module'))
+    force(klass, declaration, 'class')
+    expect(values(described_class.chain(object, :svc, declaration))).to eq([[:class, 'module'], [:global, 'global']])
     klass.include(declarer)
+    write_level(object, declaration, &numbered('object'))
     expect(values(described_class.chain(object, :svc, declaration)))
-      .to eq([[:class, 'class'], [:class, 'module'], [:global, 'global']])
+      .to eq([[:instance, 'object'], [:class, 'module'], [:global, 'global']])
+    expect(values(described_class.chain(object, :svc, other)))
+      .to eq([[:instance, 'other'], [:class, 'other'], [:global, 'global']])
+    expect(values(described_class.chain(klass, :svc, declaration))).to eq([[:class, 'module'], [:global, 'global']])
     expect(values(described_class.chain(object, :svc, nil))).to eq([[:global, 'global']])
+  end
+
+  it 'gives the level of the owner alone to the readers' do
+    declarer = Class.new
+    declaration = ApiRecipes::Internals::Declaration.new(declarer, :svc, {}, nil)
+    object = declarer.new
+    write_level(ApiRecipes, :svc, &numbered('global'))
+    expect(described_class.own(object, :svc, declaration)).to be_nil
+    expect(described_class.own(declarer, :svc, declaration)).to be_nil
+    write_level(declarer, declaration, &numbered('class'))
+    write_level(object, declaration, &numbered('object'))
+    expect(described_class.own(object, :svc, declaration).variables).to eq(n: 'object')
+    expect(described_class.own(declarer, :svc, declaration).variables).to eq(n: 'class')
+    expect(described_class.own(Class.new(declarer), :svc, declaration).variables).to eq(n: 'class')
+    expect(described_class.own(ApiRecipes, :svc, nil).variables).to eq(n: 'global')
   end
 end

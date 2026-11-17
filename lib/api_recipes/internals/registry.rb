@@ -13,7 +13,7 @@ module ApiRecipes
       @warned = {}
 
       @methods = [].freeze
-      @variable_names = [].freeze
+      VALUE_KEYS = %i[variables authorization basic_auth].freeze
 
       class << self
         attr_reader :current
@@ -26,23 +26,21 @@ module ApiRecipes
         def install(configuration)
           LOCK.synchronize do
             apis = configuration.load
-            definitions = Compiler.compile_all(apis, configuration.variables)
+            # A configuration that gives no values keeps those in force now,
+            # read under the lock: not those of when its block started.
+            levels = configuration.value_levels || @current.levels
+            definitions = Compiler.compile_all(apis, levels.transform_values(&:variables))
             handles = definitions.transform_values { |definition| Handles.new(definition) }
-            variables = Compiler.normalize(configuration.variables).to_h { |name, values| [name, variable_values(values)] }
             WARNED_LOCK.synchronize { @warned = {} }
+            # One assignment: the trees and the values of the application
+            # change together, for every reader.
             @current = new(configs: Compiler.frozen_copy(apis), definitions: definitions, handles: handles,
-                           generation: @current.generation + 1)
+                           levels: levels, generation: @current.generation + 1)
             yield if block_given?
             warnings = define_methods(@current.apis) + handles.values.flat_map(&:warnings)
-            (variables.keys - definitions.keys).each do |name|
-              warnings << "variables are given for '#{name}', which is not a configured api"
+            (levels.keys - definitions.keys).each do |name|
+              warnings << "values are given for '#{PlainYaml.label(name.to_s, 40)}', which is not a configured api"
             end
-            # A name that configure set belongs to the configuration: the next
-            # successful configure applies its variables again or removes them,
-            # so a value assigned directly under such a name is replaced. A value
-            # assigned directly to a name that configure never set is not touched.
-            LevelSet.replace_variables(ApiRecipes, variables, @variable_names - variables.keys)
-            @variable_names = variables.keys.freeze
             warnings.each { |message| configuration.logger.warn(message) }
           end
         end
@@ -75,7 +73,6 @@ module ApiRecipes
         def reset!
           LOCK.synchronize do
             LevelSet.reset!
-            @variable_names = [].freeze
             define_methods([])
             WARNED_LOCK.synchronize { @warned = {} }
             @current = new(generation: @current.generation + 1)
@@ -87,6 +84,50 @@ module ApiRecipes
         # or nil. Anything else than a Hash or nil raises ConfigurationError.
         def variable_values(values)
           Compiler.resolve_options({ variables: values }, :with_api)[:variables]
+        end
+
+        # values as { api name => Level }: what config.values holds. Raises
+        # ConfigurationError, or InvalidCredential, without showing a value.
+        def value_levels(values)
+          values.each_with_object({}) do |(name, given), levels|
+            unless name.is_a?(Symbol) || (name.is_a?(String) && name.valid_encoding?)
+              raise ConfigurationError.new(['values: the name of an api must be a String or a Symbol'])
+            end
+            key = name.to_sym
+            shown = PlainYaml.label(name.to_s, 40)
+            raise ConfigurationError.new(["values.#{shown}: is not the name of an api"]) unless shown == name.to_s && !shown.empty?
+            raise ConfigurationError.new(["values.#{key}: is given twice"]) if levels.key?(key)
+
+            levels[key] = level_from(given, "values.#{key}")
+          end.freeze
+        end
+
+        # The level that given describes: variables, and authorization or
+        # basic_auth. A credential given as nil means "send none".
+        def level_from(given, where)
+          raise ConfigurationError.new(["#{where}: must be a Hash"]) unless given.is_a?(Hash)
+
+          texts = given.keys.map(&:to_s)
+          # What is not one of the three names is not shown: a credential
+          # written in the wrong place would be.
+          unless (texts - VALUE_KEYS.map(&:to_s)).empty?
+            raise ConfigurationError.new(["#{where}: takes variables, authorization and basic_auth, and nothing else"])
+          end
+          twice = texts.find { |text| texts.count(text) > 1 }
+          raise ConfigurationError.new(["#{where}: #{twice} is given twice"]) if twice
+
+          names = texts.map(&:to_sym)
+          if names.include?(:authorization) && names.include?(:basic_auth)
+            raise ConfigurationError.new(["#{where}: takes authorization or basic_auth, not both"])
+          end
+
+          resolved = Compiler.resolve_options(given, :with_api)
+          kind = (names & %i[authorization basic_auth]).first
+          Level.new(credential: kind && Credential.from(kind, resolved[kind]), variables: resolved[:variables])
+        rescue ConfigurationError => e
+          raise e if e.errors.all? { |problem| problem.start_with?(where) }
+
+          raise ConfigurationError.new(e.errors.map { |problem| "#{where}.#{problem}" })
         end
 
         private
@@ -114,12 +155,14 @@ module ApiRecipes
         end
       end
 
-      attr_reader :configs, :definitions, :handles, :generation
+      # levels: what the whole application gives to each api, name => Level.
+      attr_reader :configs, :definitions, :handles, :levels, :generation
 
-      def initialize(configs: {}, definitions: {}, handles: {}, generation: 0)
+      def initialize(configs: {}, definitions: {}, handles: {}, levels: {}, generation: 0)
         @configs = configs.freeze
         @definitions = definitions.freeze
         @handles = handles.freeze
+        @levels = levels.freeze
         @generation = generation
         @globals = definitions.to_h do |name, definition|
           context = Context.new(definition: definition, owner: ApiRecipes, global_definition: definition,
@@ -128,6 +171,9 @@ module ApiRecipes
         end.freeze
         freeze
       end
+
+      # The level of the application for the api called name, or nil.
+      def level(name) = @levels[name]
 
       # The global api called name, always the same object; nil if unknown.
       def global(name) = @globals[name]

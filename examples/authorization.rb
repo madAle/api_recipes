@@ -3,8 +3,17 @@ require 'yaml'
 
 # Take a look at examples/config/github.yml.erb  for a full list of available options
 
+# Setup Auth. This will set/replace the HTTP 'Authorization' header with the
+# provided value
+
+# Get your OAUTH token on Github.
+# Navigate Profile => Settings => Developer Settings => Personal Access Tokens => Generate new token
+# Copy the generated string and set the env variable
+# e.g.  GITHUB_OAUTH_TOKEN=your_token bundle exec ruby examples/authorization.rb
+# The credential of the whole application is given to configure, once
 ApiRecipes.configure do |config|
   config.apis_files_paths = ['examples/config/github.yml.erb']
+  config.values = { github: { authorization: "token #{ENV.fetch('GITHUB_OAUTH_TOKEN')}" } }
 end
 
 # Let's create a simple class that uses ApiRecipes
@@ -14,16 +23,6 @@ class MyFancyClass
   # Declare the apis that we're going to use
   api :github
 end
-
-# Setup Auth. This will set/replace the HTTP 'Authorization' header with the
-# provided value
-
-# Get your OAUTH token on Github.
-# Navigate Profile => Settings => Developer Settings => Personal Access Tokens => Generate new token
-# Copy the generated string and set the env variable
-# e.g.  GITHUB_OAUTH_TOKEN=your_token bundle exec ruby examples/authorization.rb
-# Credentials are set on the api of the ApiRecipes module
-ApiRecipes.github.authorization = "token #{ENV.fetch('GITHUB_OAUTH_TOKEN')}"
 
 # From now on every github's api request will be authenticated through the provided
 # auth, including those made by MyFancyClass and its instances

@@ -18,7 +18,7 @@ describe 'Responses through the DSL' do
 
   before do
     configure_test_apis(svc: { host: 'api.example.test', endpoints: { users: nil } })
-    ApiRecipes.svc.authorization = 'Bearer SECRET'
+    global_values(svc: { authorization: 'Bearer SECRET' })
   end
 
   def answer(body, headers: json)
@@ -48,7 +48,7 @@ describe 'Responses through the DSL' do
     it 'does not take the header named by auth to another origin, nor give it back on the way home' do
       ApiRecipes.reset!
       configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'header', name: 'X-Api-Key' }, endpoints: { users: nil } })
-      ApiRecipes.svc.authorization = 'SECRET'
+      global_values(svc: { authorization: 'SECRET' })
       stub_request(:get, 'https://evil.test/steal')
         .to_return(status: 302, headers: { 'Location' => 'https://api.example.test/back' })
       stub_request(:get, 'https://api.example.test/back').to_return(status: 200, body: '{}')
@@ -62,7 +62,7 @@ describe 'Responses through the DSL' do
     it 'does not take a credential sent in the query to another origin' do
       ApiRecipes.reset!
       configure_test_apis(svc: { host: 'api.example.test', auth: { type: 'query', name: 'key' }, endpoints: { users: nil } })
-      ApiRecipes.svc.authorization = 'SECRET'
+      global_values(svc: { authorization: 'SECRET' })
       stub_request(:get, %r{\Ahttps://api\.example\.test/users})
         .to_return(status: 302, headers: { 'Location' => 'https://evil.test/steal?key=SECRET&x=1' })
       stub_request(:get, %r{\Ahttps://evil\.test/steal}).to_return(status: 200, body: '{}')

@@ -139,8 +139,9 @@ describe 'Endpoint and api names' do
   end
 
   it 'shows itself without secrets' do
-    svc = api(users: { endpoints: { show: { path: '/:id' } } })
-    svc.authorization = 'Bearer SECRET'
+    api(users: { endpoints: { show: { path: '/:id' } } })
+    global_values(svc: { authorization: 'Bearer SECRET' })
+    svc = ApiRecipes.svc
     expect(svc.inspect).to eq('#<ApiRecipes::Api svc https://h.test endpoints: users>')
     expect(svc.users.show(7, params: { token: 'SECRET' }).inspect)
       .to eq('#<ApiRecipes::Endpoint svc.users.show GET https://h.test/users/7>')

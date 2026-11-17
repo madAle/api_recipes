@@ -46,7 +46,7 @@ describe 'with' do
     expect { copy.basic_auth = { user: 'u', pass: 'p' } }.to raise_error(ApiRecipes::Error, /with\(basic_auth: \.\.\.\)/)
     expect { copy.variables = { region: 'eu' } }.to raise_error(ApiRecipes::Error, /with\(variables: \.\.\.\)/)
     expect([ApiRecipes.svc.authorization, ApiRecipes.svc.basic_auth, ApiRecipes.svc.variables]).to eq([nil, nil, {}])
-    ApiRecipes.svc.authorization = 'Bearer shared'
+    global_values(svc: { authorization: 'Bearer shared' })
     expect(copy.authorization).to eq('Bearer shared')
   end
 

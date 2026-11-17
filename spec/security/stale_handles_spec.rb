@@ -21,7 +21,7 @@ describe 'An api held across a configure' do
     held = ApiRecipes.svc
     held_endpoint = ApiRecipes.svc.users
     configure_test_apis(new_config)
-    ApiRecipes.svc.authorization = 'Bearer NEW'
+    global_values(svc: { authorization: 'Bearer NEW' })
 
     expect { held.users.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
     expect { held_endpoint.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
@@ -32,13 +32,15 @@ describe 'An api held across a configure' do
     configure_test_apis(old_config)
     client = client_class.new
     held = client.svc
-    held_by_class = client_class.svc
+    with_credential = Class.new do
+      include ApiRecipes
+      api :svc, authorization: 'Bearer CLASS'
+    end
+    held_by_class = with_credential.svc
     configure_test_apis(new_config)
     client.svc.authorization = 'Bearer OBJECT'
 
     expect { held.users.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
-    client.svc.authorization = nil
-    client_class.svc.authorization = 'Bearer CLASS'
     expect { held_by_class.users.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
     expect(WebMock).not_to have_requested(:any, /example\.test/)
   end
@@ -46,11 +48,39 @@ describe 'An api held across a configure' do
   it 'does not take a credential to the old host when the api is no longer configured' do
     configure_test_apis(old_config)
     held = ApiRecipes.svc
-    ApiRecipes.svc.authorization = 'Bearer OLD'
+    global_values(svc: { authorization: 'Bearer OLD' })
     configure_test_apis(other: { host: 'other.example.test' })
 
     expect { held.users.run }.to raise_error(ApiRecipes::CredentialOriginMismatch)
     expect(WebMock).not_to have_requested(:any, /example\.test/)
+  end
+
+  # The trees and the values of the application change in one step: a request
+  # that starts while configure is still running sees both the new ones.
+  it 'never pairs the host of a new configuration with the credential of the old one while configure runs' do
+    seen = []
+    stub_request(:any, /example\.test/).to_return do |request|
+      seen << [request.uri.host, request.headers['Authorization']]
+      { status: 200, body: '[]', headers: json }
+    end
+    configure_test_apis(old_config)
+    global_values(svc: { authorization: 'Bearer OLD' })
+    held = ApiRecipes.svc.users
+    outcomes = []
+    registry = ApiRecipes::Internals::Registry
+    # define_methods runs inside configure, after the new registry is in force.
+    allow(registry).to receive(:define_methods).and_wrap_original do |original, *arguments|
+      ApiRecipes.svc.users.run
+      outcomes << (held.run && :sent rescue $!.class)
+      original.call(*arguments)
+    end
+    new_apis = new_config
+    ApiRecipes.configure do |config|
+      config.apis_configs = new_apis
+      config.values = { svc: { authorization: 'Bearer NEW' } }
+    end
+    expect(seen).to eq([['new.example.test', 'Bearer NEW']])
+    expect(outcomes).to eq([ApiRecipes::CredentialOriginMismatch])
   end
 
   it 'keeps sending the credential when the configure does not move the origin' do
@@ -58,7 +88,7 @@ describe 'An api held across a configure' do
     held = ApiRecipes.svc
     held_by_object = client_class.new.svc
     configure_test_apis(old_config)
-    ApiRecipes.svc.authorization = 'Bearer SAME'
+    global_values(svc: { authorization: 'Bearer SAME' })
 
     held.users.run
     held_by_object.users.run

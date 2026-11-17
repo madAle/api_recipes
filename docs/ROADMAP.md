@@ -11,7 +11,7 @@ stable line until `3.0.0` is final.
 | --- | --- |
 | `3.0.0.beta1` | the new core, the fixes that change behaviour and the upgrade guide |
 | `3.0.0.beta2` | the OpenAPI importer |
-| `3.0.0.beta3` | portable recipes and a command to install them |
+| `3.0.0.beta3` | portable recipes and a command to install them; variables in paths, `default_params` and `resource`; options looked for up the tree; values of the application and of a class given at startup |
 | `3.0.0` | all of the above, after real use |
 
 A part that is not mature when the others are ships marked as experimental
@@ -39,6 +39,11 @@ changes is underneath.
   is made: `auth` says where the credential goes (a header, the query string),
   and `variables` declares `{name}` placeholders for `host`, `base_url` and
   header values, with values taken along the same chain as credentials.
+- The credential and the variables that the whole application or a class uses
+  are shared by every thread, so they are given where the application starts:
+  `config.values` for the application, the options of `api` for a class. The
+  writers `authorization=`, `basic_auth=` and `variables=` work on an object
+  only; `with` gives a value to one chain.
 - `definition` gives a read-only description of an api or of an endpoint, and
   `inspect` never shows a credential.
 - Requests are made with http.rb 6 (`>= 6.0.4, < 7`); http.rb 5 is no longer
@@ -96,10 +101,37 @@ A command turns an OpenAPI description into a recipe file, for example:
 - A recipe meant to be shared is data only: no ERB, declared placeholders for
   host and credentials, and metadata such as name, version and kind of
   authorization.
-- Recipes are shared through a Git repository, with contributions by pull
-  request. A command downloads a recipe and pins its version.
+- Recipes are shared through a Git repository, the
+  [cookbook](https://github.com/madAle/api_recipes-cookbook), with contributions
+  by pull request. `api_recipes install` downloads a recipe, shows where the
+  requests and the credential go and pins its version in `recipes.lock`;
+  `api_recipes update` shows what changes before replacing it; `api_recipes
+  check` validates a recipe and compares the installed ones with the lock.
+- The application loads the installed recipes with `config.recipes_paths` and
+  downloads nothing when it starts. A recipe that does not match the lock stops
+  the configuration.
 - The content of that repository grows on its own schedule and is not a
   requirement for the release.
+- A company can keep its recipes in a private repository of its own, reached
+  over `https` with the credentials that `git` already has, or over `ssh` with
+  its keys.
+
+### Less text for the same API
+
+Four additions arrive with portable recipes, because they are part of what a
+recipe can hold.
+
+- A `{name}` variable in the `path` of an endpoint, for a value that many calls
+  share and no call should repeat: `/accounts/{account}/orders`.
+- `default_params`, the query parameters sent with every request, and
+  `default_headers` and `default_params` on an endpoint, for that endpoint and
+  the ones below it.
+- `resource: true`, which adds the endpoints of a REST resource (`show`,
+  `create`, `update`, `replace`, `delete`) under an endpoint.
+- An option is written once, at the highest place where it holds: an endpoint
+  that does not set `timeout`, `on_bad_code`, `mime_type` or `verify_with`
+  looks for it up the tree, in the endpoints that contain it and then in the
+  API.
 
 ## Later
 

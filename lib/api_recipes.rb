@@ -8,8 +8,11 @@ require 'api_recipes/internals/credential'
 require 'api_recipes/internals/level'
 require 'api_recipes/internals/path_template'
 require 'api_recipes/internals/template'
+require 'api_recipes/internals/plain_yaml'
 require 'api_recipes/internals/definition'
 require 'api_recipes/internals/compiler'
+require 'api_recipes/internals/recipe'
+require 'api_recipes/internals/recipe_lock'
 require 'api_recipes/internals/context'
 require 'api_recipes/internals/request'
 require 'api_recipes/response'
@@ -40,7 +43,7 @@ module ApiRecipes
 
     draft = configuration.dup
     yield draft
-    Internals::Registry.install(draft) { @configuration = draft }
+    Internals::Registry.install(draft) { @configuration = draft.close_draft }
     nil
   end
 
@@ -56,8 +59,9 @@ module ApiRecipes
 
   def self.apis = Internals::Registry.current.apis
 
-  # Removes the global apis and their methods, the configuration and every
-  # credential and variable value.
+  # Removes the global apis and their methods, the configuration, the values
+  # of the application and those assigned to objects. What a class gives to
+  # `api` is part of its code and stays.
   def self.reset!
     Internals::Registry.reset! { @configuration = nil }
     nil

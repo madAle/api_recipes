@@ -15,7 +15,7 @@ describe 'Credentials' do
 
   def assign(owner, value)
     credential = ApiRecipes::Internals::Credential.from(:authorization, value)
-    ApiRecipes::Internals::LevelSet.write(owner, declaration_for(owner) || :svc) { |l| l.with(credential: credential) }
+    write_level(owner, declaration_for(owner) || :svc) { |l| l.with(credential: credential) }
   end
 
   # The helper of TestApis, with the levels of owner read through the declaration.
@@ -99,17 +99,38 @@ describe 'Credentials' do
       .to raise_error(ApiRecipes::CredentialOriginMismatch)
   end
 
-  it 'binds a superclass token to the host the superclass selects, not a subclass variable' do
+  it 'binds a class token to the host the class selects, not a variable of an object of a subclass' do
     config = base.merge(host: '{shop}.example.test', variables: { shop: { default: 'api' } })
-    parent = Class.new
-    child = Class.new(parent)
-    assign(parent, 'Bearer parent')
-    ApiRecipes::Internals::LevelSet.write(child, declaration) { |l| l.with(variables: { shop: 'other' }.freeze) }
-    expect { new_request(config, %i[users], owner: child.new).perform }
+    object = Class.new(klass).new
+    assign(klass, 'Bearer class')
+    write_level(object, declaration) { |l| l.with(variables: { shop: 'other' }.freeze) }
+    expect { new_request(config, %i[users], owner: object).perform }
       .to raise_error(ApiRecipes::CredentialOriginMismatch, /other\.example\.test/)
     expect(WebMock).not_to have_requested(:any, /example\.test/)
-    assign(child, 'Bearer child')
-    new_request(config, %i[users], owner: child.new).perform
-    expect(WebMock).to have_requested(:get, 'https://other.example.test/users').with(headers: { 'Authorization' => 'Bearer child' })
+    assign(object, 'Bearer object')
+    new_request(config, %i[users], owner: object).perform
+    expect(WebMock).to have_requested(:get, 'https://other.example.test/users').with(headers: { 'Authorization' => 'Bearer object' })
   end
+
+  # The level of a class is the one of the class that declared the api. A
+  # level that something else left on a subclass or on a module is not read.
+  it 'reads no level left on a class or a module that did not declare the api' do
+    child = Class.new(klass)
+    mixin = Module.new
+    child.include(mixin)
+    stray = ApiRecipes::Internals::Credential.from(:authorization, 'Bearer STRAY')
+    level = ApiRecipes::Internals::Level.new(credential: stray, variables: nil)
+    sets = ApiRecipes::Internals::LevelSet
+    [child, mixin, child.singleton_class].each do |owner|
+      expect { sets.write(owner, declaration) { level } }.to raise_error(ApiRecipes::Error, /on an object, not on a class or a module/)
+      # Even a set put there by force is not looked at.
+      owner.instance_variable_set(sets::IVAR, sets.new({ declaration => level }.compare_by_identity, sets.generation))
+    end
+    [child, child.new].each { |owner| new_request(base, %i[users], owner: owner).perform }
+    expect(WebMock).to sent_without_authorization.twice
+    assign(klass, 'Bearer class')
+    new_request(base, %i[users], owner: child.new).perform
+    expect(WebMock).to sent('Authorization' => 'Bearer class').once
+  end
+
 end

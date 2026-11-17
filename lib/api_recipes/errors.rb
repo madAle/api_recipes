@@ -17,9 +17,10 @@ module ApiRecipes
   class RecipeFileError < ConfigurationError
     attr_reader :path
 
+    # reason: one reason, or several.
     def initialize(path, reason)
       @path = path
-      super(["#{path}: #{reason}"])
+      super(Array(reason).map { |one| "#{path}: #{one}" })
     end
   end
 

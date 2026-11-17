@@ -17,12 +17,13 @@ describe 'Objects of the DSL' do
                           ) }
     )
     stub_request(:any, /\.test/).to_return(status: 200, body: '{"ok":true}', headers: json)
-    ApiRecipes.svc.authorization = 'Bearer SECRET-TOKEN'
+    global_values(svc: { authorization: 'Bearer SECRET-TOKEN' })
   end
 
   def objects
     [ApiRecipes.svc, ApiRecipes.svc.users, ApiRecipes.svc.users.show(1, **options),
-     ApiRecipes.svc.with(authorization: 'Bearer SECRET-WITH', default_headers: { 'X-W' => 'SECRET-WITH' }),
+     ApiRecipes.svc.with(authorization: 'Bearer SECRET-WITH', default_headers: { 'X-W' => 'SECRET-WITH' },
+                         default_params: { 'w' => 'SECRET-WITH' }),
      ApiRecipes.svc.users.show(1).with(timeout: 5)]
   end
 
@@ -70,18 +71,64 @@ describe 'Objects of the DSL' do
     expect(ApiRecipes.svc.definition.to_json).to include('"X-Default":"[FILTERED]"')
   end
 
+  it 'shows and writes no value of default_params, nor of the headers and parameters of an endpoint' do
+    configure_test_apis(svc: { host: 'api.example.test', default_params: { 'always' => 'SECRET-DEFAULT-PARAM' },
+                               endpoints: { users: { default_headers: { 'X-Users' => 'SECRET-ENDPOINT-HEADER' },
+                                                     default_params: { 'only' => 'SECRET-ENDPOINT-PARAM' },
+                                                     endpoints: { show: { path: '/:id' } } } } })
+    shown = objects.flat_map do |object|
+      definition = object.definition
+      [object.inspect, object.to_s, PP.pp(object, +''), definition.inspect, PP.pp(definition, +''), definition.to_h.inspect,
+       definition.to_json, JSON.generate([definition])]
+    end
+    expect(shown.join("\n")).not_to include('SECRET')
+    expect(ApiRecipes.svc.definition.to_json).to include('"always":"[FILTERED]"', '"X-Users":"[FILTERED]"', '"only":"[FILTERED]"')
+    expect(ApiRecipes.svc.users.show(1).url.to_s).to eq('https://api.example.test/users/1')
+    expect { Marshal.dump(ApiRecipes.svc.users.definition) }.to raise_error(TypeError)
+  end
+
+  # Every String that object holds in its instance variables, through Hashes
+  # and Arrays at any depth: what a dump of it would write as plain text.
+  def plain_texts(object)
+    walk = lambda do |value|
+      case value
+      when String then [value]
+      when Symbol then [value.to_s]
+      when Hash then value.flat_map { |key, item| walk.call(key) + walk.call(item) }
+      when Array then value.flat_map(&walk)
+      else []
+      end
+    end
+    object.instance_variables.flat_map { |name| walk.call(object.instance_variable_get(name)) }
+  end
+
   it 'shows no header and no variable value when the configuration is printed' do
     ApiRecipes.configure do |config|
       config.logger = Logger.new(IO::NULL)
       config.apis_configs = { svc: { host: '{shop}.example.test', variables: { shop: { default: 'SECRET-DEFAULT' } },
                                      default_headers: { 'X-Default' => 'SECRET-HEADER' } } }
-      config.variables = { svc: { shop: 'SECRET-SHOP' } }
+      config.values = { svc: { variables: { shop: 'SECRET-SHOP' }, authorization: 'Bearer SECRET-TOKEN' } }
       shown = [config.inspect, config.to_s, "#{config}", PP.pp(config, +'')]
       expect(shown.join("\n")).not_to include('SECRET')
+      # What it keeps of the values while the block runs never shows them, in
+      # any form, and it keeps no other copy of what it was given.
+      levels = config.value_levels
+      expect(levels.keys).to eq([:svc])
+      kept = [levels.inspect, levels.to_s, PP.pp(levels, +''), YAML.dump(levels), Marshal.dump(levels), levels.to_json]
+      expect(kept.join("\n")).not_to include('SECRET')
+      expect(plain_texts(config).join("\n")).not_to include('SECRET-TOKEN', 'SECRET-SHOP')
     end
     configuration = ApiRecipes.configuration
     shown = [configuration.inspect, configuration.to_s, "#{configuration}", PP.pp(configuration, +'')]
     expect(shown.join("\n")).not_to include('SECRET')
+    # Once in force it keeps none of the values: the registry holds them, as levels.
+    expect(configuration.value_levels).to be_nil
+    expect(plain_texts(configuration).join("\n")).not_to include('SECRET-TOKEN', 'SECRET-SHOP')
+    registry = ApiRecipes::Internals::Registry.current
+    held = [registry.inspect, registry.to_s, PP.pp(registry, +''), registry.levels.inspect, YAML.dump(registry.levels),
+            Marshal.dump(registry.levels), registry.levels.to_json]
+    expect(held.join("\n")).not_to include('SECRET-TOKEN', 'SECRET-SHOP')
+    expect(ApiRecipes.svc.authorization).to eq('Bearer SECRET-TOKEN')
     expect(configuration.inspect).to include('ApiRecipes::Configuration', 'svc')
   end
 
