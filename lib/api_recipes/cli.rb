@@ -9,6 +9,7 @@ require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
 require 'api_recipes/cli/recipes'
 require 'api_recipes/cli/convert'
+require 'api_recipes/cli/convert/migration'
 
 module ApiRecipes
   # The api_recipes command. It is not loaded by `require 'api_recipes'`.
@@ -38,15 +39,18 @@ module ApiRecipes
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
         convert [--name NAME] [--version VERSION] [--to DIR] FILE
-            Writes NAME.recipe.yml, a portable recipe, from the configuration FILE of a
-            project, in DIR (the current folder). The file is created, never replaced.
-            Nothing in FILE is run: an ERB tag becomes a variable where a recipe can have
-            one, and is left out elsewhere. A header or a parameter named like a credential
-            is never copied: it becomes a variable. verify_with is left out. --name chooses
-            the api when FILE describes several; --version is the version of the recipe
-            (1.0.0). It says what changed and what the application gives from now on.
-            Exits with 1 if FILE cannot become a recipe, 2 if the arguments are wrong or
-            something could not be read or written.
+            Moves the api that the configuration FILE of a project describes to a portable
+            recipe. In the root of a project (a folder with a Gemfile, or where a git
+            repository starts): installs NAME.recipe.yml in config/api_recipes,
+            moves the code of each ERB tag to config.values in the file that calls
+            ApiRecipes.configure, removes the old description, and lists every file it
+            changed. It changes files only when git can undo it, and all at once or not at
+            all. With --to DIR it writes the recipe alone in DIR and leaves the project as it
+            is. Nothing in FILE is run: a tag becomes a variable. A header or a parameter named
+            like a credential is never copied into the recipe. --name chooses the api when
+            FILE describes several; --version is the version of the recipe (1.0.0).
+            Exits with 1 if FILE cannot become a recipe or the project cannot be changed
+            safely, 2 if the arguments are wrong or something could not be read or written.
         install [--version VERSION] [--from URL] [--to DIR] [--yes] NAME|FILE
             Installs the portable recipe called NAME from the cookbook
             (https://github.com/madAle/api_recipes-cookbook) or from the Git repository at URL,
@@ -180,7 +184,7 @@ module ApiRecipes
 
       def convert(args, out, err)
         options = {}
-        directory = '.'
+        directory = nil
         parser = OptionParser.new
         parser.on('--name NAME') { |name| options[:name] = name }
         parser.on('--version VERSION') { |version| options[:version] = version }
@@ -192,6 +196,10 @@ module ApiRecipes
         end
 
         result = Convert.new(files.first, **options).call
+        # In the root of a project, and told no folder, the project is moved to the recipe.
+        return Convert::Migration.new(result, files.first, out: out, err: err).call if directory.nil? && project_root?
+
+        directory ||= '.'
         file_name = "#{result.name}#{Internals::Recipe::SUFFIX}"
         path = directory == '.' ? file_name : File.join(directory, file_name)
         return 2 unless place_recipe(result.text, directory, path, err)
@@ -205,6 +213,10 @@ module ApiRecipes
         err.puts e.message
         2
       end
+
+      # The current directory is the root of a project: it has a Gemfile, or
+      # it is where a git repository starts.
+      def project_root? = File.file?('Gemfile') || File.exist?('.git')
 
       # The recipe is created in its folder, never replaced.
       def place_recipe(text, directory, path, err)

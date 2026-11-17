@@ -142,27 +142,40 @@ describe 'api_recipes convert' do
       expect(recipe['base_url']).to eq('api/{base_url}')
       expect(recipe['default_headers']).to eq('Accept' => 'application/json', 'X-Tenant' => '{tenant}')
       expect(recipe['endpoints']['invoices']['path']).to eq('/{tenant}/invoices')
-      expect(recipe['variables']).to eq('billing_host' => { 'default' => 'billing.example.test' }, 'base_url' => {}, 'tenant' => {})
+      expect(recipe['variables']).to include('billing_host' => { 'default' => 'billing.example.test' }, 'base_url' => {}, 'tenant' => {})
       expect(out).to include('host: the ERB tag is now the variable {billing_host}, with the default written in the tag',
                              'base_url: the ERB tag is now the variable {base_url}',
                              'default_headers.X-Tenant: the ERB tag is now the variable {tenant}')
     end
 
-    it 'gives its written default, or nothing, to an option that cannot be a variable' do
+    it 'becomes a variable in the protocol, in the port and in the other options of a request too' do
       write('billing.yml.erb', with_erb)
-      _, out, = run('convert', 'billing.yml.erb')
-      expect(recipe['protocol']).to eq('http')
-      expect(recipe['timeout']).to eq(7)
-      expect(recipe).not_to have_key('port')
-      expect(out).to include('protocol: came from an ERB tag: the recipe has the default written in the tag',
-                             'port: came from an ERB tag with no default that can be read without running it: left out')
+      _, out, = run('convert', '--to', '.', 'billing.yml.erb')
+      expect(recipe.values_at('protocol', 'port', 'timeout')).to eq(['{billing_protocol}', '{billing_port}', '{billing_timeout}'])
+      expect(recipe['variables']).to include('billing_protocol' => { 'default' => 'http' }, 'billing_port' => {},
+                                             'billing_timeout' => { 'default' => '7' })
+      expect(out).to include('protocol: the ERB tag is now the variable {billing_protocol}, with the default written in the tag',
+                             'port: the ERB tag is now the variable {billing_port}')
+    end
+
+    it 'reads the default written after ||' do
+      write('billing.yml', plain.sub('billing.example.test', "<%= ENV['BILLING_HOST'] || 'billing.example.test' %>").sub('timeout: 5', "timeout: <%= ENV['T'] || 5 %>"))
+      run('convert', '--to', '.', 'billing.yml')
+      expect(recipe['variables']).to eq('billing_host' => { 'default' => 'billing.example.test' }, 't' => { 'default' => '5' })
     end
 
     it 'says what to give in the application, by the names of the environment variables' do
       write('billing.yml.erb', with_erb)
-      _, out, = run('convert', 'billing.yml.erb')
-      expect(out).to include("config.values = { billing: { variables: { base_url: '...', tenant: ENV.fetch('TENANT') } } }",
+      _, out, = run('convert', '--to', '.', 'billing.yml.erb')
+      expect(out).to include("config.values = { billing: { variables: { base_url: '...', billing_port: ENV.fetch('BILLING_PORT'), tenant: ENV.fetch('TENANT') } } }",
                              "billing_host: ENV.fetch('BILLING_HOST')")
+    end
+
+    it 'refuses a tag that gives a part of an option that only a whole variable can give' do
+      write('billing.yml', plain.sub('timeout: 5', "timeout: 1<%= ENV['T'] %>"))
+      code, _, err = run('convert', '--to', '.', 'billing.yml')
+      expect(code).to eq(1)
+      expect(err).to include('timeout: an ERB tag gives a part of the value')
     end
 
     it 'is never run' do

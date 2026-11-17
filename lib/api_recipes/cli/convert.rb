@@ -24,19 +24,24 @@ module ApiRecipes
       class Unusable < StandardError; end
 
       # variables: { name => environment variable or nil } for those without a
-      # default; defaults: the same for those that have one.
-      Result = Data.define(:name, :version, :text, :calls, :changes, :variables, :defaults)
+      # default; defaults: the same for those that have one. expressions:
+      # { name => Ruby code } for every variable the conversion made: the code
+      # of the tag it comes from, or the value that was written, as a literal.
+      # verify_with: where one was left out, as [place, method name].
+      Result = Data.define(:name, :version, :text, :calls, :changes, :variables, :defaults, :expressions, :verify_with)
 
-      Tag = Data.define(:line, :env, :default)
+      Tag = Data.define(:line, :env, :default, :code)
 
       DEFAULT_VERSION = '1.0.0'
       COMMENT = /<%#.*?%>/m
       OUTPUT = /<%=(.*?)-?%>/m
       TOKEN = /__API_RECIPES_ERB_(\d+)__/
-      ENV_READ = /\A\s*ENV(?:\.fetch\(\s*|\[\s*)(['"])([A-Za-z_][A-Za-z0-9_]*)\1\s*(?:,\s*(.*?))?\s*[\])]\s*\z/m
+      ENV_READ = /\A\s*ENV(?:\.fetch\(\s*|\[\s*)(['"])([A-Za-z_][A-Za-z0-9_]*)\1\s*(?:,\s*(.*?))?\s*[\])]\s*(?:\|\|\s*(.*?))?\s*\z/m
       # A header or a parameter with such a name holds a credential.
       CREDENTIAL = /auth|key|token|secret|passw|credential|signature|cookie|session/i
       SENT = %w[default_headers default_params].freeze
+      # The options of a request that a variable can give whole.
+      OPTION_KEYS = Internals::OptionValue::KEYS.map(&:to_s).freeze
       API_ORDER = %w[recipe auth variables protocol host port base_url timeout on_bad_code mime_type
                      default_headers default_params].freeze
       ENDPOINT_ORDER = %w[path verb route ok_code resource timeout on_bad_code mime_type default_headers default_params].freeze
@@ -55,6 +60,8 @@ module ApiRecipes
         @variables = {}
         @origins = {}
         @envs = {}
+        @expressions = {}
+        @verify_with = []
         name, options = api(parsed(plain(source)))
         @name = name
         declared = options['variables']
@@ -67,7 +74,7 @@ module ApiRecipes
         body['variables'] = (body['variables'] || {}).merge(@variables) unless @variables.empty?
         text = Text.new(name, ordered(body, API_ORDER)).to_yaml
         Result.new(name: name, version: @version, text: text, calls: checked(name, text), changes: @changes,
-                   variables: env_of(false), defaults: env_of(true))
+                   variables: env_of(false), defaults: env_of(true), expressions: @expressions, verify_with: @verify_with)
       end
 
       # What is said after the recipe is written in path: what changed from
@@ -91,6 +98,16 @@ module ApiRecipes
         end
         lines << '' << "Read the file, then check it: api_recipes check #{path}"
         lines
+      end
+
+      # The apis that text describes, with every ERB tag read as the same
+      # word: what two texts must share to describe the same thing.
+      def self.shape(text)
+        plain = text.gsub(COMMENT, '').gsub(OUTPUT, '__API_RECIPES_ERB__')
+        raise Refused.new(['an ERB tag decides the structure of the file']) if plain.gsub('<%%', '').include?('<%')
+
+        data = YAML.safe_load(plain, permitted_classes: [Symbol], aliases: true)
+        data.is_a?(Hash) ? data.transform_keys(&:to_s) : {}
       end
 
       private
@@ -140,9 +157,9 @@ module ApiRecipes
       # variable it reads and the default written beside it.
       def tag(code, line)
         match = ENV_READ.match(code)
-        return Tag.new(line: line, env: nil, default: nil) unless match
+        return Tag.new(line: line, env: nil, default: nil, code: code.strip) unless match
 
-        Tag.new(line: line, env: match[2], default: literal(match[3]))
+        Tag.new(line: line, env: match[2], default: literal(match[4] || match[3]), code: code.strip)
       end
 
       def literal(code)
@@ -211,8 +228,9 @@ module ApiRecipes
         out = {}
         options.each do |key, value|
           case key
-          when 'verify_with' then left_out(key)
+          when 'verify_with' then left_out(key, value)
           when 'host', 'base_url' then out[key] = with_variables(value, key, key)
+          when *OPTION_KEYS then out[key] = option(value, key, key)
           when *SENT then out[key] = sent(value, key)
           when 'endpoints' then out[key] = endpoints(value, key)
           else keep(out, key, value, key)
@@ -235,8 +253,9 @@ module ApiRecipes
         options.each do |key, value|
           here = "#{where}.#{key}"
           case key
-          when 'verify_with' then left_out(here)
+          when 'verify_with' then left_out(here, value)
           when 'path' then out[key] = with_variables(value, here, "#{name}_path")
+          when *OPTION_KEYS then out[key] = option(value, here, "#{name}_#{key}")
           when *SENT then out[key] = sent(value, here)
           when 'endpoints' then out[key] = endpoints(value, here)
           else keep(out, key, value, here)
@@ -245,7 +264,8 @@ module ApiRecipes
         out
       end
 
-      def left_out(where)
+      def left_out(where, value)
+        @verify_with << [where, value.to_s]
         @changes << "#{shown(where)}: left out, a recipe cannot carry it: give it where a class declares the api, " \
                     "as `api :#{@name}, verify_with: ...`"
       end
@@ -272,6 +292,7 @@ module ApiRecipes
           @changes << "#{shown(where)}: the ERB tag is now the variable {#{variable}}; the value is not in the recipe"
         else
           variable = declare(variable_name(name), nil, nil)
+          @expressions[variable] ||= written(content)
           @changes << "#{shown(where)}: looks like a credential: its value is not copied, it is now the variable {#{variable}}"
         end
         "{#{variable}}"
@@ -291,7 +312,29 @@ module ApiRecipes
       end
 
       def variable_for(tag, fallback, default:)
-        declare(variable_name(tag.env || fallback), tag.env, default ? tag.default : nil)
+        name = declare(variable_name(tag.env || fallback), tag.env, default ? tag.default : nil)
+        @expressions[name] ||= tag.code
+        name
+      end
+
+      # A value written in the file, as the Ruby code that gives it again. A
+      # tag inside it stays what it was: an interpolation.
+      def written(content)
+        return content.inspect unless content.is_a?(String) && TOKEN.match?(content)
+
+        parts = content.split(TOKEN).each_slice(2).flat_map do |text, index|
+          [text.inspect[1..-2], index && "\#{#{@tags[index.to_i].code}}"]
+        end
+        "\"#{parts.compact.join}\""
+      end
+
+      # One of the options of a request: a tag that gives it whole becomes a
+      # variable, which is all a recipe can have there.
+      def option(value, where, fallback)
+        return value unless holds_tag?(value)
+        return with_variables(value, where, fallback) if value.is_a?(String) && value.match?(/\A#{TOKEN.source}\z/)
+
+        refuse("#{where}: an ERB tag gives a part of the value: a recipe needs it written, or given whole by one tag")
       end
 
       def variable_name(text)

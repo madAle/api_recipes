@@ -2,6 +2,7 @@ require 'spec_helper'
 require 'api_recipes/cli'
 require 'tmpdir'
 require 'fileutils'
+require 'open3'
 
 # What the files of a project can do to the commands that read them without
 # being told which ones: `api_recipes upgrade` with no argument, and
@@ -122,6 +123,76 @@ describe 'The commands that read the files of a project' do
       expect(code).to eq(2)
       expect(err).to include('describes 2 apis (billing, other')
       expect(out + err).not_to match(/\e|\u202E/)
+    end
+  end
+
+  describe 'convert in the root of a project, which changes its files' do
+    let(:erb_api) { api.sub('billing.example.test', "<%= #{touch}; ENV['H'] || 'billing.example.test' %>").sub('Accept: application/json', "Accept: application/json\n    X-Api-Key: written-secret") }
+    let(:initializer) { "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n" }
+
+    def git(*arguments)
+      out, status = Open3.capture2e('git', '-c', 'user.name=spec', '-c', 'user.email=spec@example.test', *arguments)
+      raise out unless status.success?
+    end
+
+    def project
+      write('Gemfile', "gem 'api_recipes'\n")
+      write('config/apis/billing.yml', erb_api)
+      write('config/initializers/api_recipes.rb', initializer)
+      git('init', '-q', '.')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'start')
+    end
+
+    def snapshot = Dir.glob('**/*').to_h { |f| [f, File.file?(f) ? File.read(f) : nil] }
+
+    it 'moves the code of a tag without running it, and never shows it or a value of the file' do
+      project
+      code, out, err = run_cli('convert', 'config/apis/billing.yml')
+      expect(code).to eq(0)
+      expect(File.exist?(marker)).to be(false)
+      expect(out + err + File.read('config/api_recipes/billing.recipe.yml')).not_to match(/written-secret|MARKER|File\.write/)
+      expect(File.read('config/initializers/api_recipes.rb')).to include('x_api_key: "written-secret"', 'File.write')
+    end
+
+    it 'deletes nothing that git could not bring back: a file with changes that are not committed stops it' do
+      project
+      File.write('config/apis/billing.yml', "#{erb_api}# not committed\n")
+      before = snapshot
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(1)
+      expect(snapshot).to eq(before)
+    end
+
+    it 'edits nothing that git does not know, and nothing at all outside git' do
+      project
+      git('rm', '-q', '--cached', 'config/initializers/api_recipes.rb')
+      git('commit', '-q', '-m', 'untrack')
+      before = snapshot
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(1)
+      FileUtils.remove_entry('.git')
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(1)
+      expect(snapshot).to eq(before)
+    end
+
+    it 'writes the file that calls configure only when the result is valid Ruby' do
+      project
+      File.write('config/apis/billing.yml', erb_api.sub("|| 'billing.example.test'", "|| 'billing.example.test' # note"))
+      git('commit', '-q', '-am', 'comment')
+      before = snapshot
+      code, _, err = run_cli('convert', 'config/apis/billing.yml')
+      expect(code).to eq(1)
+      expect(err).to include('would not be valid Ruby')
+      expect(snapshot).to eq(before)
+    end
+
+    it 'changes nothing when a single step is not possible: no recipe without the values, no values without the recipe' do
+      project
+      write('config/api_recipes/billing.recipe.yml', 'already here')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'recipe')
+      before = snapshot
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(1)
+      expect(snapshot).to eq(before)
     end
   end
 end

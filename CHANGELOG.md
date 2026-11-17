@@ -14,12 +14,14 @@
   such as a bare `rescue`, only to the files that use the gem. A declared api
   that no file describes is pointed out. With paths and `--config` it works as
   before, and a directory is searched for `*.rake` files too.
-- `api_recipes convert FILE` writes a portable recipe from a configuration file
-  of a project: it adds the key `recipe`, turns an ERB tag into a variable
-  where a recipe can have one and leaves it out elsewhere, never copies a
-  header or a parameter named like a credential, leaves `verify_with` out and
-  says what the application gives from now on. It runs nothing of the file,
-  checks the result as a portable recipe and never replaces a file.
+- `api_recipes convert FILE` moves an api of a project to a portable recipe. In
+  the root of a project it installs the recipe, moves the code of each ERB tag
+  to `config.values` in the file that calls `ApiRecipes.configure`, writes
+  `verify_with` where a class declares the api, removes the old description
+  and lists what it changed; with `--to DIR` it writes the recipe alone. It
+  runs nothing of the file, never copies a header or a parameter named like a
+  credential into the recipe, checks the result as a portable recipe, changes
+  a file only when git can undo it, and changes everything or nothing.
 - `api_recipes upgrade` checks a configuration file that contains ERB without
   running its code: what a `<%= ... %>` tag gives is left out and counted, the
   rest is checked. `--erb` still evaluates the file. A file called

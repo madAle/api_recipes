@@ -929,52 +929,101 @@ published version is the tag `NAME-VERSION`, for example `billing-1.2.0`.
 
 ### From a file of your project
 
-When the API is already described in a file of your project, `convert` writes
-the portable recipe from it:
+When the API is already described in a file of your project, `convert` moves
+it to a portable recipe. Run it in the root of the project: a Rails
+application or any other Ruby project, wherever `ApiRecipes.configure` is
+called.
 
-    $ api_recipes convert config/apis/billing.yml --to ../api-recipes/recipes
-    billing 1.0.0 is written in ../api-recipes/recipes/billing.recipe.yml: 12 calls
+    $ bundle exec api_recipes convert config/apis/billing.yml.erb
+    billing 1.0.0 now comes from a portable recipe: 2 calls
 
-    What changed from config/apis/billing.yml
+    Changed in the project
+      created  config/api_recipes/billing.recipe.yml, with its line in config/api_recipes/recipes.lock
+      edited   config/initializers/api_recipes.rb: recipes_paths and config.values
+      edited   app/models/invoice.rb: verify_with on the declaration of the api
+      deleted  config/apis/billing.yml.erb
+
+    What changed in the description
       host: the ERB tag is now the variable {billing_host}, with the default written in the tag
-      port: came from an ERB tag with no default that can be read without running it: left out, so the default of the gem applies; write the value in the recipe if it is always the same
-      default_headers.X-Api-Key: the ERB tag is now the variable {billing_key}; the value is not in the recipe
+      port: the ERB tag is now the variable {billing_port}, with the default written in the tag
       verify_with: left out, a recipe cannot carry it: give it where a class declares the api, as `api :billing, verify_with: ...`
+      default_headers.Api-Key-Client: the ERB tag is now the variable {billing_client}; the value is not in the recipe
 
-    In the application, the variables that have no default:
-      config.values = { billing: { variables: { billing_key: ENV.fetch('BILLING_KEY') } } }
+    Every change is in `git status` and `git diff`, and `git checkout` undoes it. Check the recipes with `api_recipes check`, then start the application.
 
-    Variables with a default, to give only where the value is another:
-      billing_host: ENV.fetch('BILLING_HOST')
+The project works as before, and the values still come from where they came:
+the code of each tag is moved, as it is written, to `config.values`.
 
-    Read the file, then check it: api_recipes check ../api-recipes/recipes/billing.recipe.yml
+```ruby
+ApiRecipes.configure do |config|
+  config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)]
+  config.values = {
+    billing: { variables: {
+      billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
+      billing_port: (ENV['BILLING_PORT'] || 443),
+      billing_client: ENV['BILLING_CLIENT']
+    }.compact }
+  }
+  config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
+end
+```
 
-- The command adds the key `recipe`, with the name of the API, `--version`
-  (default `1.0.0`) and the format. When the file describes several APIs,
-  `--name` chooses one. Anchors, aliases and merge keys are written out.
-- **Nothing in the file is run**, and there is no option that runs it. An
-  `<%= ... %>` tag in the `host`, in the `base_url`, in a `path`, or in the value
-  of a header or of a parameter becomes a variable. It is named after the
-  environment variable when the tag is `ENV['NAME']` or `ENV.fetch('NAME')`,
-  and after its place otherwise; a default written in the tag as plain text or
-  as a number becomes the default of the variable. Anywhere else a recipe
-  cannot have a variable: the option takes the default written in the tag, or
-  is left out. A tag that is not `<%= ... %>`, or that gives the name of an
-  option, stops the command, which says the line.
-- **A credential is never copied.** A header or a parameter whose name
-  contains `auth`, `key`, `token`, `secret`, `passw`, `credential`,
-  `signature`, `cookie` or `session` becomes a variable without a default,
-  whether its value was written in the file or came from a tag. To send one as
-  the credential of the API, replace it with [`auth`](#authorization) in the
-  recipe. The command cannot know a secret written anywhere else: read the file
+What the command does:
+
+- **It writes the recipe**, with the key `recipe` (the name of the API,
+  `--version`, `1.0.0` by default, and the format), and installs it in
+  `config/api_recipes` with its line in `recipes.lock`. When the file describes
+  several APIs, `--name` chooses one. Anchors, aliases and merge keys are
+  written out.
+- **An `<%= ... %>` tag becomes a variable**, in every place where a recipe
+  can have one: the `host`, the `base_url`, a `path`, the value of a header or
+  of a parameter, and the `protocol`, `port`, `timeout`, `on_bad_code`,
+  `mime_type`, `verb` and `ok_code` when the tag gives the whole value. The
+  variable is named after the environment variable that the tag reads, or
+  after its place, and a default written in the tag as plain text or as a
+  number (`ENV.fetch('NAME', 'text')`, `ENV['NAME'] || 443`) becomes the
+  default of the variable.
+- **Nothing in the file is run**, and there is no option that runs it. The
+  code of a tag goes to `config.values` as text. `.compact` leaves out a
+  variable whose code gives `nil`, so the default of the recipe applies.
+- **A credential is never copied into the recipe.** A header or a parameter
+  whose name contains `auth`, `key`, `token`, `secret`, `passw`, `credential`,
+  `signature`, `cookie` or `session` becomes a variable without a default, and
+  its value, written in the file or given by a tag, goes to `config.values`.
+  The command cannot know a secret written anywhere else: read the recipe
   before you share it.
-- `verify_with` is left out, wherever it is.
-- The result is checked as a portable recipe before it is written, and the
-  file is created, never replaced. What the command prints holds names, never
-  a value of your file.
-- The command does not publish: the recipe reaches a repository with `git`,
-  through the review that every recipe gets.
+- **The old description is removed**: the file is deleted, or only the lines
+  of that API when it describes others, because a recipe never takes the place
+  of an API that another source defines.
+- **`verify_with`**, which a recipe cannot carry, is written on the line where
+  a class declares the API.
+- **What it prints holds names, never a value of your file** or the code of a
+  tag.
 
+It changes your files only when that is safe, and all at once or not at all:
+
+- Lines are added only to a file that git knows. A file is deleted, or lines
+  are taken out of it, only when git has it committed as it is now. Outside a
+  git repository the project is not changed.
+- The file that calls `ApiRecipes.configure` is edited when there is exactly
+  one, written as `ApiRecipes.configure do |config|`, and when `config.values`
+  is not assigned yet or was written by this command. The result is read as
+  Ruby, without running it, before it is written.
+- When a step is not possible, nothing is written and the command says why.
+  What it could not do by itself is listed under `Left to you`: a
+  `verify_with` when no class declares the API, or on an endpoint.
+- A tag that is not `<%= ... %>`, that gives the name of an option, or that
+  gives a part of the protocol, of the port or of another such option, stops
+  the command, which says the line.
+
+To write the recipe alone, as for the repository of the recipes, name a
+folder: the project is not touched, and the command says which variables the
+application gives.
+
+    $ api_recipes convert config/apis/billing.yml.erb --to ../api-recipes/recipes
+
+The command does not publish: the recipe reaches a repository with `git`,
+through the review that every recipe gets.
 
 ## Where an API is available
 

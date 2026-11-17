@@ -56,6 +56,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command |
 | `lib/api_recipes/cli/convert.rb` | the `convert` command: from a configuration file of a project to the text of a portable recipe |
+| `lib/api_recipes/cli/convert/migration.rb` | what `convert` changes in a project: the installed recipe, `config.values` in the file that calls `configure`, the old description |
 | `lib/api_recipes/cli/recipes.rb` | the `install`, `update` and `check` commands for portable recipes |
 | `lib/api_recipes/cli/recipes/git.rb` | reads one file from a Git repository: no working copy, no shell, `https` and `ssh` only |
 | `lib/api_recipes/cli/recipes/summary.rb`, `lock_file.rb` | what `install` and `update` show; the text of `recipes.lock` |
@@ -115,6 +116,13 @@ classes are built once, by `configure`.
   holds names, shown with `Recipes::Summary.shown`, never a value of the file.
   The recipe is checked with `Internals::Recipe` before it is written, and the
   file is created with `File::EXCL`.
+- `Convert::Migration` is the only code of the gem that edits or deletes a
+  file of a project. It works out every change before it writes one, and
+  writes none when one is not possible. It adds lines only to a file that git
+  tracks, and deletes a file or takes lines out of it only when git has it
+  committed as it is now. The file that calls `configure` is parsed, never
+  run, before it is written. The code of a tag goes to that file and never to
+  the terminal.
 - A portable recipe is written by someone else. A file of `recipes_paths`, and
   what `install`, `update` and `check` read, is read only by
   `Internals::Recipe`: never with ERB, never with `YAML.safe_load` directly, and
