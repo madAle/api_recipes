@@ -11,7 +11,7 @@ stable line until `3.0.0` is final.
 | --- | --- |
 | `3.0.0.beta1` | the new core, the fixes that change behaviour and the upgrade guide |
 | `3.0.0.beta2` | the OpenAPI importer |
-| `3.0.0.beta3` | portable recipes and a command to install them; variables in paths, `default_params` and `resource` |
+| `3.0.0.beta3` | portable recipes and a command to install them; variables in paths, `default_params` and `resource`; options looked for up the tree; values of the application and of a class given at startup |
 | `3.0.0` | all of the above, after real use |
 
 A part that is not mature when the others are ships marked as experimental
