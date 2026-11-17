@@ -58,7 +58,13 @@ module ApiRecipes
             found << "the credential travels in the address, as the query parameter #{clip(auth[:name], PART)}: " \
                      'addresses are written in logs and kept by proxies'
           end
-          found << 'the protocol is http: a credential you assign travels without encryption' if @api.protocol == 'http'
+          protocol = filled(@api.protocol.to_s)
+          if protocol == 'http'
+            found << "the protocol is http#{' by default' unless @api.protocol == 'http'}: a credential you assign travels without encryption"
+          elsif Internals::OptionValue.variable?(:protocol, protocol)
+            found << 'the protocol is a variable without a default: the application chooses it, and with http a ' \
+                     'credential you assign travels without encryption'
+          end
           found
         end
 
@@ -68,7 +74,9 @@ module ApiRecipes
           base = @api.base_url.to_s
           base = filled(base) if fill
           path = "/#{base}".gsub(%r{/+}, '/').chomp('/')
-          "#{@api.protocol}://#{host}#{":#{@api.port}" if @api.port}#{path}"
+          protocol = fill ? filled(@api.protocol.to_s) : @api.protocol
+          port = fill && @api.port ? filled(@api.port.to_s) : @api.port
+          "#{protocol}://#{host}#{":#{port}" if port}#{path}"
         end
 
         # The same address with the default of each variable that has one.
@@ -110,12 +118,12 @@ module ApiRecipes
         def changing_calls
           origin = "#{@api.protocol}://#{@api.host}#{":#{@api.port}" if @api.port}"
           @api.routes.reject { |route| route.verb == :get }.map do |route|
-            [route.verb.to_s.upcase, route.call, route.url.delete_prefix(origin)]
+            [Internals::OptionValue.shown_verb(route.verb), route.call, route.url.delete_prefix(origin)]
           end
         end
 
         # Each call as { call => verb }.
-        def verbs = @api.routes.to_h { |route| [route.call, route.verb.to_s.upcase] }
+        def verbs = @api.routes.to_h { |route| [route.call, Internals::OptionValue.shown_verb(route.verb)] }
 
         # What this recipe changes in the recipe installed now, whose summary
         # is previous (nil when it is not a valid recipe): the address, the

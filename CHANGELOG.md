@@ -1,5 +1,13 @@
 ## Unreleased
 
+- A `{variable}` can give the `protocol`, the `port`, the `timeout`,
+  `on_bad_code`, `mime_type`, the `verb` and `ok_code`. The value is looked for
+  as the one of any variable when the request is built, and must be a value of
+  the option: anything else raises `ApiRecipes::InvalidVariable` before the
+  request is sent, and a default that is not one is a configuration error. A
+  credential stays bound to the protocol, the host and the port of the level
+  that gave it. `api_recipes install` warns when the protocol of a recipe is
+  `http` by default or is left to the application.
 - `api_recipes upgrade` needs no argument: run in the root of a project, it
   finds the Ruby files (`*.rb` and `*.rake`) and the files that describe an api,
   says what it checked, and applies the checks that also match unrelated code,

@@ -345,8 +345,10 @@ request must be a Hash.
 ## Variables
 
 A variable is a `{name}` placeholder in the `host`, the `base_url`, the `path`
-of an endpoint, or the value of a header or of a parameter sent with every
-request. Use it for what changes from one account or one environment to the
+of an endpoint, the value of a header or of a parameter sent with every
+request, or in one of the options that are read when a request is sent:
+`protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
+`ok_code`. Use it for what changes from one account or one environment to the
 next, such as the address of a shop. Declare the variables of the API, with an
 optional `default` and `description`:
 
@@ -468,6 +470,48 @@ every thread. That is why it is given only where the application starts, to
 `Store.shopify.variables = ...` raise `ApiRecipes::Error`: a value that changes
 while requests are served goes to `with` or to an object. The same holds for
 credentials.
+
+A service whose address changes with the environment is described once, and
+each environment gives its values:
+
+```yaml
+billing:
+  variables:
+    protocol:
+      default: https
+    host:
+      default: billing.example.com
+    port:
+      default: 443
+    timeout:
+      default: 5
+  protocol: '{protocol}'
+  host: '{host}'
+  port: '{port}'
+  timeout: '{timeout}'
+  endpoints:
+    invoices:
+```
+
+```ruby
+ApiRecipes.configure do |config|
+  config.values = { billing: { variables: { protocol: 'http', host: 'localhost', port: 3000 } } }
+end
+
+ApiRecipes.billing.invoices.url.to_s
+# => "http://localhost:3000/invoices"
+```
+
+In these options the variable gives a value of the option: `http` or `https`
+for the protocol, an integer from 1 to 65535 for the port, a positive number
+for the timeout, `raise` or `ignore`, a verb, a status. It is made when the
+request is built, and a value that is not one raises
+`ApiRecipes::InvalidVariable` before anything is sent, as a default that is
+not one raises `ApiRecipes::ConfigurationError` when the configuration is
+loaded. `definition`, `routes` and the `api_recipes routes` command show such
+an option as it is written. What decides the shape of the tree is read when
+the configuration is loaded and takes no variable: `endpoints`, `resource`,
+`route`, the names, `verify_with` and `auth`.
 
 The value of a variable is a String, a Symbol or a number, and is kept as
 text. A value is checked for the place where it ends up. In a `host` it can contain
@@ -931,10 +975,6 @@ the portable recipe from it:
 - The command does not publish: the recipe reaches a repository with `git`,
   through the review that every recipe gets.
 
-The protocol and the port of a recipe are fixed. For a service whose address
-changes with the environment, the host can be a variable; when the protocol or
-the port change too, give them where a class declares the API, as in
-`api :billing, protocol: 'http', port: 3000`, or keep the file of the project.
 
 ## Where an API is available
 
@@ -1803,11 +1843,11 @@ Every protection has an example in [`spec/security`](spec/security); its
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `protocol` | `https` | `http` or `https` |
+| `protocol` | `https` | `http` or `https`; can be a `{variable}` |
 | `host` | `localhost` | host name, which can contain `{variables}` |
-| `port` | port of the protocol | port number |
+| `port` | port of the protocol | port number; can be a `{variable}` |
 | `base_url` | none | prefix of every path, for example `api/v1`; can contain `{variables}` |
-| `timeout` | `3` | seconds allowed for the whole request |
+| `timeout` | `3` | seconds allowed for the whole request; can be a `{variable}`, as `on_bad_code` and `mime_type` |
 | `default_headers` | none | headers sent with every request; a value can contain `{variables}` |
 | `default_params` | none | query parameters sent with every request; a value is text, a number or a boolean, and can contain `{variables}` |
 | `on_bad_code` | `raise` | `raise` or `ignore` when the response is not a success |
@@ -1822,7 +1862,7 @@ Every protection has an example in [`spec/security`](spec/security); its
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `path` | the endpoint name | segment added to the parent path; `''` adds nothing; can contain `:name` and `*name` placeholders and `{variables}` |
-| `verb` | `get` | HTTP verb |
+| `verb` | `get` | HTTP verb; can be a `{variable}`, as `ok_code` (one status), `timeout`, `on_bad_code` and `mime_type` |
 | `route` | `yes` | `no` makes the endpoint a group that cannot be called |
 | `ok_code` | any 2xx | the status, or the list of statuses, accepted as a success |
 | `timeout` | looked for up the tree | seconds allowed for the whole request |

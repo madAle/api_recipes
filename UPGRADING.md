@@ -423,8 +423,9 @@ You can adopt these when you are ready. The [README](README.md) describes each o
 - **Credentials along a chain**: the chain, the object, the class that declares
   the API, then the whole application. A credential is bound to its origin.
 - **`variables`**: `{name}` placeholders in `host`, `base_url`, the `path` of an
-  endpoint and the values of `default_headers` and `default_params`, with
-  values given at any of those levels.
+  endpoint, the values of `default_headers` and `default_params`, and in
+  `protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
+  `ok_code`, with values given at any of those levels.
 - **`default_params`**: query parameters sent with every request, as
   `default_headers` does for headers. Both can be written on an endpoint, for
   that endpoint and the ones below it.

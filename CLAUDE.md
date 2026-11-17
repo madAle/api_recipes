@@ -38,6 +38,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/internals/definition.rb` | the immutable tree that `definition` returns |
 | `lib/api_recipes/internals/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once; expands `resource` into endpoints |
 | `lib/api_recipes/internals/path_template.rb`, `template.rb` | the `path` of an endpoint, and `{variable}` strings, with their encoding rules |
+| `lib/api_recipes/internals/option_value.rb` | the options of a request written with `{variables}` (`protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb`, `ok_code`): made when the request is built, checked for the option |
 | `lib/api_recipes/internals/handles.rb` | generates the subclasses of `Api` and `Endpoint` with one method per child |
 | `lib/api_recipes/internals/context.rb` | which tree, which owner and which `with` options a chain uses; resolves values |
 | `lib/api_recipes/internals/level.rb`, `credential.rb` | credentials and variables assigned to the module, a class or an object |

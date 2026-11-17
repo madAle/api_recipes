@@ -25,6 +25,7 @@ Spec files:
 | `configuration_spec.rb` | local files, ERB, YAML, refused configurations |
 | `openapi_import_spec.rb` | `api_recipes import`: a hostile OpenAPI description and the recipe written from it |
 | `portable_recipes_spec.rb` | portable recipes: a hostile recipe or repository, with `recipes_paths`, `install`, `update` and `check` |
+| `variables_in_options_spec.rb` | a `{variable}` in the protocol, the port, the verb and the other options of a request |
 | `project_commands_spec.rb` | the commands that read the files of a project: `upgrade` with no argument and `convert` |
 
 ## Values put in the URL and in the headers
@@ -229,3 +230,11 @@ What `convert` does not do: it cannot recognise a secret written where its name
 does not say so, such as a token inside a `path` or in a header called
 `X-Client`. Read the recipe before sharing it; `api_recipes install` shows the
 headers and the parameters to whoever installs it.
+
+## Variables in the options of a request
+
+| Risk | Protection | Spec | Example |
+| --- | --- | --- | --- |
+| A value typed at run time that moves the request through the protocol, the port or the verb | the value must be exactly `http` or `https`, an integer from 1 to 65535, a verb known to http.rb: anything else raises `InvalidVariable` before the request is sent, and the message never shows the value | `variables_in_options_spec.rb` | `cannot hold anything but a protocol, a port or a verb: no host, no user, no path, no line break` |
+| A credential sent in clear, or to another port, because a nearer level changes the protocol or the port | the origin a credential is bound to is made with the protocol, the host and the port of the level that gave it | `variables_in_options_spec.rb` | `does not take a credential to the protocol or the port that a nearer level chooses` |
+| A recipe whose protocol is `http` behind a variable, or whose verb is hidden behind one | `install` and `update` show the address with the defaults, warn when the protocol is `http` by default or left to the application, and list a call whose verb is a variable among those that are not GET | `variables_in_options_spec.rb` | `in a portable recipe is shown to whoever installs it: http by default, or left to the application`; `never hides a call that is not a GET: a verb given by a variable is listed with the others` |

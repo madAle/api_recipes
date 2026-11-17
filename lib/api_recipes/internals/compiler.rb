@@ -339,6 +339,7 @@ module ApiRecipes
       # used when they give no auth.
       def api_attrs(_name, config, location, known = [], credential_param = nil)
         check_keys(config, API_KEYS, location)
+        @option_uses = nil
         variables = config[:variables].is_a?(Hash) ? config[:variables] : {}
         declared = known == :any ? nil : variables.keys + known
         attrs = {}
@@ -359,6 +360,7 @@ module ApiRecipes
         attrs[:variables] = option(:variables, config, location, :api, declared)
         attrs[:recipe] = option(:recipe, config, location, :api, declared)
         attrs[:endpoints] = endpoints_attrs(config[:endpoints], join(location, :endpoints), names)
+        check_option_defaults(attrs[:variables], location)
         attrs
       end
 
@@ -455,6 +457,8 @@ module ApiRecipes
         return nil if value.nil?
 
         where = join(location, key)
+        return option_with_variables(key, value, where, declared) if OptionValue.variable?(key, value)
+
         case key
         when :protocol then one_of(value, PROTOCOLS, where)
         when :host then host(value, where, declared)
@@ -473,6 +477,30 @@ module ApiRecipes
         when :verb then verb(value, where)
         when :route then route(value, where)
         when :ok_code then ok_code(value, where)
+        end
+      end
+
+      # An option of a request written with {variables}: kept as it is
+      # written, and made when the request is built.
+      def option_with_variables(key, value, where, declared)
+        check_variables(value, where, declared)
+        (@option_uses ||= []) << [key, value]
+        value.dup.freeze
+      end
+
+      # The default of a variable that gives the whole value of an option must
+      # be a value of that option.
+      def check_option_defaults(variables, location)
+        uses = @option_uses || []
+        @option_uses = nil
+        return unless variables
+
+        uses.uniq.each do |key, value|
+          name = OptionValue.whole(value)
+          default = name && variables[name] && variables[name][:default]
+          next if default.nil? || !OptionValue.typed(key, default).nil?
+
+          add(join(join(join(location, :variables), name), :default), "is used as #{OptionValue::USED_AS.fetch(key)}")
         end
       end
 
