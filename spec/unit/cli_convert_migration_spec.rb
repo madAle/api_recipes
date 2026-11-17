@@ -83,7 +83,7 @@ describe 'api_recipes convert, in a project' do
     expect(code).to eq(0)
     expect(out).to include('billing 1.0.0 now comes from a portable recipe: 2 calls',
                            'created  config/api_recipes/billing.recipe.yml, with its line in config/api_recipes/recipes.lock',
-                           'edited   config/initializers/api_recipes.rb: recipes_paths and config.values',
+                           'edited   config/initializers/api_recipes.rb: recipes_paths and config.values; apis_files_paths, which loads nothing now, is gone',
                            'edited   app/models/invoice.rb: verify_with on the declaration of the api',
                            'deleted  config/apis/billing.yml.erb')
     expect(out).not_to include('Left to you')
@@ -91,7 +91,6 @@ describe 'api_recipes convert, in a project' do
     expect(File.read('app/models/invoice.rb')).to include("api :billing, verify_with: :expected_response?\n")
     expect(File.read('config/initializers/api_recipes.rb')).to eq(<<~RUBY)
       ApiRecipes.configure do |config|
-        config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)] + Dir[File.expand_path('../apis/*.yml', __dir__)]
         config.values = {
           billing: { variables: {
             billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
@@ -136,6 +135,50 @@ describe 'api_recipes convert, in a project' do
     allow(ApiRecipes).to receive(:configure).and_wrap_original { |original, &block| original.call { |config| config.logger = logger; block.call(config) } }
     load File.join(@root, 'lib/my_app/setup.rb')
     expect(ApiRecipes.billing.invoices.show(7).url.to_s).to eq('https://billing.example.test/invoices/7')
+  end
+
+  describe 'apis_files_paths, when the last description of the project goes' do
+    def initializer_text = File.read('config/initializers/api_recipes.rb')
+
+    it 'stays while another file describes an api, and goes with the last one' do
+      project('config/apis/other.yml' => "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to include('config.apis_files_paths = ')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'first')
+      code, out, = convert('config/apis/other.yml')
+      expect(code).to eq(0)
+      expect(out).to include('apis_files_paths, which loads nothing now, is gone')
+      expect(initializer_text).not_to include('apis_files_paths')
+      boot
+      expect(ApiRecipes.apis).to contain_exactly(:billing, :other)
+    end
+
+    it 'stays, and the person is told, when the file that assigns it has changes that are not committed' do
+      project('config/apis/other.yml' => "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      code, out, = convert('config/apis/other.yml')
+      expect(code).to eq(0)
+      expect(out).to include('Left to you', 'config.apis_files_paths, at line 2 of config/initializers/api_recipes.rb, loads no file now: you can take it out')
+      expect(initializer_text).to include('config.apis_files_paths = ')
+    end
+
+    it 'stays when the command cannot tell what it loads, or when it still finds a file' do
+      project('config/initializers/api_recipes.rb' => "BASE = File.expand_path('../apis', __dir__)\nApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[File.join(BASE, '*.yml.erb')]\nend\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to include('config.apis_files_paths = ')
+      FileUtils.rm_rf(Dir.children('.'))
+      project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[File.expand_path('../apis/*', __dir__)]\nend\n",
+              'config/apis/notes.txt' => "not a description\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to include('config.apis_files_paths = ')
+    end
+
+    it 'goes when it was a list that named only the file' do
+      project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.print_urls = false\n  config.apis_files_paths = [File.expand_path('../apis/billing.yml.erb', __dir__)]\nend\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to start_with("ApiRecipes.configure do |config|\n  config.print_urls = false\n  config.values = {\n")
+    end
   end
 
   it 'works when the old files and the recipes share a folder and one pattern matches both' do
@@ -241,7 +284,6 @@ describe 'api_recipes convert, in a project' do
       2. In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure (lines 1 to 3) with:
 
           ApiRecipes.configure do |config|
-            config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)] + Dir[File.expand_path('../apis/*.yml', __dir__)]
             config.values = {
               billing: { variables: {
                 billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
@@ -400,7 +442,7 @@ describe 'api_recipes convert, in a project' do
       project('config/initializers/api_recipes.rb' => setup, 'app/models/invoice.rb' => "class Invoice\nend\n")
       code, out, = convert('config/apis/billing.yml.erb')
       expect(code).to eq(0)
-      expect(out).to include('edited   config/initializers/api_recipes.rb: recipes_paths and config.values, and verify_with on the declaration of the api')
+      expect(out).to include('edited   config/initializers/api_recipes.rb: recipes_paths and config.values; apis_files_paths, which loads nothing now, is gone, and verify_with on the declaration of the api')
       expect(initializer_text).to include('api :billing, verify_with: :expected_response?', 'config.values = {', 'config.recipes_paths = ')
     end
 

@@ -204,7 +204,8 @@ module ApiRecipes
           edits = edits.map { |from, to, added_text| [from, to, added_text.gsub("\n", "\r\n")] } if text.include?("\r\n")
           @proposal = [text, Code.edited(text, edits)]
           taken_out = edits.any? { |from, to, _| to > from }
-          plan(@initializer, @proposal.last, 'recipes_paths and config.values') if taken_out ? removable(@initializer) : addable(@initializer)
+          note = "recipes_paths and config.values#{'; apis_files_paths, which loads nothing now, is gone' if @gone}"
+          plan(@initializer, @proposal.last, note) if taken_out ? removable(@initializer) : addable(@initializer)
         end
 
         # The lines that give the variables of this api, one variable a line.
@@ -311,6 +312,7 @@ module ApiRecipes
               covered << found.last
             end
           end
+          edits, covered = without_dead_assignments(block, given, text, edits, covered)
           @project.ruby_files.each do |file|
             @project.text(file).to_s.lines.each_with_index do |line, index|
               next unless line.include?(name)
@@ -320,6 +322,72 @@ module ApiRecipes
             end
           end
           edits
+        end
+
+        # When the file that goes was the last one that apis_files_paths
+        # loaded, its lines are taken out, if git has the file as it is now;
+        # otherwise the person is told, and the lines stay. They stay too when
+        # the command cannot tell what the assignment loads.
+        def without_dead_assignments(block, given, text, edits, covered)
+          return [edits, covered] unless !given.empty? && given.all? { |node| loads_nothing?(node.arguments&.arguments&.first) }
+
+          lines = text.lines
+          whole = given.map do |node|
+            first = node.location.start_line
+            last = node.location.end_line
+            alone = lines[first - 1].b[0...node.location.start_column].strip.empty? && lines[last - 1].b[node.location.end_column..].to_s.strip.empty?
+            from = lines[0...first - 1].sum(&:bytesize)
+            alone ? [[from, from + lines[first - 1..last - 1].sum(&:bytesize), ''], first..last] : nil
+          end
+          if whole.all? && committed?(@initializer)
+            @gone = true
+            return [whole.map(&:first), whole.map(&:last)]
+          end
+
+          @left << "#{block.config}.apis_files_paths, at line #{given.first.location.start_line} of #{shown(@initializer)}, loads no " \
+                   'file now: you can take it out'
+          [edits, covered]
+        end
+
+        # Whether value, given to apis_files_paths, loads no file once the old
+        # one is gone: patterns that find nothing else, a list that names
+        # nothing else. false when the command cannot tell.
+        def loads_nothing?(value)
+          return (found = files_of(value)) && found.empty? if pattern?(value)
+          return loads_nothing?(value.receiver) && loads_nothing?(value.arguments.arguments.first) if value.is_a?(Prism::CallNode) && value.name == :+ && value.arguments&.arguments&.size == 1
+          return false unless value.is_a?(Prism::ArrayNode) && value.opening_loc&.slice == '['
+
+          value.elements.all? do |element|
+            if written?(element) then element.slice.include?(File.basename(@source))
+            else loads_nothing?(element.is_a?(Prism::SplatNode) ? element.expression : element)
+            end
+          end
+        end
+
+        # The files that a pattern of Dir finds now, without the recipes and
+        # the file that goes; nil when its folder is not written out.
+        def files_of(pattern)
+          arguments = pattern.arguments&.arguments
+          path = arguments&.size == 1 ? written_path(arguments.first) : nil
+          return nil unless path
+
+          Dir.glob(path).select { |file| File.file?(file) }.reject do |file|
+            file.end_with?(Internals::Recipe::SUFFIX) || File.expand_path(file) == File.expand_path(full(@source))
+          end
+        end
+
+        # The path that node gives, when it is written with text only: 'a/*.yml',
+        # File.expand_path('a/*.yml', __dir__), Rails.root.join('a', '*.yml').
+        def written_path(node)
+          return File.expand_path(node.unescaped, @root) if node.is_a?(Prism::StringNode)
+          return nil unless written?(node)
+
+          texts = node.arguments.arguments.select { |one| one.is_a?(Prism::StringNode) }.map(&:unescaped)
+          if node.name == :expand_path
+            texts.size == 1 && node.arguments.arguments.size == 2 ? File.expand_path(texts.first, File.dirname(full(@initializer))) : nil
+          elsif node.receiver.is_a?(Prism::CallNode) && node.receiver.name == :root && node.receiver.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.receiver.name == :Rails
+            File.join(File.expand_path(@root), *texts)
+          end
         end
 
         # Whether value, given to apis_files_paths, names the file called
