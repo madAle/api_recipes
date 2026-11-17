@@ -112,7 +112,10 @@ module ApiRecipes
         if kind == :hash
           apis.merge!(@apis_configs)
         else
-          @apis_files_paths.each { |path| merge_file(apis, path) }
+          recipes = @recipes_paths.map { |path| expanded(path) }
+          # A recipe that recipes_paths loads is left to it: a pattern such as
+          # config/apis/*.yml* can match both kinds of file in one folder.
+          @apis_files_paths.each { |path| merge_file(apis, path) unless recipes.include?(expanded(path)) }
         end
       end
       apis.merge(Internals::Recipe.load_all(@recipes_paths, taken: apis.keys))
@@ -121,8 +124,8 @@ module ApiRecipes
     # Reads one file with the rules of apis_files_paths and returns the apis as
     # { name => description }. ERB is evaluated only with erb: true; without it a
     # file that contains ERB is refused and nothing in it is run.
-    def read_recipe_file(path, erb: true)
-      read_file(path, erb: erb)
+    def read_recipe_file(path, erb: true, &without_erb)
+      read_file(path, erb: erb, &without_erb)
     end
 
     def logger=(logger)
@@ -183,8 +186,11 @@ module ApiRecipes
       if erb
         text = ERB.new(text).result
       elsif text.include?('<%')
-        raise RecipeFileError.new(path, 'contains ERB: run again with --erb to evaluate it ' \
-                                        '(this executes the code in the file)')
+        unless block_given?
+          raise RecipeFileError.new(path, 'contains ERB: run again with --erb to evaluate it ' \
+                                          '(this executes the code in the file)')
+        end
+        text = yield(text)
       end
       data = begin
                YAML.safe_load(text, permitted_classes: [Symbol], aliases: true)
@@ -207,6 +213,13 @@ module ApiRecipes
       raise RecipeFileError.new(path, 'file not found')
     rescue SystemCallError => e
       raise RecipeFileError.new(path, "cannot read file (#{e.class.name.split('::').last})")
+    end
+
+    # @private
+    def expanded(path)
+      path.is_a?(String) || path.is_a?(Pathname) ? File.expand_path(path) : nil
+    rescue ArgumentError
+      nil
     end
 
     # @private

@@ -57,8 +57,31 @@ module ApiRecipes
       # The level of the owner alone, or nil.
       def own_level = Levels.own(@owner, @definition.name, @declaration)
 
-      # The value of an option, from the nearest place that has one.
-      def setting(key, endpoint = nil, endpoint_overrides = nil)
+      # The value of an option, from the nearest place that has one. An
+      # option written with variables is made from those of chain.
+      def setting(key, endpoint = nil, endpoint_overrides = nil, chain: nil)
+        resolve(key, written(key, endpoint, endpoint_overrides), chain: chain)
+      end
+
+      # value as the option key: what is written with variables is filled
+      # with those of chain and checked for the option; anything else is
+      # returned as it is.
+      def resolve(key, value, chain: nil)
+        return value unless OptionValue.variable?(key, value)
+
+        OptionValue.resolve(key, value, variables(chain: chain || levels), api: @definition.name)
+      end
+
+      # The verb as inspect shows it: made from the variables, or as it is
+      # written when one is missing.
+      def shown_verb(verb)
+        OptionValue.shown_verb(resolve(:verb, verb))
+      rescue Error
+        OptionValue.shown_verb(verb)
+      end
+
+      # The option as it is written, from the nearest place that has one.
+      def written(key, endpoint = nil, endpoint_overrides = nil)
         if endpoint
           value = endpoint_overrides && endpoint_overrides[key]
           return value unless value.nil?
@@ -148,7 +171,7 @@ module ApiRecipes
       def shown_origin
         origin
       rescue Error
-        address(@definition, @overrides[:host] || @definition.host, with: true)
+        address(@definition, @overrides[:host] || @definition.host, nil, with: true)
       end
 
       def inspect = "#<#{self.class.name} #{@definition.name}>"
@@ -215,17 +238,23 @@ module ApiRecipes
 
         values = sum_variables(api, chain, start, with)
         host = with && @overrides[:host] ? Template.new(@overrides[:host], :host) : api.host_template
-        address(api, host.expand(values, api: api.name), with: with)
+        address(api, host.expand(values, api: api.name), values, with: with)
       rescue MissingVariable
         raise if with
 
         nil
       end
 
-      # "scheme://host" or "scheme://host:port", without the default port.
-      def address(api, host, with:)
+      # "scheme://host" or "scheme://host:port", without the default port. A
+      # protocol or a port written with variables is made from values, and
+      # shown as it is written when values is nil.
+      def address(api, host, values, with:)
         protocol = (with && @overrides[:protocol]) || api.protocol
         port = (with && @overrides[:port]) || api.port
+        if values
+          protocol = OptionValue.resolve(:protocol, protocol, values, api: api.name)
+          port = OptionValue.resolve(:port, port, values, api: api.name)
+        end
         port = nil if port == DEFAULT_PORTS[protocol]
         "#{protocol}://#{host}#{":#{port}" if port}"
       end

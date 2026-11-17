@@ -25,6 +25,8 @@ Spec files:
 | `configuration_spec.rb` | local files, ERB, YAML, refused configurations |
 | `openapi_import_spec.rb` | `api_recipes import`: a hostile OpenAPI description and the recipe written from it |
 | `portable_recipes_spec.rb` | portable recipes: a hostile recipe or repository, with `recipes_paths`, `install`, `update` and `check` |
+| `variables_in_options_spec.rb` | a `{variable}` in the protocol, the port, the verb and the other options of a request |
+| `project_commands_spec.rb` | the commands that read the files of a project: `upgrade` with no argument and `convert` |
 
 ## Values put in the URL and in the headers
 
@@ -207,3 +209,40 @@ The application must:
 - Know that `git` runs with its own configuration: its credential helper is what
   lets `install` read a private repository, and it downloads the whole commit,
   not only the file of the recipe, into a temporary folder.
+
+## The commands that read the files of a project
+
+`api_recipes upgrade` with no argument finds the files to check by itself, and
+`api_recipes convert` writes a file meant for a shared repository from one of
+the project.
+
+| Risk | Protection | Spec | Example |
+| --- | --- | --- | --- |
+| Code in a file that `upgrade` found by itself | without `--erb` no ERB is run: each `<%= ... %>` is replaced by a token before the text is parsed, and a file with any other tag is reported and not read | `project_commands_spec.rb` | `upgrade with no argument never runs the ERB of a file it found by itself: output tags, other tags, comments`; `runs it only with --erb` |
+| A symbolic link that takes `upgrade` out of the project | no symbolic link is followed: neither a directory nor a file | `project_commands_spec.rb` | `upgrade with no argument does not leave the project through a symbolic link`; `does not read a file through a symbolic link, with or without --erb` |
+| A file of the project that keeps `upgrade` or `convert` busy, or stops it | a file is measured before it is walked: more than 200,000 values, which aliases make from a few lines, is refused; a file nested too deeply is reported in one line | `project_commands_spec.rb` | `convert is not kept busy by a few lines: a long tag, or aliases that stand for millions of values`; `convert answers with one line, never with a backtrace, to a file it did not foresee` |
+| Code in the file given to `convert` | the tags are replaced by tokens and never evaluated; the command has no `--erb` | `project_commands_spec.rb` | `convert never runs the ERB of the file, and has no option that does` |
+| A credential of the project copied into a recipe that is then shared | a header or a parameter named like a credential, of the api or of an endpoint, is written as a variable without a default, also when the same environment variable is read elsewhere with one: neither a value written in the file nor the default of a tag reaches the recipe, the list of changes or an error message | `project_commands_spec.rb` | `convert never copies a credential into the recipe or onto the terminal: written in the file, or as the default of a tag`; `does not copy one written on an endpoint either`; `gives no default to a credential, whatever else reads the same environment variable, before or after it`; `never shows the value of a header or of a parameter, not even one too long for a recipe` |
+| `convert` writing over a file | the recipe is created with `File::EXCL`, which also refuses a symbolic link | `project_commands_spec.rb` | `convert creates the recipe and never writes over a file, not even through a symbolic link` |
+| `convert` writing something that is not a portable recipe | the text is checked with the rules of a portable recipe before the file is created | `project_commands_spec.rb` | `convert writes only what passes as a portable recipe: a file that would not is refused and nothing is written` |
+| A name that changes what the terminal shows | every name of the file, and every name of a file found in the project, goes through `Recipes::Summary.shown` | `project_commands_spec.rb` | `convert does not send a name of the file to the terminal as it is written`; `does not send a name of the file to the terminal when it refuses it either`; `upgrade with no argument does not send the name of a file to the terminal as it is written` |
+| Code of the project run, or shown, while `convert` moves it | the code of a tag is copied as text into the file that calls `ApiRecipes.configure`; it is never evaluated, and when the command changes the project neither it nor a value of the file is printed | `project_commands_spec.rb` | `convert in the root of a project, which changes its files moves the code of a tag without running it, and never shows it or a value of the file` |
+| `convert` destroying work that is not saved | a file is deleted, or lines are taken out of it, only when git has it committed as it is now; lines are added only to a plain file that git tracks; a symbolic link and a file that git was told to skip are never changed; outside git nothing is changed | `project_commands_spec.rb` | `deletes nothing that git could not bring back: a file with changes that are not committed stops it`; `edits nothing that git does not know, and nothing at all outside git`; `changes nothing through a symbolic link, and nothing that git was told to look away from` |
+| `git`, run by `convert`, running a program that the repository names | `git` is given `core.fsmonitor=false` and no hooks path | `project_commands_spec.rb` | `does not run a program that the repository names for git` |
+| `convert` editing Ruby it does not fully understand | only shapes read whole are edited: the list given to `apis_files_paths`, the Hash given to `config.values`, the block of `configure`, the declarations of a class; a list of words, a `**`, a closing brace after another, a `next`, a call inside a method stop it or are left to the person | `cli_convert_migration_spec.rb` (unit) | `changes nothing when it cannot read how the project loads its files`; `changes nothing when it cannot read all of the Hash given to config.values`; `changes nothing when the block of configure can end before its last line`; `gives verify_with only to a declaration of a class or a module, and to none when it cannot read one of them` |
+| `convert` leaving a project that does not start | Ruby is read as a tree, never as lines; every change is worked out first, and nothing is written unless all can be; each changed Ruby file is parsed, without running it, before it is written; when a write fails every file is put back | `project_commands_spec.rb` | `writes the file that calls configure only when the result is valid Ruby`; `changes nothing when a single step is not possible: no recipe without the values, no values without the recipe`; `puts the project back as it was when a write fails after others were made` |
+| The code to paste, when `convert` does not change the project, changing what the terminal shows | the code holds what the file holds, by decision of the maintainer, but a tag or a value with a control or a direction-changing character is left out and given by its line | `project_commands_spec.rb` | `gives the code to paste whole, so that it works, and leaves out only what a terminal would obey` |
+| The code that `upgrade` gives to paste changing what the terminal shows, or being broken code | what a line assigned is copied only when it is one whole Ruby expression, read and never run, on one line, with no control or direction-changing character; `--no-code` leaves all code out | `cli_upgrade_spec.rb` (unit) | `the code to paste is left out with --no-code, and for a line that goes on, or that a terminal would obey` |
+
+What `convert` does not do: it cannot recognise a secret written where its name
+does not say so, such as a token inside a `path` or in a header called
+`X-Client`. Read the recipe before sharing it; `api_recipes install` shows the
+headers and the parameters to whoever installs it.
+
+## Variables in the options of a request
+
+| Risk | Protection | Spec | Example |
+| --- | --- | --- | --- |
+| A value typed at run time that moves the request through the protocol, the port or the verb | the value must be exactly `http` or `https`, an integer from 1 to 65535, a verb known to http.rb: anything else raises `InvalidVariable` before the request is sent, and the message never shows the value | `variables_in_options_spec.rb` | `cannot hold anything but a protocol, a port or a verb: no host, no user, no path, no line break` |
+| A credential sent in clear, or to another port, because a nearer level changes the protocol or the port | the origin a credential is bound to is made with the protocol, the host and the port of the level that gave it | `variables_in_options_spec.rb` | `does not take a credential to the protocol or the port that a nearer level chooses` |
+| A recipe whose protocol is `http` behind a variable, or whose verb is hidden behind one | `install` and `update` show the address with the defaults, warn when the protocol is `http` by default or left to the application, and list a call whose verb is a variable among those that are not GET | `variables_in_options_spec.rb` | `in a portable recipe is shown to whoever installs it: http by default, or left to the application`; `never hides a call that is not a GET: a verb given by a variable is listed with the others` |

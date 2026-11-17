@@ -38,16 +38,18 @@ module ApiRecipes
 
         check_follow
         check_headers
-        chain = @context.levels
+        chain = @chain = @context.levels
         origin = @context.origin(chain: chain)
         credential = @context.credential(origin, chain: chain)
         address = checked(url(origin), origin)
         logger = ApiRecipes.logger
         logger.info(address) if ApiRecipes.configuration.print_urls
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        http_response = send_request(client(credential, chain), address, send_options(credential, origin, chain))
+        verb = @context.resolve(:verb, @definition.verb, chain: chain)
+        SETTINGS.each { |key| setting(key) }
+        http_response = send_request(client(credential, chain), verb, address, send_options(credential, origin, chain))
         elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000
-        logger.debug("#{@definition.verb.to_s.upcase} #{address} -> #{http_response.code} (#{elapsed.round(1)}ms)")
+        logger.debug("#{verb.to_s.upcase} #{address} -> #{http_response.code} (#{elapsed.round(1)}ms)")
         respond(http_response)
       end
 
@@ -59,7 +61,16 @@ module ApiRecipes
 
       private
 
-      def setting(key) = @context.setting(key, @definition, @overrides)
+      # The levels are those the request read: a variable in an option gets
+      # the value the origin and the credential were made with.
+      def setting(key)
+        @settings ||= {}
+        @settings.fetch(key) { @settings[key] = @context.setting(key, @definition, @overrides, chain: @chain) }
+      end
+
+      # The options written with variables are made before anything is sent:
+      # a value that does not fit stops the request, whatever the answer.
+      SETTINGS = %i[timeout on_bad_code mime_type ok_code].freeze
 
       def auth = @context.definition.auth || {}
 
@@ -98,8 +109,8 @@ module ApiRecipes
       # with the optional addressable gem. Without the gem that is a LoadError,
       # which a server must not be able to cause: it becomes InvalidUrl. Any
       # other LoadError passes.
-      def send_request(client, address, options)
-        client.request(@definition.verb, address, **options)
+      def send_request(client, verb, address, options)
+        client.request(verb, address, **options)
       rescue LoadError => e
         raise unless e.path.to_s.start_with?('addressable')
 

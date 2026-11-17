@@ -37,7 +37,7 @@ module ApiRecipes
                  Configuration.new.read_recipe_file(file, erb: @erb)
                end
         Internals::Compiler.compile_all(apis).each_value do |api|
-          api.routes.each { |route| rows << [route.call, route.verb.to_s.upcase, route.url] }
+          api.routes.each { |route| rows << [route.call, Internals::OptionValue.shown_verb(route.verb), route.url] }
         end
         0
       rescue RecipeFileError => e

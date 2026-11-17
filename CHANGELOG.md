@@ -1,3 +1,41 @@
+## Unreleased
+
+- A `{variable}` can give the `protocol`, the `port`, the `timeout`,
+  `on_bad_code`, `mime_type`, the `verb` and `ok_code`. The value is looked for
+  as the one of any variable when the request is built, and must be a value of
+  the option: anything else raises `ApiRecipes::InvalidVariable` before the
+  request is sent, and a default that is not one is a configuration error. A
+  credential stays bound to the protocol, the host and the port of the level
+  that gave it. `api_recipes install` warns when the protocol of a recipe is
+  `http` by default or is left to the application.
+- `api_recipes upgrade` needs no argument: run in the root of a project, it
+  finds the Ruby files (`*.rb` and `*.rake`) and the files that describe an api,
+  says what it checked, and applies the checks that also match unrelated code,
+  such as a bare `rescue`, only to the files that use the gem. A declared api
+  that no file describes is pointed out. With paths and `--config` it works as
+  before, and a directory is searched for `*.rake` files too.
+- `api_recipes convert FILE` moves an api of a project to a portable recipe. In
+  the root of a project it installs the recipe, moves the code of each ERB tag
+  to `config.values` in the file that calls `ApiRecipes.configure`, writes
+  `verify_with` where a class declares the api, removes the old description
+  and lists what it changed; with `--to DIR` it writes the recipe alone. It
+  runs nothing of the file, never copies a header or a parameter named like a
+  credential into the recipe, checks the result as a portable recipe, changes
+  a file only when git can undo it, and changes everything or nothing. When it
+  does not change the project it gives the steps to do by hand, with the code
+  to paste and where.
+- A file called `NAME.recipe.yml` that both `apis_files_paths` and
+  `recipes_paths` name is left to `recipes_paths`, so that one pattern can
+  match the old files and the recipes of one folder.
+- `api_recipes upgrade` gives the code to paste where what to write is known:
+  the whole block of `ApiRecipes.configure` with the values that lines of the
+  application gave when it started, and the replacement under the other
+  findings. `--no-code` leaves it out.
+- `api_recipes upgrade` checks a configuration file that contains ERB without
+  running its code: what a `<%= ... %>` tag gives is left out and counted, the
+  rest is checked. `--erb` still evaluates the file. A file called
+  `NAME.recipe.yml` is checked as a portable recipe.
+
 ## Version 3.0.0.beta3
 
 The third pre-release of 3.0 adds portable recipes: recipes written by others,

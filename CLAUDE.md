@@ -12,10 +12,12 @@ bundle exec rspec                               # whole suite, no network
 bundle exec rspec spec/unit/url_building_spec.rb
 bundle exec rspec spec/security                 # one example per protection
 bundle exec rspec spec/docs                     # the examples in README.md and UPGRADING.md
+bundle exec ruby -Ilib exe/api_recipes upgrade                                  # in the root of a project: finds code and configuration by itself
 bundle exec ruby -Ilib exe/api_recipes upgrade app lib --config config/apis/github.yml
 bundle exec ruby -Ilib exe/api_recipes import spec/fixtures/openapi/github_small.yml --name github
 bundle exec ruby -Ilib exe/api_recipes routes spec/fixtures/openapi/github_small.expected.yml
 bundle exec ruby -Ilib exe/api_recipes check path/to/NAME.recipe.yml   # a portable recipe
+bundle exec ruby -Ilib exe/api_recipes convert config/apis/github.yml   # from a file of a project to a portable recipe
 URI_VERSION='~> 1.0' bundle exec rspec          # pick the uri gem: '~> 1.0' or '< 1.0'
 gem build api_recipes.gemspec -o /tmp/check.gem # packaging check
 ```
@@ -36,6 +38,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/internals/definition.rb` | the immutable tree that `definition` returns |
 | `lib/api_recipes/internals/compiler.rb` | turns the configuration into a tree and validates it; reports every problem at once; expands `resource` into endpoints |
 | `lib/api_recipes/internals/path_template.rb`, `template.rb` | the `path` of an endpoint, and `{variable}` strings, with their encoding rules |
+| `lib/api_recipes/internals/option_value.rb` | the options of a request written with `{variables}` (`protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb`, `ok_code`): made when the request is built, checked for the option |
 | `lib/api_recipes/internals/handles.rb` | generates the subclasses of `Api` and `Endpoint` with one method per child |
 | `lib/api_recipes/internals/context.rb` | which tree, which owner and which `with` options a chain uses; resolves values |
 | `lib/api_recipes/internals/level.rb`, `credential.rb` | credentials and variables assigned to the module, a class or an object |
@@ -45,12 +48,16 @@ fails under 90% line coverage.
 | `lib/api_recipes/internals/declaration.rb` | one `api :name` in a class or a module |
 | `lib/api_recipes/internals/request.rb` | builds the URL and the http.rb client, sends the request, checks the outcome |
 | `lib/api_recipes/cli.rb`, `cli/upgrade.rb`, `exe/api_recipes` | the `api_recipes` command and its `upgrade` checks |
+| `lib/api_recipes/cli/upgrade/project.rb` | what `upgrade` without arguments finds in a project: Ruby files, descriptions of apis, the names of the apis |
 | `lib/api_recipes/cli/import.rb` | the `import` command: from an OpenAPI description to the text of a recipe, checked before it is returned |
 | `lib/api_recipes/cli/import/document.rb` | reads the description (YAML or JSON) and follows its internal `$ref` |
 | `lib/api_recipes/cli/import/server.rb`, `security.rb` | the address, the variables and the `auth` of the api |
 | `lib/api_recipes/cli/import/tree.rb` | from the paths to the tree of endpoints: names, operations, comments, warnings |
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command |
+| `lib/api_recipes/cli/code.rb` | the code a command gives to paste: how it is shown, in colours on a terminal, and the block of `ApiRecipes.configure` of a file |
+| `lib/api_recipes/cli/convert.rb` | the `convert` command: from a configuration file of a project to the text of a portable recipe |
+| `lib/api_recipes/cli/convert/migration.rb` | what `convert` changes in a project: the installed recipe, `config.values` in the file that calls `configure`, the old description |
 | `lib/api_recipes/cli/recipes.rb` | the `install`, `update` and `check` commands for portable recipes |
 | `lib/api_recipes/cli/recipes/git.rb` | reads one file from a Git repository: no working copy, no shell, `https` and `ssh` only |
 | `lib/api_recipes/cli/recipes/summary.rb`, `lock_file.rb` | what `install` and `update` show; the text of `recipes.lock` |
@@ -102,6 +109,35 @@ classes are built once, by `configure`.
 - Internal classes live under `ApiRecipes::Internals`, so that `include ApiRecipes` does not shadow an application's own constants. Only `Api`, `Endpoint`, `Response`, `Configuration`, the errors and `VERSION` stay directly under `ApiRecipes`.
 - Ruby 3.3 syntax; the block parameter `it` is not allowed (Ruby 3.4).
 - The code of the commands lives under `ApiRecipes::CLI`, uses only the standard library and is not loaded by `require 'api_recipes'`. `api_recipes import` opens one file, never uses the network, and never turns a mapping or a list of the description into text: every value read from the description goes through `Import.text`, `Import.shown` or `Import.one_line`, never through `to_s` or an interpolation. With YAML aliases a small file can describe a huge structure; `Document::Shape` refuses the largest ones while the text is parsed.
+- `api_recipes convert` and `api_recipes upgrade` without `--erb` never run
+  the ERB of a file: a tag is replaced by a token before the text is parsed.
+  `convert` has no option that evaluates ERB, because its result is meant for a
+  shared repository: a header or a parameter that `Convert::CREDENTIAL` matches
+  is written as a variable, never with its value or with a default. The
+  messages of the command hold names, shown with `Recipes::Summary.shown`. The
+  code to paste that it prints when it does not change the project
+  (`Convert::Snippet`) is the one exception, decided by the maintainer: it
+  holds the code of the tags and the values written in the file, so that it
+  works when pasted, and leaves out only what `Code::UNSAFE` matches. The code
+  that `upgrade` gives to paste follows the same decision: it holds what a
+  line assigned, never a line as it is, only whole Ruby expressions, and
+  `--no-code` leaves it out.
+  The mark that stands for a tag is random, so that no file can write one.
+  The recipe is checked with `Internals::Recipe` before it is written, and the
+  file is created with `File::EXCL`.
+- `Convert::Migration` is the only code of the gem that edits or deletes a
+  file of a project. It reads Ruby as a tree (`Code.tree`, Prism, a default
+  gem), never with a regular expression on lines, and never runs it. It works
+  out every change in memory, each on the text the changes before it left,
+  writes none when one is not possible or when a result is not valid Ruby, and
+  puts every file back when a write fails. It adds lines only to a plain file
+  that git tracks (`H` in `git ls-files -v`, and present in `HEAD`), and
+  deletes a file or takes lines out of it only when git has it committed as
+  it is now. It edits only the shapes it reads whole, listed in the README:
+  a new shape is refused, with the code to paste, never guessed. `git` is run
+  with `Migration::GIT`, so that it runs no program the repository names. When it changes the project it prints nothing of
+  what the file holds; when it does not, it prints the steps and the code to
+  paste.
 - A portable recipe is written by someone else. A file of `recipes_paths`, and
   what `install`, `update` and `check` read, is read only by
   `Internals::Recipe`: never with ERB, never with `YAML.safe_load` directly, and

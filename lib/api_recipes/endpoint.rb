@@ -81,7 +81,7 @@ module ApiRecipes
     attr_reader :definition
 
     def inspect
-      "#<ApiRecipes::Endpoint #{@definition.full_name} #{@definition.verb.to_s.upcase} " \
+      "#<ApiRecipes::Endpoint #{@definition.full_name} #{@context.shown_verb(@definition.verb)} " \
         "#{@context.shown_origin}#{@path}>"
     end
 

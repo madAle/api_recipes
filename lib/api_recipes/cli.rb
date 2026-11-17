@@ -1,12 +1,17 @@
 # frozen_string_literal: true
 
 require 'optparse'
+require 'fileutils'
 require 'api_recipes'
 require 'api_recipes/version'
+require 'api_recipes/cli/code'
 require 'api_recipes/cli/upgrade'
 require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
 require 'api_recipes/cli/recipes'
+require 'api_recipes/cli/convert'
+require 'api_recipes/cli/convert/snippet'
+require 'api_recipes/cli/convert/migration'
 
 module ApiRecipes
   # The api_recipes command. It is not loaded by `require 'api_recipes'`.
@@ -15,10 +20,15 @@ module ApiRecipes
       Usage: api_recipes COMMAND [options]
 
       Commands:
-        upgrade [--config FILE]... [--erb] [PATH]...
-            Looks in the Ruby files under each PATH for what changed in api_recipes 3.0
-            and checks each configuration FILE with the 3.0 rules. It never changes a file.
-            A file that contains ERB is evaluated only with --erb: this runs the code in it.
+        upgrade [--config FILE]... [--erb] [--no-code] [PATH]...
+            Without arguments, in the root of a project: finds its Ruby files and the files
+            that describe an api, and looks for what changed in api_recipes 3.0. It says what
+            it checked. With arguments: the Ruby files under each PATH, and each configuration
+            FILE checked with the 3.0 rules. It never changes a file. A file that contains ERB
+            is checked without running its code, leaving out what its tags give; --erb
+            evaluates it instead: this runs the code in it. Where what to write is known it
+            gives the code to paste, with the whole block of ApiRecipes.configure; --no-code
+            leaves the code out.
             Exits with 1 if it finds something, 2 if it could not read something, 0 otherwise.
         import [--name NAME] [--only GLOB]... [--except GLOB]... [--server N] [--output FILE] FILE
             Writes a recipe from the OpenAPI 3.0 or 3.1 description in FILE (YAML or JSON), on
@@ -32,6 +42,19 @@ module ApiRecipes
             A file that contains ERB is evaluated only with --erb: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
+        convert [--name NAME] [--version VERSION] [--to DIR] FILE
+            Moves the api that the configuration FILE of a project describes to a portable
+            recipe. In the root of a project (a folder with a Gemfile, or where a git
+            repository starts): installs NAME.recipe.yml in config/api_recipes,
+            moves the code of each ERB tag to config.values in the file that calls
+            ApiRecipes.configure, removes the old description, and lists every file it
+            changed. It changes files only when git can undo it, and all at once or not at
+            all: when it cannot, it gives the steps and the code to paste. With --to DIR it
+            writes the recipe alone in DIR and leaves the project as it is. Nothing in FILE is run: a tag becomes a variable. A header or a parameter named
+            like a credential is never copied into the recipe. --name chooses the api when
+            FILE describes several; --version is the version of the recipe (1.0.0).
+            Exits with 1 if FILE cannot become a recipe or the project cannot be changed
+            safely, 2 if the arguments are wrong or something could not be read or written.
         install [--version VERSION] [--from URL] [--to DIR] [--yes] NAME|FILE
             Installs the portable recipe called NAME from the cookbook
             (https://github.com/madAle/api_recipes-cookbook) or from the Git repository at URL,
@@ -82,6 +105,8 @@ module ApiRecipes
           import(args, out, err)
         when 'routes'
           routes(args, out, err)
+        when 'convert'
+          convert(args, out, err)
         when 'check'
           check(args, out, err)
         when 'install', 'update'
@@ -161,6 +186,63 @@ module ApiRecipes
         false
       end
 
+      def convert(args, out, err)
+        options = {}
+        directory = nil
+        parser = OptionParser.new
+        parser.on('--name NAME') { |name| options[:name] = name }
+        parser.on('--version VERSION') { |version| options[:version] = version }
+        parser.on('--to DIR') { |dir| directory = dir }
+        files = parser.parse(args)
+        unless files.size == 1
+          err.puts 'convert needs one configuration file'
+          return 2
+        end
+
+        result = Convert.new(files.first, **options).call
+        # In the root of a project, and told no folder, the project is moved to the recipe.
+        return Convert::Migration.new(result, files.first, out: out, err: err).call if directory.nil? && project_root?
+
+        directory ||= '.'
+        file_name = "#{result.name}#{Internals::Recipe::SUFFIX}"
+        path = directory == '.' ? file_name : File.join(directory, file_name)
+        return 2 unless place_recipe(result.text, directory, path, err)
+
+        Convert.report(result, files.first, path, out)
+        0
+      rescue Convert::Refused => e
+        e.reasons.each { |reason| err.puts reason }
+        1
+      rescue Convert::Unusable, OptionParser::ParseError => e
+        err.puts e.message
+        2
+      rescue SystemStackError
+        err.puts 'the file is nested too deeply to be read'
+        1
+      rescue StandardError => e
+        # What the command did not foresee is answered with one line, never
+        # with the text of an exception, which could hold a value of the file.
+        err.puts "convert failed (#{e.class}): this is a defect of api_recipes, not of the file"
+        1
+      end
+
+      # The current directory is the root of a project: it has a Gemfile, or
+      # it is where a git repository starts.
+      def project_root? = File.file?('Gemfile') || File.exist?('.git')
+
+      # The recipe is created in its folder, never replaced.
+      def place_recipe(text, directory, path, err)
+        FileUtils.mkdir_p(directory)
+        File.open(path, File::WRONLY | File::CREAT | File::EXCL) { |file| file.write(text) }
+        true
+      rescue Errno::EEXIST
+        err.puts "#{path} already exists: remove it, or choose another folder with --to"
+        false
+      rescue SystemCallError => e
+        err.puts "#{path}: cannot be written (#{e.class.name.split('::').last})"
+        false
+      end
+
       def check(args, out, err)
         directory = Recipes::DEFAULT_DIRECTORY
         parser = OptionParser.new
@@ -214,15 +296,20 @@ module ApiRecipes
         configs = []
         erb = false
         parser = OptionParser.new
+        code = true
         parser.on('--config FILE') { |file| configs << file }
         parser.on('--erb') { erb = true }
+        parser.on('--no-code') { code = false }
         paths = parser.parse(args)
-        if paths.empty? && configs.empty?
-          err.puts 'upgrade needs a directory or a file to scan, or --config FILE'
+        return Upgrade.new(paths, config: configs, erb: erb, code: code).report(out, err) unless paths.empty? && configs.empty?
+
+        unless File.file?('Gemfile')
+          err.puts 'upgrade without arguments checks the project in the current directory, and there is no Gemfile ' \
+                   'here: run it in the root of the project, or name the directories and the files to check'
           return 2
         end
 
-        Upgrade.new(paths, config: configs, erb: erb).report(out, err)
+        Upgrade.for_project(Upgrade::Project.new, erb: erb, code: code).report(out, err)
       rescue OptionParser::ParseError => e
         err.puts e.message
         2
