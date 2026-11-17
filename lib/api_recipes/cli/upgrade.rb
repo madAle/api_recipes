@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'securerandom'
 require 'api_recipes/cli/upgrade/project'
 
 module ApiRecipes
@@ -56,7 +57,9 @@ module ApiRecipes
 
       # What stands for the value of an ERB tag in a file that is checked
       # without running its code.
-      ERB_VALUE = 'API_RECIPES_ERB_VALUE'
+      # Options whose value is a mapping: a tag that gives one gives a part
+      # of the structure, which is not guessed.
+      CONTAINERS = %w[variables endpoints default_headers default_params auth recipe resource].freeze
       ERB_COMMENT = /<%#.*?%>/m
       ERB_OUTPUT = /<%=.*?%>/m
 
@@ -108,6 +111,9 @@ module ApiRecipes
         @project = project
         @warnings = []
         @notes = []
+        # What stands for the value of an ERB tag in a file that is checked
+        # without running its code: random, so that no file can write it.
+        @erb_value = "API_RECIPES_ERB_VALUE_#{SecureRandom.hex(6)}"
       end
 
       # The command without arguments: the project in the current directory.
@@ -169,15 +175,20 @@ module ApiRecipes
         lines << if @configs.empty?
                    'No configuration file was found'
                  else
-                   "Checked #{@configs.size} configuration file#{'s' unless @configs.size == 1}: #{@configs.join(', ')}"
+                   "Checked #{@configs.size} configuration file#{'s' unless @configs.size == 1}: #{@configs.map { |file| shown_path(file) }.join(', ')}"
                  end
         lines + @project.undescribed.map do |declared|
-          "#{declared.file}:#{declared.line}: declares the api '#{declared.name}', and no configuration file found here describes it"
+          "#{shown_path(declared.file)}:#{declared.line}: declares the api '#{declared.api}', and no configuration file found here describes it"
         end
       end
 
+      # A name found in the project is shown without what a terminal would
+      # obey; a path that was given is shown as it was given.
+      def shown_path(file) = @project ? Recipes::Summary.shown(file, 300) : file
+
       def format_finding(finding)
-        where = finding.line ? "#{finding.file}:#{finding.line}" : finding.file
+        file = shown_path(finding.file)
+        where = finding.line ? "#{file}:#{finding.line}" : file
         "#{where}: [#{finding.kind}] #{finding.message}"
       end
 
@@ -242,20 +253,61 @@ module ApiRecipes
 
       def check_config(file)
         return check_recipe(file) if file.end_with?(Internals::Recipe::SUFFIX)
+        return [config_finding(file, 'describes more values than can be checked: aliases make them from a few lines')] if too_many_values?(file)
 
         unchecked = []
-        apis = Configuration.new.read_recipe_file(file, erb: @erb) { |text| without_erb(file, text) }
+        tags = false
+        apis = Configuration.new.read_recipe_file(file, erb: @erb) do |text|
+          tags = true
+          without_erb(file, text)
+        end
+        return not_checked(file) if tags && structural_tag?(apis)
+
         unchecked = erb_values(apis)
         Internals::Compiler.compile_all(apis)
         note_unchecked(file, unchecked)
         []
       rescue RecipeFileError => e
+        return not_checked(file) if tags && e.errors.all? { |problem| problem.include?('invalid YAML') }
+
         e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }
       rescue ConfigurationError => e
         note_unchecked(file, unchecked)
         checked(e.errors, unchecked).map { |problem| config_finding(file, problem) }
+      rescue SystemStackError
+        [config_finding(file, 'is nested too deeply to be checked')]
       rescue StandardError, ScriptError => e
         [config_finding(file, "could not be evaluated (#{e.class})")]
+      end
+
+      # A file whose tags give a name or a part of the structure is not
+      # guessed: it is said, and it is not a finding.
+      def not_checked(file)
+        @notes << "#{shown_path(file)}: an ERB tag gives a name or a part of the structure: not checked without --erb"
+        []
+      end
+
+      def structural_tag?(value)
+        case value
+        when Hash
+          value.any? do |key, inner|
+            key.to_s.include?(@erb_value) || (CONTAINERS.include?(key.to_s) && inner.to_s == @erb_value) || structural_tag?(inner)
+          end
+        when Array then value.any? { |inner| structural_tag?(inner) }
+        else false
+        end
+      end
+
+      # Aliases can make millions of values from a few lines: the file is
+      # measured, with its tags read as a word, before anything walks it.
+      def too_many_values?(file)
+        text = File.binread(file).force_encoding(Encoding::UTF_8)
+        return false unless text.valid_encoding? && text.include?('*')
+
+        data = YAML.safe_load(text.gsub(/<%.*?%>/m, 'erb'), permitted_classes: [Symbol], aliases: true)
+        !Project.within?(data, Project::MAX_VALUES)
+      rescue SystemCallError, Psych::Exception, SystemStackError
+        false
       end
 
       # A file called NAME.recipe.yml is a portable recipe, read as data only.
@@ -272,33 +324,37 @@ module ApiRecipes
       # the value of each output tag becomes ERB_VALUE. A tag that is not an
       # output tag can decide which lines the file has, so it is not guessed.
       def without_erb(file, text)
-        plain = text.gsub(ERB_COMMENT, '').gsub(ERB_OUTPUT, ERB_VALUE)
+        plain = text.gsub(ERB_COMMENT, '').gsub(ERB_OUTPUT, @erb_value)
         return plain.gsub('<%%', '<%') unless plain.gsub('<%%', '').include?('<%')
 
         raise RecipeFileError.new(file, 'contains ERB that decides the structure of the file (<% ... %>): run again ' \
                                        'with --erb to evaluate it (this executes the code in the file)')
       end
 
-      # The places, as the compiler names them, whose value holds ERB_VALUE.
+      # The places, as the compiler names them, whose value holds the value
+      # of a tag.
       def erb_values(value, path = nil, found = [])
         case value
-        when Hash then value.each { |key, inner| erb_values(inner, [path, key].compact.join('.'), found) }
-        when Array then found << path if value.any? { |item| item.to_s.include?(ERB_VALUE) }
-        else found << path if value.to_s.include?(ERB_VALUE)
+        when Hash then value.each { |key, inner| erb_values(inner, [path, place(key)].compact.join('.'), found) }
+        when Array then found << path if value.any? { |item| item.to_s.include?(@erb_value) }
+        else found << path if value.to_s.include?(@erb_value)
         end
         found
       end
 
+      # A name as the compiler writes it in the place of a problem.
+      def place(name) = name.to_s.gsub(/[^[:print:]]/, '?')[0, 40]
+
       # The problems that are not about a value that an ERB tag gives.
       def checked(problems, unchecked)
-        problems.reject { |problem| unchecked.any? { |path| problem.start_with?("#{path}: ", "#{path}.") } }
+        problems.reject { |problem| unchecked.any? { |path| problem.start_with?("#{path}: ") } }
       end
 
       def note_unchecked(file, unchecked)
         return if unchecked.empty?
 
         count = unchecked.size
-        @notes << "#{file}: #{count} value#{'s' unless count == 1} come#{'s' if count == 1} from ERB and " \
+        @notes << "#{shown_path(file)}: #{count} value#{'s' unless count == 1} come#{'s' if count == 1} from ERB and " \
                   "#{count == 1 ? 'was' : 'were'} not checked"
       end
 

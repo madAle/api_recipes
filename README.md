@@ -548,8 +548,11 @@ together: they are applied in the order they are assigned, so assigning
 
 A file that is missing, empty, not valid YAML or not valid UTF-8 raises
 `ApiRecipes::RecipeFileError`, which names the file. A file called
-`something.recipe.yml` is refused here: it is a [portable recipe](#portable-recipes)
-and goes in `recipes_paths`, where it is never evaluated with ERB.
+`something.recipe.yml` is a [portable recipe](#portable-recipes) and goes in
+`recipes_paths`, where it is never evaluated with ERB: here it is refused,
+unless `recipes_paths` has it too, in which case it is left to `recipes_paths`.
+So one pattern, such as `config/apis/*.yml*`, can match both kinds of file in
+one folder.
 
 Files are evaluated with ERB before being parsed, so values can come from the
 environment:
@@ -982,13 +985,15 @@ What the command does:
   variable is named after the environment variable that the tag reads, or
   after its place, and a default written in the tag as plain text or as a
   number (`ENV.fetch('NAME', 'text')`, `ENV['NAME'] || 443`) becomes the
-  default of the variable.
+  default of the variable. A default that a tag gave to a variable the file
+  declares is given by the application from now on.
 - **Nothing in the file is run**, and there is no option that runs it. The
   code of a tag goes to `config.values` as text. `.compact` leaves out a
   variable whose code gives `nil`, so the default of the recipe applies.
 - **A credential is never copied into the recipe.** A header or a parameter
   whose name contains `auth`, `key`, `token`, `secret`, `passw`, `credential`,
-  `signature`, `cookie` or `session` becomes a variable without a default, and
+  `signature`, `cookie` or `session` becomes a variable without a default,
+  unless the file already gives it with a variable it declares, and
   its value, written in the file or given by a tag, goes to `config.values`.
   The command cannot know a secret written anywhere else: read the recipe
   before you share it.
@@ -997,8 +1002,9 @@ What the command does:
   of an API that another source defines.
 - **`verify_with`**, which a recipe cannot carry, is written on the line where
   a class declares the API.
-- **What it prints holds names, never a value of your file** or the code of a
-  tag.
+- **What it prints never holds the code of a tag or the value of a header or
+  of a parameter.** A message about an option that is not valid, such as a
+  protocol that is not one, shows what was written, as `configure` does.
 
 It changes your files only when that is safe, and all at once or not at all:
 

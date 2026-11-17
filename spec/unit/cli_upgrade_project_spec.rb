@@ -209,6 +209,105 @@ describe 'api_recipes upgrade, in a project' do
     expect(out).to include('Checked 2 configuration files')
   end
 
+  describe 'what it takes for a description of an api' do
+    it 'is a name with endpoints, in any style, and not any YAML file with that word' do
+      project('config/apis/flow.yml' => "github: { host: api.github.test, endpoints: { users: {} } }\n",
+              'config/locales/en.yml' => "en:\n  endpoints:\n    title: Endpoints\n",
+              'k8s/monitor.yaml' => "apiVersion: v1\nkind: ServiceMonitor\nspec:\n  endpoints:\n    - port: web\n",
+              'spec/fixtures/broken.yml' => billing.sub('host:', 'hots:'),
+              'app/client.rb' => "class Client\n  include ApiRecipes\n  api :github\nend\n")
+      code, out, = run('upgrade')
+      expect(code).to eq(0)
+      expect(out).to include('Checked 1 configuration file: config/apis/flow.yml')
+      expect(out).not_to include('[config]', 'declares the api')
+    end
+
+    it 'reads the names of the apis as the gem does: quoted, or written as symbols' do
+      project('config/apis/a.yml' => "\"github\":\n  host: h.test\n  endpoints:\n    users:\n:stripe:\n  host: s.test\n  endpoints:\n    charges:\n",
+              'app/client.rb' => "class Client\n  include ApiRecipes\n  api :github\n  api :stripe, as: 'pay'\n  api :missing, as: :gone\nend\n")
+      _, out, = run('upgrade')
+      expect(out.scan('declares the api').size).to eq(1)
+      expect(out).to include("app/client.rb:5: declares the api 'missing'")
+    end
+
+    it 'takes a declaration only from a line of code that starts with api' do
+      project('app/a.rb' => "# api :commented_out\nDOC = 'write api :in_a_string'\njson.api :thing\n", 'config/apis/billing.yml' => billing)
+      expect(run('upgrade')[1]).not_to include('declares the api')
+    end
+  end
+
+  describe 'a use of the gem' do
+    let(:rescued) { "begin\n  work\nrescue\n  nil\nend\n" }
+
+    it 'is not an address in a comment, a top-level key that is not an api, or a word of another file' do
+      project('config/apis/github.yml' => "defaults: &defaults\n  timeout: 5\ngithub:\n  <<: *defaults\n  host: api.github.test\n  endpoints:\n    users:\n",
+              'app/comment.rb' => "# see https://github.com/rails/rails\n# then call github.users\n" + rescued,
+              'app/url.rb' => "URL = 'https://github.com/rails/rails'\n" + rescued,
+              'app/defaults.rb' => "defaults.merge(a: 1)\n" + rescued)
+      code, out, = run('upgrade')
+      expect(code).to eq(0)
+      expect(out).to include('Checked 3 Ruby files, 0 of them use api_recipes')
+    end
+
+    it 'is a call through the name given with as:, written as a symbol or as a string' do
+      project('app/client.rb' => "class Client\n  include ApiRecipes\n  api :github, as: 'gh'\nend\n", 'app/caller.rb' => "client.gh.users.run\n" + rescued)
+      expect(run('upgrade')[1]).to include('app/caller.rb:4: [check] a bare rescue')
+    end
+  end
+
+  describe 'a file with ERB that cannot be checked without running it' do
+    def note = 'an ERB tag gives a name or a part of the structure: not checked without --erb'
+
+    it 'is said, and is not a finding: a tag that gives a name, a mapping or lines of the file' do
+      ["billing:\n  host: h.test\n  variables: <%= vars.to_json %>\n  endpoints:\n    invoices:\n",
+       "billing:\n  host: h.test\n  endpoints:\n    <%= ENV['NAME'] %>:\n",
+       "billing:\n  host: h.test\n  endpoints:\n    invoices:\n<%= File.read('extra.yml') %>\n"].each do |text|
+        project('config/apis/billing.yml' => text)
+        code, out, = run('upgrade')
+        expect(code).to eq(0)
+        expect(out).to include("config/apis/billing.yml: #{note}")
+        expect(out).not_to include('[config]')
+      end
+    end
+
+    it 'does not hide a problem next to a value that a tag gives, however long the names are' do
+      long = 'an_endpoint_with_a_name_longer_than_forty_characters'
+      project('config/apis/billing.yml' => "billing:\n  host: h.test\n  default_params:\n    a: <%= x %>\n    a.b: [1]\n  endpoints:\n    #{long}:\n      verb: <%= x %>\n    other:\n      verb: yell\n")
+      _, out, = run('upgrade')
+      expect(out.lines.grep(/\[config\]/).size).to eq(2)
+      expect(out).to include('billing.default_params.a.b', "billing.endpoints.other.verb: 'yell' is not a verb")
+    end
+
+    it 'reports a value that only looks like the mark of a tag' do
+      project('config/apis/billing.yml' => "billing:\n  host: <%= x %>\n  protocol: API_RECIPES_ERB_VALUE\n  endpoints:\n    invoices:\n")
+      expect(run('upgrade')[1]).to include("billing.protocol: 'API_RECIPES_ERB_VALUE' is not one of http, https")
+    end
+  end
+
+  it 'is not kept busy or stopped by one file: aliases that stand for millions of values, or thousands of levels' do
+    bomb = "a: &a [x, x, x, x, x, x, x, x, x, x]\n" + ('b'..'h').each_cons(2).map { |one, two| "#{two}: &#{two} [#{(['*' + (one == 'b' ? 'a' : one)] * 10).join(', ')}]\n" }.join
+    project('config/apis/bomb.yml' => "#{bomb}billing:\n  host: h.test\n  x-all: *h\n  endpoints:\n    a:\n",
+            'config/apis/deep.yml' => "billing:\n  host: h.test\n  endpoints:\n    a:\n  x-deep: #{'[' * 20_000}#{']' * 20_000}\n",
+            'app/a.rb' => "ApiRecipes.print_urls = true\n")
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    code, out, err = run('upgrade')
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 15
+    expect(code).to eq(1)
+    expect(out).to include('app/a.rb:1: [breaks]')
+    expect(out + err).not_to include('SystemStackError', 'upgrade.rb')
+  end
+
+  it 'leaves out node_modules wherever it is, and says of a YAML file it cannot read' do
+    project('frontend/node_modules/pkg/dep.rb' => "ApiRecipes.print_urls = true\n", 'app/a.rb' => "x = 1\n", 'config/apis/secret.yml' => billing)
+    File.chmod(0o000, 'config/apis/secret.yml')
+    code, out, err = run('upgrade')
+    expect(out).to include('Checked 1 Ruby file')
+    expect(err).to include('config/apis/secret.yml: cannot read')
+    expect(code).to eq(2)
+  ensure
+    File.chmod(0o644, 'config/apis/secret.yml')
+  end
+
   it 'changes no file' do
     project('app/a.rb' => "ApiRecipes.print_urls = true\n", 'config/apis/billing.yml' => billing)
     snapshot = -> { Dir.glob('**/*', File::FNM_DOTMATCH).to_h { |f| [f, File.file?(f) ? File.read(f) : nil] } }

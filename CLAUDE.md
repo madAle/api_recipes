@@ -112,8 +112,10 @@ classes are built once, by `configure`.
   the ERB of a file: a tag is replaced by a token before the text is parsed.
   `convert` has no option that evaluates ERB, because its result is meant for a
   shared repository: a header or a parameter that `Convert::CREDENTIAL` matches
-  is written as a variable, never with its value, and what the command prints
-  holds names, shown with `Recipes::Summary.shown`, never a value of the file.
+  is written as a variable, never with its value or with a default, and what
+  the command prints never holds the code of a tag or the value of a header or
+  of a parameter; every name of the file is shown with `Recipes::Summary.shown`.
+  The mark that stands for a tag is random, so that no file can write one.
   The recipe is checked with `Internals::Recipe` before it is written, and the
   file is created with `File::EXCL`.
 - `Convert::Migration` is the only code of the gem that edits or deletes a

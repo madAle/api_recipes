@@ -22,6 +22,9 @@
   runs nothing of the file, never copies a header or a parameter named like a
   credential into the recipe, checks the result as a portable recipe, changes
   a file only when git can undo it, and changes everything or nothing.
+- A file called `NAME.recipe.yml` that both `apis_files_paths` and
+  `recipes_paths` name is left to `recipes_paths`, so that one pattern can
+  match the old files and the recipes of one folder.
 - `api_recipes upgrade` checks a configuration file that contains ERB without
   running its code: what a `<%= ... %>` tag gives is left out and counted, the
   rest is checked. `--erb` still evaluates the file. A file called

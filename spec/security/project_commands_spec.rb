@@ -54,6 +54,27 @@ describe 'The commands that read the files of a project' do
       expect(File.exist?(marker)).to be(true)
     end
 
+    it 'does not read a file through a symbolic link, with or without --erb' do
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'secret.yml'), api.sub('billing.example.test', "<%= #{touch} %>").sub('host:', 'hots:'))
+      File.write(File.join(outside, 'code.rb'), "ApiRecipes.print_urls = true\n")
+      FileUtils.mkdir_p(%w[config app])
+      File.symlink(File.join(outside, 'secret.yml'), 'config/linked.yml')
+      File.symlink(File.join(outside, 'code.rb'), 'app/linked.rb')
+      _, out, = run_cli('upgrade', '--erb')
+      expect(File.exist?(marker)).to be(false)
+      expect(out).not_to include('[config]', '[breaks]')
+    ensure
+      FileUtils.remove_entry(outside) if outside
+    end
+
+    it 'does not send the name of a file to the terminal as it is written' do
+      write("config/apis/\e[2Jbilling.yml", api.sub('host:', 'hots:'))
+      _, out, err = run_cli('upgrade')
+      expect(out).to include('[config]')
+      expect(out + err).not_to include("\e")
+    end
+
     it 'does not leave the project through a symbolic link' do
       outside = Dir.mktmpdir
       File.write(File.join(outside, 'billing.yml'), api.sub('billing.example.test', "<%= #{touch} %>").sub('host:', 'hots:'))

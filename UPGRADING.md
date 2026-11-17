@@ -482,25 +482,29 @@ changes a file. Run it in the root of your project, with no argument:
 
 It finds by itself what to check, and says what it checked:
 
-- **The Ruby files of the project**, `*.rb` and `*.rake`, in every folder but
-  `vendor`, `node_modules`, `tmp`, `log`, `coverage`, `public`, `storage` and
-  those whose name starts with a dot. Code that stops working is marked
+- **The Ruby files of the project**, `*.rb` and `*.rake`. It leaves out the
+  folders `vendor`, `node_modules`, `tmp`, `log`, `coverage`, `public` and
+  `storage` at the top of the project, `node_modules` wherever it is, what
+  starts with a dot, and every symbolic link. Code that stops working is marked
   `[breaks]`; a line that deserves a look because its result changes is marked
   `[check]`: a manual encoding of a path parameter, a bare `rescue`, `follow:`,
   `response.request`, the removed `Hash` and `Array` methods.
 - **The files that describe an API**: the YAML files (`.yml`, `.yaml`, also
-  followed by `.erb`) that hold an `endpoints:` key, and the installed portable
-  recipes. Each is checked with the rules of 3.0 (marked `[config]`).
+  followed by `.erb`) where a name has `endpoints`, each with its options or
+  with none, and the files called `NAME.recipe.yml`. Those under `spec`, `test`
+  and `features` are fixtures and are left out. Each is checked with the rules
+  of 3.0 (marked `[config]`).
 - **Less noise.** A bare `rescue` or a call to `CGI.escape` is in every
   application. The checks that also match code that has nothing to do with the
-  gem are applied only to the files that name `ApiRecipes` or call one of your
-  APIs by its name, and the one about the `Hash` methods is left out when the
-  project has ActiveSupport.
-- **A file that contains ERB is checked without running its code.** What a
-  `<%= ... %>` tag gives is not checked, and the command says how many values
-  it left out; everything else in the file is. A file where a `<% ... %>` tag
-  decides which lines exist is reported, and is read only with `--erb`, which
-  evaluates the file: that runs the code in it, and outside your application a
+  gem are applied only to the files whose code names `ApiRecipes` or calls one
+  of your APIs by its name, and the one about the `Hash` methods is left out
+  when the project has ActiveSupport.
+- **A file that contains ERB is checked without running its code.** The value
+  that a `<%= ... %>` tag gives is not checked, and the command says how many
+  it left out; the other values are. A file where a tag gives a name, a
+  mapping or whole lines, or where a `<% ... %>` tag decides which lines exist,
+  is not guessed: the command says so, and reads it only with `--erb`, which
+  evaluates the file. That runs the code in it, and outside your application a
   value read from the environment may be missing.
 - The command prints the file, the line and what to do, never the text of the
   line, which could hold a secret.
@@ -512,8 +516,8 @@ config/apis/github.yml: [config] github: unknown option 'hots'
 
 Checked 214 Ruby files, 6 of them use api_recipes
 Checked 2 configuration files: config/apis/billing.yml, config/apis/github.yml
-config/apis/billing.yml: 2 values come from ERB and were not checked
 app/models/shop.rb:4: declares the api 'shopify', and no configuration file found here describes it
+config/apis/billing.yml: 2 values come from ERB and were not checked
 
 (the list of what the command cannot find)
 

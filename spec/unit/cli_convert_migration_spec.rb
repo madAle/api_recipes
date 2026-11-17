@@ -138,6 +138,18 @@ describe 'api_recipes convert, in a project' do
     expect(ApiRecipes.billing.invoices.show(7).url.to_s).to eq('https://billing.example.test/invoices/7')
   end
 
+  it 'works when the old files and the recipes share a folder and one pattern matches both' do
+    project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[File.expand_path('../api_recipes/*.yml*', __dir__)]\nend\n",
+            'config/api_recipes/other.yml' => "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+    FileUtils.mv('config/apis/billing.yml.erb', 'config/api_recipes/billing.yml.erb')
+    git('add', '-A')
+    git('commit', '-q', '-m', 'one folder')
+    expect(convert('config/api_recipes/billing.yml.erb').first).to eq(0)
+    boot
+    expect(ApiRecipes.apis).to contain_exactly(:billing, :other)
+    expect(ApiRecipes.billing.invoices.show(7).url.to_s).to eq('https://billing.example.test/invoices/7')
+  end
+
   it 'adds a second api to the config.values it wrote, and takes only its lines out of a file with others' do
     apis = "github:\n  host: api.github.test\n  default_headers:\n    Authorization: Bearer written-token\n  endpoints:\n    users:\n" \
            "shop:\n  host: shop.example.test\n  endpoints:\n    orders:\n"

@@ -342,8 +342,6 @@ module ApiRecipes
         tags = content.to_s.scan(@token).flatten.map { |index| @tags[index.to_i] }
         if tags.size == 1 && content.to_s.match?(/\A#{@token.source}\z/)
           variable = variable_for(tags.first, name, default: false)
-          # The same environment variable may have been read elsewhere, with a default.
-          @variables[variable] = {}
           @changes << "#{shown(where)}: the ERB tag is now the variable {#{variable}}; the value is not in the recipe"
         else
           variable = declare(variable_name(name), nil, nil)
@@ -368,6 +366,8 @@ module ApiRecipes
 
       def variable_for(tag, fallback, default:)
         name = declare(variable_name(tag.env || fallback), tag.env, default ? tag.default : nil)
+        # A variable that gives a credential has no default, also when the
+        # same environment variable is read elsewhere with one.
         @secret << name unless default
         @variables[name] = {} if @secret.include?(name)
         @expressions[name] ||= tag.code
