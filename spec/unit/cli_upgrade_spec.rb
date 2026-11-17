@@ -125,12 +125,14 @@ describe 'api_recipes upgrade' do
     expect(out).to include("[config] github.endpoints.users: unknown option 'method'")
   end
 
-  it 'evaluates ERB only when asked' do
-    _, out, = run('upgrade', '--config', File.join(root, 'config/with_erb.yml'))
-    expect(out).to include('contains ERB: run again with --erb')
+  it 'evaluates ERB only when asked, and without it says what it did not check' do
+    code, out, = run('upgrade', '--config', File.join(root, 'config/with_erb.yml'))
+    expect(code).to eq(0)
+    expect(out).to include('with_erb.yml: 1 value comes from ERB and was not checked', 'Nothing to change')
     code, out, = run('upgrade', '--erb', '--config', File.join(root, 'config/with_erb.yml'))
     expect(code).to eq(0)
     expect(out).to include('Nothing to change')
+    expect(out).not_to include('comes from ERB')
   end
 
   it 'changes no file' do
@@ -143,6 +145,17 @@ describe 'api_recipes upgrade' do
     expect(run('--version')).to match([0, /#{Regexp.escape(ApiRecipes::VERSION)}/, ''])
     expect(run('--help')[1]).to include('upgrade')
     expect(run('nope')).to match([2, '', /unknown command: nope/])
+  end
+
+  it 'reads the rake files of a directory too, and nothing else' do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'sync.rake'), "ApiRecipes.print_urls = true\n")
+      File.write(File.join(dir, 'notes.txt'), "ApiRecipes.print_urls = true\n")
+      code, out, = run('upgrade', dir)
+      expect(code).to eq(1)
+      expect(out).to include('sync.rake:1: [breaks]')
+      expect(out).not_to include('notes.txt')
+    end
   end
 
   it 'says "1 finding" for exactly one' do
@@ -249,8 +262,10 @@ describe 'api_recipes upgrade' do
                            '--config', File.join(@dir, 'missing.yml'), '--config', @dir)
       expect(code).to eq(1)
       expect(err).to eq('')
-      expect(out.scan('[config]').size).to eq(7)
-      expect(out).to include('file is empty', 'invalid YAML', 'must contain a mapping', 'file not found')
+      expect(out.lines.grep(/\[config\]/).map { |line| File.basename(line[/\A\S+(?=: \[config\])/]) }.uniq)
+        .to contain_exactly('empty.yml', 'broken.yml', 'list.yml', 'latin.yml', 'x.recipe.yml', 'missing.yml', File.basename(@dir))
+      expect(out).to include('file is empty', 'invalid YAML', 'must contain a mapping', 'file not found',
+                             'x.recipe.yml: [config] the key recipe is required')
     end
 
     it 'reports an ERB file that fails when evaluated' do
@@ -268,10 +283,10 @@ describe 'api_recipes upgrade' do
       expect(File.exist?(marker)).to be(false)
     end
 
-    it 'asks for something to check when given nothing' do
-      code, _, err = run('upgrade')
+    it 'asks where the project is when given nothing outside a project' do
+      code, _, err = Dir.chdir(@dir) { run('upgrade') }
       expect(code).to eq(2)
-      expect(err).to include('upgrade needs')
+      expect(err).to include('there is no Gemfile here')
     end
 
     it 'rejects an unknown option' do

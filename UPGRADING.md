@@ -51,8 +51,9 @@ github:
   cannot upgrade Ruby yet, stay on 2.10.
 - **http.rb 6.** The gem needs `http` 6.0.4 or higher, below 7. http.rb 5 is no
   longer supported.
-- **Run `api_recipes upgrade`** on your code and your configuration files (see
-  [below](#the-api_recipes-upgrade-command)). It finds the removed
+- **Run `api_recipes upgrade`** in the root of your project (see
+  [below](#the-api_recipes-upgrade-command)). It finds your code and your
+  configuration files by itself, then the removed
   `route`, `base_configs`, `ApiRecipes.print_urls`, the removed error classes and
   `Hash` and `Array` methods, and a few lines that deserve a look (manual
   encoding of path parameters, a bare `rescue`, `follow:`). It then lists what it
@@ -474,19 +475,32 @@ See [Security in the README](README.md#security) for the same list in its place.
 ## The `api_recipes upgrade` command
 
 The gem installs a command that looks for the changes of this guide. It never
-changes a file.
+changes a file. Run it in the root of your project, with no argument:
 
-    $ api_recipes upgrade app lib --config config/apis/github.yml
+    $ bundle exec api_recipes upgrade
 
-- Every directory or file you list is searched for Ruby code that stops working
-  (marked `[breaks]`) and for lines that deserve a look because their result
-  changes (marked `[check]`): a manual encoding of a path parameter, a bare
-  `rescue`, `follow:`, `response.request`, the removed `Hash` and `Array`
-  methods.
-- With `--config FILE`, each configuration file is checked with the rules of
-  3.0 (marked `[config]`). Use the option once for each file.
-- A file that contains ERB is evaluated only with `--erb`, because that runs the
-  code in the file. Without it the file is reported and not read.
+It finds by itself what to check, and says what it checked:
+
+- **The Ruby files of the project**, `*.rb` and `*.rake`, in every folder but
+  `vendor`, `node_modules`, `tmp`, `log`, `coverage`, `public`, `storage` and
+  those whose name starts with a dot. Code that stops working is marked
+  `[breaks]`; a line that deserves a look because its result changes is marked
+  `[check]`: a manual encoding of a path parameter, a bare `rescue`, `follow:`,
+  `response.request`, the removed `Hash` and `Array` methods.
+- **The files that describe an API**: the YAML files (`.yml`, `.yaml`, also
+  followed by `.erb`) that hold an `endpoints:` key, and the installed portable
+  recipes. Each is checked with the rules of 3.0 (marked `[config]`).
+- **Less noise.** A bare `rescue` or a call to `CGI.escape` is in every
+  application. The checks that also match code that has nothing to do with the
+  gem are applied only to the files that name `ApiRecipes` or call one of your
+  APIs by its name, and the one about the `Hash` methods is left out when the
+  project has ActiveSupport.
+- **A file that contains ERB is checked without running its code.** What a
+  `<%= ... %>` tag gives is not checked, and the command says how many values
+  it left out; everything else in the file is. A file where a `<% ... %>` tag
+  decides which lines exist is reported, and is read only with `--erb`, which
+  evaluates the file: that runs the code in it, and outside your application a
+  value read from the environment may be missing.
 - The command prints the file, the line and what to do, never the text of the
   line, which could hold a secret.
 
@@ -495,16 +509,32 @@ app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpo
 app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
 config/apis/github.yml: [config] github: unknown option 'hots'
 
+Checked 214 Ruby files, 6 of them use api_recipes
+Checked 2 configuration files: config/apis/billing.yml, config/apis/github.yml
+config/apis/billing.yml: 2 values come from ERB and were not checked
+app/models/shop.rb:4: declares the api 'shopify', and no configuration file found here describes it
+
 (the list of what the command cannot find)
 
 3 findings
 ```
 
-A directory is searched for `*.rb` files only; a file you name is read whatever
-its name. The command then prints the list of changes that a search in the text
+The line about `api :shopify` is said of a declaration in the code when no file
+found in the project describes that API and the code never assigns
+`apis_configs`: look for where its description comes from.
+
+To check something else, name it: every directory is searched for `*.rb` and
+`*.rake` files, a file you name is read whatever its name, and `--config FILE`,
+once for each file, checks a description. Every check then applies to every
+file.
+
+    $ api_recipes upgrade app lib --config config/apis/github.yml
+
+The command then prints the list of changes that a search in the text
 cannot find, which you check by hand (this guide has the details of each), and a
-summary line: `Nothing to change`, `1 finding` or `N findings`. The summary line
-is left out when there is no finding and something could not be read.
+summary line: `Nothing to change`, `1 finding` or `N findings`. When it found
+no description of an API it says so instead of `Nothing to change`. The summary
+line is left out when there is no finding and something could not be read.
 
 A file or a directory that could not be read (missing, binary, not valid UTF-8,
 or not readable for lack of permission) is reported on the error stream, as

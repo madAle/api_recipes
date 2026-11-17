@@ -1,3 +1,16 @@
+## Unreleased
+
+- `api_recipes upgrade` needs no argument: run in the root of a project, it
+  finds the Ruby files (`*.rb` and `*.rake`) and the files that describe an api,
+  says what it checked, and applies the checks that also match unrelated code,
+  such as a bare `rescue`, only to the files that use the gem. A declared api
+  that no file describes is pointed out. With paths and `--config` it works as
+  before, and a directory is searched for `*.rake` files too.
+- `api_recipes upgrade` checks a configuration file that contains ERB without
+  running its code: what a `<%= ... %>` tag gives is left out and counted, the
+  rest is checked. `--erb` still evaluates the file. A file called
+  `NAME.recipe.yml` is checked as a portable recipe.
+
 ## Version 3.0.0.beta3
 
 The third pre-release of 3.0 adds portable recipes: recipes written by others,

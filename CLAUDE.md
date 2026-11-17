@@ -12,6 +12,7 @@ bundle exec rspec                               # whole suite, no network
 bundle exec rspec spec/unit/url_building_spec.rb
 bundle exec rspec spec/security                 # one example per protection
 bundle exec rspec spec/docs                     # the examples in README.md and UPGRADING.md
+bundle exec ruby -Ilib exe/api_recipes upgrade                                  # in the root of a project: finds code and configuration by itself
 bundle exec ruby -Ilib exe/api_recipes upgrade app lib --config config/apis/github.yml
 bundle exec ruby -Ilib exe/api_recipes import spec/fixtures/openapi/github_small.yml --name github
 bundle exec ruby -Ilib exe/api_recipes routes spec/fixtures/openapi/github_small.expected.yml
@@ -45,6 +46,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/internals/declaration.rb` | one `api :name` in a class or a module |
 | `lib/api_recipes/internals/request.rb` | builds the URL and the http.rb client, sends the request, checks the outcome |
 | `lib/api_recipes/cli.rb`, `cli/upgrade.rb`, `exe/api_recipes` | the `api_recipes` command and its `upgrade` checks |
+| `lib/api_recipes/cli/upgrade/project.rb` | what `upgrade` without arguments finds in a project: Ruby files, descriptions of apis, the names of the apis |
 | `lib/api_recipes/cli/import.rb` | the `import` command: from an OpenAPI description to the text of a recipe, checked before it is returned |
 | `lib/api_recipes/cli/import/document.rb` | reads the description (YAML or JSON) and follows its internal `$ref` |
 | `lib/api_recipes/cli/import/server.rb`, `security.rb` | the address, the variables and the `auth` of the api |
