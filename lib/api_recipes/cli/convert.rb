@@ -307,7 +307,7 @@ module ApiRecipes
       end
 
       def left_out(where, value)
-        @verify_with << [where, value.to_s]
+        @verify_with << [where, holds_tag?(value) ? nil : value.to_s]
         @changes << "#{shown(where)}: left out, a recipe cannot carry it: give it where a class declares the api, " \
                     "as `api :#{@name}, verify_with: ...`"
       end
@@ -322,7 +322,11 @@ module ApiRecipes
           if content.to_s.length > Internals::Recipe::MAX_LENGTH
             refuse("#{shown(here)}: is longer than the #{Internals::Recipe::MAX_LENGTH} characters a recipe allows for a value")
           end
-          if CREDENTIAL.match?(name) && !given_by_variables?(content)
+          secret = CREDENTIAL.match?(name) && !given_by_variables?(content)
+          if !secret && content.is_a?(String) && Code::UNSAFE.match?(content.gsub(@token, ''))
+            refuse("#{shown(here)}: holds a character that is not printed: a recipe holds visible text only")
+          end
+          if secret
             [name, credential(content, here, name)]
           else
             [name, with_variables(content, here, name)]
@@ -345,8 +349,9 @@ module ApiRecipes
           variable = variable_for(tags.first, name, where, default: false)
           @changes << "#{shown(where)}: the ERB tag is now the variable {#{variable}}; the value is not in the recipe"
         else
-          variable = declare(variable_name(name), nil, nil)
-          @expressions[variable] ||= written(content)
+          code = written(content)
+          variable = declare(variable_name(name), code, nil, nil)
+          @expressions[variable] ||= code
           @refs[variable] ||= { place: where, line: nil, credential: true, literal: true }
           @changes << "#{shown(where)}: looks like a credential: its value is not copied, it is now the variable {#{variable}}"
         end
@@ -367,7 +372,9 @@ module ApiRecipes
       end
 
       def variable_for(tag, fallback, where, default:)
-        name = declare(variable_name(tag.env || fallback), tag.env, default ? tag.default : nil)
+        # What is named like a credential in the environment has no default either.
+        default &&= !CREDENTIAL.match?(tag.env.to_s)
+        name = declare(variable_name(tag.env || fallback), tag.code, tag.env, default ? tag.default : nil)
         @refs[name] ||= { place: where, line: tag.line, credential: !default }
         # A variable that gives a credential has no default, also when the
         # same environment variable is read elsewhere with one.
@@ -380,7 +387,7 @@ module ApiRecipes
       # A value written in the file, as the Ruby code that gives it again. A
       # tag inside it stays what it was: an interpolation.
       def written(content)
-        return content.inspect unless content.is_a?(String) && @token.match?(content)
+        return content.to_s.inspect unless content.is_a?(String) && @token.match?(content)
 
         parts = content.split(@token).each_slice(2).flat_map do |text, index|
           [text.inspect[1..-2], index && "\#{#{@tags[index.to_i].code}}"]
@@ -403,17 +410,17 @@ module ApiRecipes
         name
       end
 
-      # Declares the variable and returns its name. The same environment
-      # variable, or the same place, gives the same variable.
-      def declare(name, env, default)
-        origin = env || name
-        taken = @origins.key(origin)
+      # Declares the variable and returns its name. The same code gives the
+      # same variable; another code gives another one, also at the same place
+      # or for the same environment variable, so that nothing is lost.
+      def declare(name, code, env, default)
+        taken = @origins.key(code)
         return taken if taken
 
         base = name
         number = 1
         name = "#{base}_#{number += 1}" while @origins.key?(name)
-        @origins[name] = origin
+        @origins[name] = code
         @variables[name] = default.nil? ? {} : { 'default' => default.to_s }
         @envs[name] = env
         name

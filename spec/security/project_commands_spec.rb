@@ -146,6 +146,17 @@ describe 'The commands that read the files of a project' do
       expect(err).to include('default_headers.X-Client: is longer than the 2000 characters')
     end
 
+    it 'refuses by its name a value that is not visible text, and gives no default to what the environment names like a credential' do
+      write('billing.yml', api.sub('Accept: application/json', 'X-Trace: "SEKRET-VALUE\\x07bell"'))
+      code, out, err = run_cli('convert', '--to', '.', 'billing.yml')
+      expect(code).to eq(1)
+      expect(out + err).not_to include('SEKRET')
+      expect(err).to include('default_headers.X-Trace: holds a character that is not printed')
+      write('billing.yml', api.sub('Accept: application/json', "X-Client: <%= ENV['CLIENT_SECRET'] || 'default-of-a-tag' %>"))
+      expect(run_cli('convert', '--to', '.', 'billing.yml').first).to eq(0)
+      expect(File.read('billing.recipe.yml')).not_to include('default-of-a-tag')
+    end
+
     it 'does not send a name of the file to the terminal when it refuses it either' do
       write('billing.yml', api.sub("    invoices:\n", "    \"\\e[2J\\u202Eowned\": \"<%= x %>\"\n"))
       code, out, err = run_cli('convert', '--to', '.', 'billing.yml')
@@ -255,6 +266,46 @@ describe 'The commands that read the files of a project' do
       File.write('config/apis/billing.yml', "#{erb_api}# not committed\n")
       before = snapshot
       expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(1)
+      expect(snapshot).to eq(before)
+    end
+
+    it 'changes nothing through a symbolic link, and nothing that git was told to look away from' do
+      project
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'apis.yml'), "#{erb_api.sub('billing:', 'linked:')}other:\n  host: o.test\n  endpoints:\n    a:\n")
+      File.symlink(File.join(outside, 'apis.yml'), 'config/apis/linked.yml')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'link')
+      code, _, err = run_cli('convert', '--name', 'linked', 'config/apis/linked.yml')
+      expect(code).to eq(1)
+      expect(err).to include('config/apis/linked.yml is a symbolic link')
+      expect(File.read(File.join(outside, 'apis.yml'))).to include('linked:')
+      git('update-index', '--skip-worktree', 'config/apis/billing.yml')
+      File.write('config/apis/billing.yml', "#{erb_api}# a local change\n")
+      before = snapshot
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(1)
+      expect(snapshot).to eq(before)
+    ensure
+      FileUtils.remove_entry(outside) if outside
+    end
+
+    it 'does not run a program that the repository names for git' do
+      project
+      File.write('hook.sh', "#!/bin/sh\ntouch #{marker}\n")
+      File.chmod(0o755, 'hook.sh')
+      git('config', 'core.fsmonitor', File.join(@root, 'hook.sh'))
+      git('add', '-A')
+      git('commit', '-q', '-m', 'hook')
+      FileUtils.rm_f(marker)
+      run_cli('convert', 'config/apis/billing.yml')
+      expect(File.exist?(marker)).to be(false)
+    end
+
+    it 'puts the project back as it was when a write fails after others were made' do
+      project
+      before = snapshot
+      allow(File).to receive(:delete).and_wrap_original { |original, path| path.end_with?('billing.yml') ? raise(Errno::EACCES) : original.call(path) }
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(2)
       expect(snapshot).to eq(before)
     end
 

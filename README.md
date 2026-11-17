@@ -506,9 +506,9 @@ In these options the variable gives a value of the option: `http` or `https`
 for the protocol, an integer from 1 to 65535 for the port, a positive number
 for the timeout, `raise` or `ignore`, a verb, a status. It is made when the
 request is built, and a value that is not one raises
-`ApiRecipes::InvalidVariable` before anything is sent, as a default that is
-not one raises `ApiRecipes::ConfigurationError` when the configuration is
-loaded. `definition`, `routes` and the `api_recipes routes` command show such
+`ApiRecipes::InvalidVariable` before anything is sent, as the default of a
+variable that gives the whole option raises `ApiRecipes::ConfigurationError`
+when the configuration is loaded. `definition`, `routes` and the `api_recipes routes` command show such
 an option as it is written. What decides the shape of the tree is read when
 the configuration is loaded and takes no variable: `endpoints`, `resource`,
 `route`, the names, `verify_with` and `auth`.
@@ -952,7 +952,7 @@ called.
       verify_with: left out, a recipe cannot carry it: give it where a class declares the api, as `api :billing, verify_with: ...`
       default_headers.Api-Key-Client: the ERB tag is now the variable {billing_client}; the value is not in the recipe
 
-    Every change is in `git status` and `git diff`, and `git checkout` undoes it. Check the recipes with `api_recipes check`, then start the application.
+    Every change is in `git status` and `git diff`: `git checkout` undoes the edits, and the new files are in config/api_recipes. Check the recipes with `api_recipes check`, then start the application.
 
 The project works as before, and the values still come from where they came:
 the code of each tag is moved, as it is written, to `config.values`.
@@ -988,8 +988,11 @@ What the command does:
   default of the variable. A default that a tag gave to a variable the file
   declares is given by the application from now on.
 - **Nothing in the file is run**, and there is no option that runs it. The
-  code of a tag goes to `config.values` as text. `.compact` leaves out a
-  variable whose code gives `nil`, so the default of the recipe applies.
+  code of a tag goes to `config.values` as text, and each tag has its own
+  variable, also two tags in one value. `.compact` leaves out a variable whose
+  code gives `nil`: the default of the recipe applies when the tag had one
+  written, and otherwise the request says which variable is missing, where
+  2.x went on with the default of the gem.
 - **A credential is never copied into the recipe.** A header or a parameter
   whose name contains `auth`, `key`, `token`, `secret`, `passw`, `credential`,
   `signature`, `cookie` or `session` becomes a variable without a default,
@@ -1000,20 +1003,27 @@ What the command does:
 - **The old description is removed**: the file is deleted, or only the lines
   of that API when it describes others, because a recipe never takes the place
   of an API that another source defines.
-- **`verify_with`**, which a recipe cannot carry, is written on the line where
-  a class declares the API.
+- **`verify_with`**, which a recipe cannot carry, is given to each `api :name`
+  of the code. One that a tag gave, or that an endpoint had, is left to you.
 - **When it changes the project it prints names and paths**, nothing of what
   the file holds.
 
 It changes your files only when that is safe, and all at once or not at all:
 
-- Lines are added only to a file that git knows. A file is deleted, or lines
-  are taken out of it, only when git has it committed as it is now. Outside a
-  git repository the project is not changed.
-- The file that calls `ApiRecipes.configure` is edited when there is exactly
-  one, written as `ApiRecipes.configure do |config|`, and when `config.values`
-  is not assigned yet or was written by this command. The result is read as
-  Ruby, without running it, before it is written.
+- Lines are added only to a plain file of the project that git tracks. A file
+  is deleted, or lines are taken out of it, only when git has it committed as
+  it is now. A symbolic link, and a file that git was told to skip, are never
+  changed. Outside a git repository the project is not changed.
+- Ruby is read as a tree, never matched as lines and never run. The call to
+  `ApiRecipes.configure` is edited when the project has exactly one, with a
+  block `do |config|` on several lines and without a `rescue`. `config.values`
+  is added, or one entry is added to the Hash it is given, when that Hash is
+  written between braces and does not have the API yet. A name of the old
+  file in the list given to `apis_files_paths` is taken out; any other mention
+  of the old file, another file that describes the API, or a `recipes_paths`
+  the command cannot read, stops it.
+- Every Ruby file it changes must still be Ruby with the change, and when a
+  write fails every file is put back as it was.
 - When a step is not possible, nothing is written, the command says why, and
   it gives the steps to do by hand with the code to paste: the commands that
   write and install the recipe, the lines for the block of
@@ -1040,7 +1050,7 @@ It changes your files only when that is safe, and all at once or not at all:
   endpoint.
 - A tag that is not `<%= ... %>`, that gives the name of an option, or that
   gives a part of the protocol, of the port or of another such option, stops
-  the command, which says the line.
+  the command, which says where.
 
 To write the recipe alone, as for the repository of the recipes, name a
 folder: the project is not touched, and the command gives the code for the

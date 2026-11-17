@@ -118,12 +118,23 @@ module ApiRecipes
         def changing_calls
           origin = "#{@api.protocol}://#{@api.host}#{":#{@api.port}" if @api.port}"
           @api.routes.reject { |route| route.verb == :get }.map do |route|
-            [Internals::OptionValue.shown_verb(route.verb), route.call, route.url.delete_prefix(origin)]
+            [verb_of(route), route.call, route.url.delete_prefix(origin)]
           end
         end
 
         # Each call as { call => verb }.
-        def verbs = @api.routes.to_h { |route| [route.call, Internals::OptionValue.shown_verb(route.verb)] }
+        def verbs = @api.routes.to_h { |route| [route.call, verb_of(route)] }
+
+        # The verb of a call. One that a variable gives is shown as it is
+        # written, with the verb its default makes: a change of the default
+        # is a change of the call.
+        def verb_of(route)
+          verb = Internals::OptionValue.shown_verb(route.verb)
+          return verb unless Internals::OptionValue.variable?(:verb, route.verb)
+
+          made = filled(route.verb)
+          made == route.verb ? verb : "#{verb} (#{clip(made.upcase, PART)} by default)"
+        end
 
         # What this recipe changes in the recipe installed now, whose summary
         # is previous (nil when it is not a valid recipe): the address, the

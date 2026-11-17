@@ -323,6 +323,7 @@ module ApiRecipes
 
         file, text = @configure.size == 1 ? @configure.first : nil
         block = Code::ConfigureBlock.in(text)
+        block = nil if block&.problem
         config = block ? block.config : 'config'
         inside = @startup.select { |item| block && item[:file] == file && item[:line].between?(block.first, block.last) }
         added = @startup.select { |item| item[:api].nil? }.first(1).map { |item| "#{config}.print_urls = #{item[:code]}" }

@@ -65,7 +65,7 @@ describe 'A variable in the protocol, in the port or in another option of a requ
     end
 
     it 'never hides a call that is not a GET: a verb given by a variable is listed with the others' do
-      expect(summary_of('https')).to include('1, of which 1 is not GET', '{verb}  shop.orders')
+      expect(summary_of('https')).to include('1, of which 1 is not GET', '{verb} (DELETE by default)  shop.orders')
     end
   end
 end

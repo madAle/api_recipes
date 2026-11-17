@@ -187,21 +187,21 @@ describe 'api_recipes convert, in a project' do
       project
       git('rm', '-q', '--cached', 'config/initializers/api_recipes.rb')
       git('commit', '-q', '-m', 'untrack')
-      refused('config/initializers/api_recipes.rb is not in git')
+      refused('config/initializers/api_recipes.rb is not a file that git tracks')
     end
 
     it 'changes nothing: the project is not in git' do
       project
       FileUtils.remove_entry('.git')
-      refused('is not in git')
+      refused('is not committed in git as it is now')
     end
 
     it 'changes nothing: configure is written in another way, is missing, or is called twice' do
       project('config/initializers/api_recipes.rb' => "ApiRecipes.configure { |c| c.apis_files_paths = [] }\n")
-      refused('ApiRecipes.configure is not written once as `ApiRecipes.configure do |config|`')
+      refused('the call to ApiRecipes.configure is written on one line')
       File.write('config/initializers/api_recipes.rb', "# nothing\n")
       git('commit', '-q', '-am', 'none')
-      refused('no Ruby file of the project calls ApiRecipes.configure')
+      refused('no Ruby file of the project calls ApiRecipes.configure once')
       File.write('config/initializers/api_recipes.rb', initializer)
       write('config/initializers/other.rb', initializer)
       git('add', '-A')
@@ -211,7 +211,7 @@ describe 'api_recipes convert, in a project' do
 
     it 'changes nothing: config.values is already assigned in another way' do
       project('config/initializers/api_recipes.rb' => initializer.sub("end\n", "  config.values = VALUES\nend\n"))
-      refused('config.values is already assigned in a way this command does not edit')
+      refused('config.values is not given one Hash written between braces')
     end
 
     it 'changes nothing: the file would not be valid Ruby with the code of a tag' do
@@ -294,6 +294,202 @@ describe 'api_recipes convert, in a project' do
     expect(code).to eq(0)
     expect(out + err + File.read('config/api_recipes/billing.recipe.yml')).not_to match(/hard-coded-secret|written-secret|ENV|Settings/)
     expect(File.read('config/initializers/api_recipes.rb')).to include("s: (ENV.fetch('S', 'hard-coded-secret'))", 'x_api_token: "written-secret"')
+  end
+
+  describe 'on Ruby as people write it' do
+    def initializer_text = File.read('config/initializers/api_recipes.rb')
+
+    it 'gives each tag its own variable, also two in one value, and loses the code of none' do
+      project('config/apis/billing.yml.erb' => <<~YAML)
+        billing:
+          host: <%= Settings.sub %>.<%= Settings.domain %>.example.test
+          default_headers:
+            X-Mode: <%= ENV['MODE'] || 'a' %>
+          default_params:
+            mode: <%= ENV['MODE'] || 'b' %>
+          endpoints:
+            invoices:
+              path: /inv-<%= Settings.sub %>
+      YAML
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to include('host: (Settings.sub)', 'host_2: (Settings.domain)', "mode: (ENV['MODE'] || 'a')", "mode_2: (ENV['MODE'] || 'b')")
+      stub_const('Settings', Struct.new(:sub, :domain).new('one', 'two'))
+      load File.join(@root, 'config/initializers/api_recipes.rb')
+      stub_request(:get, 'https://one.two.example.test/inv-one?mode=b').to_return(status: 200, body: '{}', headers: json)
+      ApiRecipes.billing.invoices.run
+      expect(WebMock).to have_requested(:get, 'https://one.two.example.test/inv-one?mode=b').with(headers: { 'X-Mode' => 'a' })
+    end
+
+    it 'gives verify_with to the call, wherever the line goes on, and leaves a string that looks like one alone' do
+      { "api :billing if ENV['X']" => "api :billing, verify_with: :expected_response? if ENV['X']",
+        'api :billing; puts 1' => 'api :billing, verify_with: :expected_response?; puts 1',
+        'api(:billing)' => 'api(:billing, verify_with: :expected_response?)',
+        "api :billing, as: :bills # the api" => 'api :billing, as: :bills, verify_with: :expected_response? # the api' }.each do |written, expected|
+        FileUtils.rm_rf(Dir.children('.'))
+        project('app/models/invoice.rb' => "class Invoice\n  include ApiRecipes\n  #{written}\n  TEXT = <<~T\n    api :billing\n  T\nend\n")
+        expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+        expect(File.read('app/models/invoice.rb')).to eq("class Invoice\n  include ApiRecipes\n  #{expected}\n  TEXT = <<~T\n    api :billing\n  T\nend\n")
+      end
+    end
+
+    it 'leaves to the person a verify_with that a tag gave, and writes no mark of its own in the code' do
+      project('config/apis/billing.yml.erb' => billing.sub('verify_with: expected_response?', 'verify_with: <%= ENV["CHECK"] || "expected_response?" %>'))
+      code, out, = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(0)
+      expect(out).to include('Left to you', 'verify_with: was left out of the recipe')
+      expect(File.read('app/models/invoice.rb')).to eq(model)
+    end
+
+    it 'does not touch a declaration in a file that git does not track' do
+      project
+      git('rm', '-q', '--cached', 'app/models/invoice.rb')
+      git('commit', '-q', '-m', 'untrack')
+      code, out, = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(0)
+      expect(out).to include('Left to you')
+      expect(File.read('app/models/invoice.rb')).to eq(model)
+    end
+
+    it 'adds its entry to a config.values written by hand, and keeps what was there' do
+      project('config/initializers/api_recipes.rb' => initializer.sub("end\n", "  config.values = {\n    :github => { authorization: 'TOKEN-1' } # mine\n  }\nend\n"),
+              'config/apis/github.yml' => "github:\n  host: api.github.test\n  endpoints:\n    users:\n")
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to include(":github => { authorization: 'TOKEN-1' }, # mine\n    billing: { variables: {\n")
+      boot
+      stub_request(:get, 'https://api.github.test/users').to_return(status: 200, body: '[]', headers: json)
+      ApiRecipes.github.users.run
+      expect(WebMock).to have_requested(:get, 'https://api.github.test/users').with(headers: { 'Authorization' => 'TOKEN-1' })
+    end
+
+    it 'does not write a second entry for an api that config.values has, however its name is written' do
+      [":billing => { authorization: 'T' }", "'billing': { authorization: 'T' }", "billing: { authorization: 'T' }"].each do |entry|
+        FileUtils.rm_rf(Dir.children('.'))
+        project('config/initializers/api_recipes.rb' => initializer.sub("end\n", "  config.values = {\n    #{entry}\n  }\nend\n"))
+        before = snapshot
+        code, _, err = convert('config/apis/billing.yml.erb')
+        expect(code).to eq(1)
+        expect(err).to include('config.values already has billing')
+        expect(snapshot).to eq(before)
+      end
+    end
+
+    it 'adds its lines at the end of the block, whatever the block holds' do
+      body = "  if ENV['OFFLINE']\n  config.print_urls = true\nend\n  TEXT = <<~T\n    end\n  T\n  # config.recipes_paths = [] # later\n"
+      project('config/initializers/api_recipes.rb' => initializer.sub("end\n", "#{body}end\n"))
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to end_with("  # config.recipes_paths = [] # later\n  config.values = {\n#{initializer_text[/    billing: .*?\.compact \}\n/m]}  }\n" \
+                                           "  config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]\nend\n")
+      boot
+      expect(ApiRecipes.apis).to eq([:billing])
+    end
+
+    it 'changes nothing when the block of configure has a rescue, or assigns the values only sometimes' do
+      [["end\n", "rescue StandardError\n  nil\nend\n", 'has a rescue or an ensure'],
+       ["end\n", "  config.values = { a: {} } if ENV['A']\nend\n", 'config.values is assigned where the block does not always run it'],
+       ["end\n", "  config.recipes_paths = OTHER\nend\n", 'config.recipes_paths is assigned at line 3 in a way this command cannot read']].each do |from, to, reason|
+        FileUtils.rm_rf(Dir.children('.'))
+        project('config/initializers/api_recipes.rb' => initializer.sub(from, to))
+        before = snapshot
+        expect(convert('config/apis/billing.yml.erb')).to match([1, /What to do by hand/, /#{Regexp.escape(reason)}/])
+        expect(snapshot).to eq(before)
+      end
+    end
+
+    it 'keeps both changes when configure and the declaration are in one file' do
+      setup = "class Client\n  include ApiRecipes\n  api :billing\nend\n\nApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)]\nend\n"
+      project('config/initializers/api_recipes.rb' => setup, 'app/models/invoice.rb' => "class Invoice\nend\n")
+      code, out, = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(0)
+      expect(out).to include('edited   config/initializers/api_recipes.rb: recipes_paths and config.values, and verify_with on the declaration of the api')
+      expect(initializer_text).to include('api :billing, verify_with: :expected_response?', 'config.values = {', 'config.recipes_paths = ')
+    end
+
+    it 'takes the old file out of the list given to apis_files_paths, on one line or on its own line' do
+      ["config.apis_files_paths = [File.expand_path('../apis/billing.yml.erb', __dir__), 'config/apis/other.yml']",
+       "config.apis_files_paths = [\n    File.expand_path('../apis/billing.yml.erb', __dir__),\n    'config/apis/other.yml'\n  ]"].each do |assignment|
+        FileUtils.rm_rf(Dir.children('.'))
+        project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  #{assignment}\nend\n",
+                'config/apis/other.yml' => "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+        expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+        expect(initializer_text).not_to include('billing.yml.erb')
+        boot
+        expect(ApiRecipes.apis).to contain_exactly(:billing, :other)
+      end
+    end
+
+    it 'changes nothing when the old file is named somewhere it cannot take it out of' do
+      project('lib/loader.rb' => "TEXT = File.read('config/apis/billing.yml.erb')\n")
+      before = snapshot
+      code, _, err = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(1)
+      expect(err).to include('lib/loader.rb:1 names billing.yml.erb, which would be deleted')
+      expect(snapshot).to eq(before)
+    end
+
+    it 'changes nothing when another file describes the api too, or when git would ignore the recipe' do
+      project('config/apis/billing_override.yml' => "billing:\n  host: o.test\n  endpoints:\n    a:\n")
+      before = snapshot
+      expect(convert('config/apis/billing.yml.erb')).to match([1, /What to do by hand/, /billing is described in config\/apis\/billing_override.yml too/])
+      expect(snapshot).to eq(before)
+      FileUtils.rm_rf(Dir.children('.'))
+      project('.gitignore' => "config/api_recipes/\n")
+      before = snapshot
+      expect(convert('config/apis/billing.yml.erb')).to match([1, /What to do by hand/, /would be ignored by git/])
+      expect(snapshot).to eq(before)
+    end
+
+    it 'puts every file back when a write fails halfway, and says so' do
+      project
+      before = snapshot
+      allow(File).to receive(:delete).and_wrap_original do |original, path|
+        raise Errno::EACCES if path.end_with?('billing.yml.erb')
+
+        original.call(path)
+      end
+      code, _, err = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(2)
+      expect(err).to include('the project could not be changed (EACCES): every file was put back as it was')
+      expect(snapshot).to eq(before)
+    end
+
+    it 'changes nothing when a file it would write cannot be written' do
+      project
+      File.chmod(0o444, 'app/models/invoice.rb')
+      code, out, = convert('config/apis/billing.yml.erb')
+      expect(code).to eq(0)
+      expect(out).to include('Left to you')
+      FileUtils.rm_rf('config/api_recipes')
+      git('checkout', '-q', '.')
+      File.chmod(0o444, 'config/initializers/api_recipes.rb')
+      before = snapshot
+      expect(convert('config/apis/billing.yml.erb').first).to eq(1)
+      expect(snapshot).to eq(before)
+    ensure
+      File.chmod(0o644, 'app/models/invoice.rb', 'config/initializers/api_recipes.rb')
+    end
+
+    it 'gives as text a true or a number that was the value of what is named like a credential' do
+      project('config/apis/billing.yml.erb' => billing.sub("  endpoints:\n", "  default_params:\n    tokenize: true\n    session_ttl: 30\n  endpoints:\n"))
+      expect(convert('config/apis/billing.yml.erb').first).to eq(0)
+      expect(initializer_text).to include('tokenize: "true"', 'session_ttl: "30"')
+      boot
+      expect(ApiRecipes.billing.invoices.show(7).url.to_s).to eq('https://billing.example.test/invoices/7')
+    end
+
+    it 'takes a file given with its whole path, and an api whose name is not a Ruby name' do
+      project('config/apis/my-api.yml.erb' => "my-api:\n  host: <%= ENV['H'] || 'my.example.test' %>\n  endpoints:\n    ping:\n",
+              'config/apis/billing.yml.erb' => "billing:\n  host: b.example.test\n  endpoints:\n    ping:\n")
+      expect(convert(File.join(@root, 'config/apis/my-api.yml.erb')).first).to eq(0)
+      expect(initializer_text).to include("\"my-api\": { variables: {\n")
+      boot
+      expect(ApiRecipes[:'my-api'].ping.url.to_s).to eq('https://my.example.test/ping')
+    end
+
+    it 'answers with one line to what it did not foresee' do
+      project
+      allow_any_instance_of(ApiRecipes::CLI::Convert::Migration).to receive(:call).and_raise('boom with a value')
+      expect(convert('config/apis/billing.yml.erb')).to eq([1, '', "convert failed (RuntimeError): this is a defect of api_recipes, not of the file\n"])
+    end
   end
 
   it 'with --to writes the recipe alone and leaves the project as it is' do

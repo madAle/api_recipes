@@ -40,43 +40,107 @@ module ApiRecipes
         out.puts
       end
 
-      # The one block `ApiRecipes.configure do |config| ... end` of a text.
+      # Ruby read as a tree, never run. nil when the text is not valid Ruby.
+      def self.tree(text)
+        require 'prism'
+        result = Prism.parse(text)
+        result.success? ? result.value : nil
+      end
+
+      # Every node of a tree for which the block is true.
+      def self.nodes(node, found = [], &wanted)
+        return found if node.nil?
+
+        found << node if wanted.call(node)
+        node.compact_child_nodes.each { |child| nodes(child, found, &wanted) }
+        found
+      end
+
+      # text with each [from, to, replacement] applied; from and to count
+      # bytes, as the tree does.
+      def self.edited(text, edits)
+        bytes = text.b
+        edits.sort_by { |from, _, _| -from }.each { |from, to, replacement| bytes[from...to] = replacement.b }
+        bytes.force_encoding(Encoding::UTF_8)
+      end
+
+      # The one call `ApiRecipes.configure do |config| ... end` of a text, read
+      # from its tree: a comment or a string that looks like one is not one.
       class ConfigureBlock
-        PATTERN = /^([ \t]*)ApiRecipes\.configure do \|([a-z_]\w*)\|[ \t]*$/
+        # first, last: the lines of the call and of the end of its block,
+        # counted from 1. problem: why the block cannot be edited, or nil.
+        attr_reader :config, :first, :last, :problem, :call
 
-        # first, last: the lines of `do` and of `end`, counted from 1.
-        attr_reader :indent, :config, :first, :last
-
-        # nil unless text has exactly one such block, with its end.
+        # nil unless text is valid Ruby with exactly one such call.
         def self.in(text)
-          return nil unless text && text.scan(PATTERN).size == 1
-
-          lines = text.lines
-          start = lines.index { |line| PATTERN.match?(line) }
-          indent, config = PATTERN.match(lines[start]).captures
-          finish = (start + 1...lines.size).find { |index| lines[index].match?(/\A#{Regexp.escape(indent)}end[ \t]*\r?\n?\z/) }
-          finish && new(lines, start, finish, indent, config)
+          tree = text && Code.tree(text)
+          calls = tree ? Code.nodes(tree) { |node| configure?(node) } : []
+          calls.size == 1 ? new(text, calls.first) : nil
         end
 
-        def initialize(lines, start, finish, indent, config)
-          @lines = lines
-          @indent = indent
-          @config = config
-          @first = start + 1
-          @last = finish + 1
+        def self.configure?(node)
+          node.is_a?(Prism::CallNode) && node.name == :configure && node.receiver.is_a?(Prism::ConstantReadNode) &&
+            node.receiver.name == :ApiRecipes
         end
 
-        # The lines between do and end, each with its number.
-        def body = (@first...@last - 1).map { |index| [index + 1, @lines[index].chomp] }
+        def initialize(text, call)
+          @text = text
+          @lines = text.lines
+          @call = call
+          block = call.block
+          parameters = block.is_a?(Prism::BlockNode) && block.parameters.is_a?(Prism::BlockParametersNode) ? block.parameters.parameters : nil
+          names = parameters ? parameters.requireds : []
+          @first = call.location.start_line
+          @last = block.is_a?(Prism::BlockNode) ? block.closing_loc.start_line : @first
+          @config = names.size == 1 && names.first.respond_to?(:name) ? names.first.name.to_s : nil
+          @statements = block.is_a?(Prism::BlockNode) && block.body.is_a?(Prism::StatementsNode) ? block.body.body : []
+          @problem = problem_of(block)
+        end
+
+        # The statements of the block that assign config.name.
+        def assignments(name)
+          @statements.select do |node|
+            node.is_a?(Prism::CallNode) && node.name == :"#{name}=" && node.receiver.is_a?(Prism::LocalVariableReadNode) &&
+              node.receiver.name.to_s == @config
+          end
+        end
+
+        # Whether config.name is assigned anywhere in the block, also where
+        # the block does not always run it.
+        def assigned_anywhere?(name)
+          Code.nodes(@call.block) { |node| node.is_a?(Prism::CallNode) && node.name == :"#{name}=" }.any?
+        end
 
         # The line that assigns config.name, counted from 1, or nil.
-        def line_of(name) = body.find { |_, line| line.match?(/\A\s*#{@config}\.#{name}\b/) }&.first
+        def line_of(name) = assignments(name).first&.location&.start_line
 
-        # The whole block as text lines, without the lines numbered in
-        # without and with added before its end, indented as the body is.
+        # The indentation of the statements of the block.
+        def indent
+          line = @statements.empty? ? nil : @lines[@statements.first.location.start_line - 1]
+          line ? line[/\A[ \t]*/] : "#{@lines[@last - 1][/\A[ \t]*/]}  "
+        end
+
+        # Where a new statement goes: the byte at which the line of the end
+        # of the block starts.
+        def end_offset = @call.block.closing_loc.start_offset - @call.block.closing_loc.start_column
+
+        # The whole call as lines of text, without the lines numbered in
+        # without and with added before its end, indented as the block is.
         def lines(added = [], without: [])
-          kept = body.reject { |number, _| without.include?(number) }.map(&:last)
-          [@lines[@first - 1].chomp, *kept, *added.map { |line| line.empty? ? '' : "#{@indent}  #{line}" }, @lines[@last - 1].chomp]
+          kept = (@first...@last - 1).reject { |index| without.include?(index + 1) }.map { |index| @lines[index].chomp }
+          [@lines[@first - 1].chomp, *kept, *added.map { |line| line.empty? ? '' : "#{indent}#{line}" }, @lines[@last - 1].chomp]
+        end
+
+        private
+
+        def problem_of(block)
+          return 'is not given a block with do and end' unless block.is_a?(Prism::BlockNode)
+          return 'does not take its one parameter, as in `do |config|`' unless @config
+          return 'is written on one line' if @first == @last
+          return 'has a rescue or an ensure' unless block.body.nil? || block.body.is_a?(Prism::StatementsNode)
+          return 'does not end with a line of its own' unless @lines[@last - 1].strip.match?(/\A(end|\})\z/)
+
+          nil
         end
       end
     end

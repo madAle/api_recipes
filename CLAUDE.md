@@ -126,11 +126,14 @@ classes are built once, by `configure`.
   The recipe is checked with `Internals::Recipe` before it is written, and the
   file is created with `File::EXCL`.
 - `Convert::Migration` is the only code of the gem that edits or deletes a
-  file of a project. It works out every change before it writes one, and
-  writes none when one is not possible. It adds lines only to a file that git
-  tracks, and deletes a file or takes lines out of it only when git has it
-  committed as it is now. The file that calls `configure` is parsed, never
-  run, before it is written. When it changes the project it prints nothing of
+  file of a project. It reads Ruby as a tree (`Code.tree`, Prism, a default
+  gem), never with a regular expression on lines, and never runs it. It works
+  out every change in memory, each on the text the changes before it left,
+  writes none when one is not possible or when a result is not valid Ruby, and
+  puts every file back when a write fails. It adds lines only to a plain file
+  that git tracks (`H` in `git ls-files -v`), and deletes a file or takes
+  lines out of it only when git has it committed as it is now. `git` is run
+  with `Migration::GIT`, so that it runs no program the repository names. When it changes the project it prints nothing of
   what the file holds; when it does not, it prints the steps and the code to
   paste.
 - A portable recipe is written by someone else. A file of `recipes_paths`, and

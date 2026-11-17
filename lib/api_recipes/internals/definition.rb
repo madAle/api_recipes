@@ -195,7 +195,7 @@ module ApiRecipes
         def own(key) = @taken.key?(key) ? @taken[key] : @own[key]
 
         def inspect
-          "#<#{self.class} #{full_name} #{verb.to_s.upcase} #{full_path}>"
+          "#<#{self.class} #{full_name} #{OptionValue.shown_verb(verb)} #{full_path}>"
         end
 
         def pretty_print(printer)
