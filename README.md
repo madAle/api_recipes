@@ -944,7 +944,7 @@ called.
 
     Changed in the project
       created  config/api_recipes/billing.recipe.yml, with its line in config/api_recipes/recipes.lock
-      edited   config/initializers/api_recipes.rb: recipes_paths and config.values
+      edited   config/initializers/api_recipes.rb: recipes_paths and config.values; apis_files_paths, which loads nothing now, is gone
       edited   app/models/invoice.rb: verify_with on the declaration of the api
       deleted  config/apis/billing.yml.erb
 
@@ -961,7 +961,6 @@ the code of each tag is moved, as it is written, to `config.values`.
 
 ```ruby
 ApiRecipes.configure do |config|
-  config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)]
   config.values = {
     billing: { variables: {
       billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
@@ -1004,7 +1003,10 @@ What the command does:
   before you share it.
 - **The old description is removed**: the file is deleted, or only the lines
   of that API when it describes others, because a recipe never takes the place
-  of an API that another source defines.
+  of an API that another source defines. When `config.apis_files_paths` loads
+  no file after that, its lines are taken out, if the command can tell from
+  patterns and names written as text and git has the file as it is now;
+  otherwise it tells you that you can take them out.
 - **`verify_with`**, which a recipe cannot carry, is given to each `api :name`
   that a class or a module declares. One that a tag gave, or that an endpoint
   had, is left to you, as it is when one of the declarations gives its options
@@ -1691,8 +1693,22 @@ github.users.show(username)                            GET    https://api.github
 github.repos.issues(owner, repo).create                POST   https://api.github.com/repos/:owner/:repo/issues
 ```
 
-A file that contains ERB is read only with `--erb`, because that runs the code
-in it.
+With no file, in the root of a project, it lists the calls of every API of the
+project: it finds the files that describe an API, and the installed recipes, as
+`api_recipes upgrade` does.
+
+```
+$ bundle exec api_recipes routes
+shop.orders                POST  https://shop.example.com/orders
+billing.invoices           GET   {erb}://{erb}/api/v1/invoices
+billing.invoices.show(id)  GET   {erb}://{erb}/api/v1/invoices/:id
+config/apis/billing.yml.erb: what an ERB tag gives is shown as {erb}; --erb evaluates the file, which runs the code in it
+```
+
+A file that contains ERB is not run: what a `<%= ... %>` tag gives is shown as
+the variable `{erb}`. `--erb` evaluates the file instead, which runs the code
+in it. A file where a tag gives a name, or where a `<% ... %>` tag decides
+which lines exist, is listed only with `--erb`.
 
 ## Recipes
 

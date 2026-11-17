@@ -50,11 +50,11 @@ describe 'api_recipes routes' do
     end
   end
 
-  it 'evaluates a file with ERB only when asked' do
+  it 'evaluates a file with ERB only when asked, and shows a tag as a variable otherwise' do
     with_description("svc:\n  host: <%= 'erb' %>.example.test\n  endpoints: {ping: }\n", 'svc.yml.erb') do |path|
       code, out, err = run_cli('routes', path)
-      expect([code, out]).to eq([1, ''])
-      expect(err).to match(/svc\.yml\.erb: contains ERB: run again with --erb/)
+      expect([code, out]).to eq([0, "svc.ping  GET  https://{erb}.example.test/ping\n"])
+      expect(err).to match(/svc\.yml\.erb: what an ERB tag gives is shown as \{erb\}/)
       expect(run_cli('routes', path, '--erb')).to eq([0, "svc.ping  GET  https://erb.example.test/ping\n", ''])
     end
   end
@@ -75,7 +75,7 @@ describe 'api_recipes routes' do
   end
 
   it 'exits with 2 for wrong arguments and for a file it cannot read' do
-    expect(run_cli('routes').values_at(0, 1)).to eq([2, ''])
+    expect(Dir.mktmpdir { |dir| Dir.chdir(dir) { run_cli('routes') } }.values_at(0, 1)).to eq([2, ''])
     expect(run_cli('routes', recipe, '--bogus').first).to eq(2)
     code, out, err = run_cli('routes', '/nonexistent/recipe.yml', recipe)
     expect(code).to eq(2)
@@ -90,7 +90,7 @@ describe 'api_recipes routes' do
   end
 
   it 'is described by the help' do
-    expect(run_cli('--help')[1]).to include('routes [--erb] FILE...')
+    expect(run_cli('--help')[1]).to include('routes [--erb] [FILE]...')
   end
 
   it 'lists the calls of a portable recipe, read as data only and without its lock' do

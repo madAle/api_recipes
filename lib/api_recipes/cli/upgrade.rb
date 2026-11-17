@@ -76,8 +76,6 @@ module ApiRecipes
       }.freeze
       # Code longer than this is not copied into the code to paste.
       MAX_CODE = 300
-      ERB_COMMENT = /<%#.*?%>/m
-      ERB_OUTPUT = /<%=.*?%>/m
 
       SILENT_CHANGES = [
         'path parameters encoded by hand: %2F would become %252F, remove the encoding',
@@ -474,8 +472,8 @@ module ApiRecipes
       # the value of each output tag becomes ERB_VALUE. A tag that is not an
       # output tag can decide which lines the file has, so it is not guessed.
       def without_erb(file, text)
-        plain = text.gsub(ERB_COMMENT, '').gsub(ERB_OUTPUT, @erb_value)
-        return plain.gsub('<%%', '<%') unless plain.gsub('<%%', '').include?('<%')
+        plain = Tags.replaced(text, @erb_value)
+        return plain if plain
 
         raise RecipeFileError.new(file, 'contains ERB that decides the structure of the file (<% ... %>): run again ' \
                                        'with --erb to evaluate it (this executes the code in the file)')

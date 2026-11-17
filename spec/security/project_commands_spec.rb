@@ -87,6 +87,19 @@ describe 'The commands that read the files of a project' do
     end
   end
 
+  it 'routes never runs the ERB of a file, found or given, without --erb' do
+    write('Gemfile', "gem 'api_recipes'\n")
+    write('config/apis/billing.yml', api.sub('billing.example.test', "<%= #{touch}; 'h.test' %>"))
+    write('config/apis/other.yml.erb', "<% #{touch} %>\n<%# #{touch} %>\n#{api.sub('billing:', 'other:')}")
+    code, out, = run_cli('routes')
+    expect(File.exist?(marker)).to be(false)
+    expect([code, out]).to eq([1, "billing.invoices  GET  https://{erb}/invoices\n"])
+    expect(run_cli('routes', 'config/apis/billing.yml').first).to eq(0)
+    expect(File.exist?(marker)).to be(false)
+    run_cli('routes', '--erb', 'config/apis/billing.yml')
+    expect(File.exist?(marker)).to be(true)
+  end
+
   describe 'convert' do
     it 'never runs the ERB of the file, and has no option that does' do
       write('billing.yml', api.sub('billing.example.test', "<%= #{touch}; 'h.test' %>").sub('Accept: application/json', "Accept: application/json # <%# #{touch} %>"))

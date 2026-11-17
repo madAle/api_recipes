@@ -1,5 +1,12 @@
 ## Unreleased
 
+- `api_recipes routes` needs no file: in the root of a project it lists the
+  calls of every file that describes an api and of every installed recipe.
+  What an ERB tag gives is shown as the variable `{erb}`, without running the
+  tag; `--erb` still evaluates the file.
+- `api_recipes convert` takes `config.apis_files_paths` out of the block of
+  `configure` when the command can tell that it loads no file after the
+  description it moved; otherwise it says that the lines can go.
 - `api_recipes install` and `update` say `(NAME and the endpoints it contains)`
   beside a header or a parameter that an endpoint adds. The documents describe
   `default_headers` and `default_params` of an endpoint as what a request finds
