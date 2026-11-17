@@ -5,6 +5,7 @@ require 'fileutils'
 require 'api_recipes'
 require 'api_recipes/version'
 require 'api_recipes/cli/code'
+require 'api_recipes/cli/tags'
 require 'api_recipes/cli/upgrade'
 require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
@@ -37,9 +38,11 @@ module ApiRecipes
             --server chooses the entry of servers, counted from 0. Nothing in FILE is run, no
             other file is read and the network is not used.
             Exits with 1 if the description cannot be imported, 2 if the arguments are wrong.
-        routes [--erb] FILE...
+        routes [--erb] [FILE]...
             Lists the calls that the recipes in each FILE offer, with the verb and the address.
-            A file that contains ERB is evaluated only with --erb: this runs the code in it.
+            Without a FILE, in the root of a project: the calls of every file that describes
+            an api and of every installed recipe. What an ERB tag gives is shown as {erb},
+            without running the tag; --erb evaluates the file: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
         convert [--name NAME] [--version VERSION] [--to DIR] FILE
@@ -281,12 +284,19 @@ module ApiRecipes
         parser = OptionParser.new
         parser.on('--erb') { erb = true }
         files = parser.parse(args)
-        if files.empty?
-          err.puts 'routes needs at least one configuration file'
+        return Routes.new(files, erb: erb).report(out, err) unless files.empty?
+
+        # No file given: the apis of the project in the current directory.
+        unless project_root?
+          err.puts 'routes needs at least one configuration file, or to be run in the root of a project'
           return 2
         end
-
-        Routes.new(files, erb: erb).report(out, err)
+        found = Upgrade::Project.new.config_files
+        if found.empty?
+          err.puts 'no file that describes an api was found in this project: name the files to read'
+          return 1
+        end
+        Routes.new(found, erb: erb, project: true).report(out, err)
       rescue OptionParser::ParseError => e
         err.puts e.message
         2
