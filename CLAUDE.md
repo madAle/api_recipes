@@ -112,9 +112,12 @@ classes are built once, by `configure`.
   the ERB of a file: a tag is replaced by a token before the text is parsed.
   `convert` has no option that evaluates ERB, because its result is meant for a
   shared repository: a header or a parameter that `Convert::CREDENTIAL` matches
-  is written as a variable, never with its value or with a default, and what
-  the command prints never holds the code of a tag or the value of a header or
-  of a parameter; every name of the file is shown with `Recipes::Summary.shown`.
+  is written as a variable, never with its value or with a default. The
+  messages of the command hold names, shown with `Recipes::Summary.shown`. The
+  code to paste that it prints when it does not change the project
+  (`Convert::Snippet`) is the one exception, decided by the maintainer: it
+  holds the code of the tags and the values written in the file, so that it
+  works when pasted, and leaves out only what `Snippet::UNSAFE` matches.
   The mark that stands for a tag is random, so that no file can write one.
   The recipe is checked with `Internals::Recipe` before it is written, and the
   file is created with `File::EXCL`.
@@ -123,8 +126,9 @@ classes are built once, by `configure`.
   writes none when one is not possible. It adds lines only to a file that git
   tracks, and deletes a file or takes lines out of it only when git has it
   committed as it is now. The file that calls `configure` is parsed, never
-  run, before it is written. The code of a tag goes to that file and never to
-  the terminal.
+  run, before it is written. When it changes the project it prints nothing of
+  what the file holds; when it does not, it prints the steps and the code to
+  paste.
 - A portable recipe is written by someone else. A file of `recipes_paths`, and
   what `install`, `update` and `check` read, is read only by
   `Internals::Recipe`: never with ERB, never with `YAML.safe_load` directly, and

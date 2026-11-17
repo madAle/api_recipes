@@ -97,7 +97,7 @@ describe 'The commands that read the files of a project' do
       expect(File.exist?(marker)).to be(false)
     end
 
-    it 'never copies a credential into the recipe or onto the terminal: written in the file, or as the default of a tag' do
+    it 'never copies a credential into the recipe, or among the changes it lists: written in the file, or as the default of a tag' do
       secrets = %w[written-header-secret written-param-secret default-of-a-tag bearer-secret]
       write('billing.yml', api.sub("    Accept: application/json\n", <<~YAML.gsub(/^/, '    ')))
         Accept: application/json
@@ -109,7 +109,8 @@ describe 'The commands that read the files of a project' do
       code, out, err = run_cli('convert', 'billing.yml')
       expect(code).to eq(0)
       written = File.read('billing.recipe.yml')
-      secrets.each { |secret| expect(written + out + err).not_to include(secret) }
+      listed = out[/What changed.*?(?=\n\nIn the file)/m]
+      secrets.each { |secret| expect(written + listed + err).not_to include(secret) }
       expect(written).to include("X-Api-Key: \"{x_api_key}\"", 'access_token: "{access_token}"')
     end
 
@@ -117,7 +118,7 @@ describe 'The commands that read the files of a project' do
       write('billing.yml', api.sub("    invoices:\n", "    invoices:\n      default_headers:\n        X-Secret: endpoint-secret\n"))
       code, out, err = run_cli('convert', 'billing.yml')
       expect(code).to eq(0)
-      expect(File.read('billing.recipe.yml') + out + err).not_to include('endpoint-secret')
+      expect(File.read('billing.recipe.yml') + err).not_to include('endpoint-secret')
     end
 
     it 'gives no default to a credential, whatever else reads the same environment variable, before or after it' do
@@ -127,7 +128,7 @@ describe 'The commands that read the files of a project' do
         write('billing.yml', api.sub('Accept: application/json', "#{first}: #{tag}\n    #{second}: #{tag}"))
         code, out, err = run_cli('convert', '--to', '.', 'billing.yml')
         expect(code).to eq(0)
-        expect(File.read('billing.recipe.yml') + out + err).not_to include('default-of-a-tag')
+        expect(File.read('billing.recipe.yml') + err).not_to include('default-of-a-tag')
       end
     end
 
@@ -230,6 +231,23 @@ describe 'The commands that read the files of a project' do
       expect(File.exist?(marker)).to be(false)
       expect(out + err + File.read('config/api_recipes/billing.recipe.yml')).not_to match(/written-secret|MARKER|File\.write/)
       expect(File.read('config/initializers/api_recipes.rb')).to include('x_api_key: "written-secret"', 'File.write')
+    end
+
+    it 'gives the code to paste whole, so that it works, and leaves out only what a terminal would obey' do
+      write('Gemfile', "gem 'api_recipes'\n")
+      write('config/initializers/api_recipes.rb', initializer)
+      write('config/apis/billing.yml', api.sub('billing.example.test', "<%= ENV['H'] || 'host.example.test' %>").sub('Accept: application/json', <<~YAML.gsub(/^/, '    ').strip))
+        X-Api-Key: written-value
+        X-Signature: <%= ENV.fetch('SIG', 'default-value') %>
+        X-Trace: "<%= ENV['T'] + '\u202E' %>"
+        X-Token: "written\\e[2Jvalue"
+      YAML
+      _, out, err = run_cli('convert', 'config/apis/billing.yml')
+      expect(out).to include("h: (ENV['H'] || 'host.example.test'),", 'x_api_key: "written-value",', "sig: (ENV.fetch('SIG', 'default-value')),",
+                             'x_trace: nil, # paste here the code of the tag for default_headers.X-Trace, at line 6 of config/apis/billing.yml',
+                             'x_token: "written\\e[2Jvalue"')
+      expect(out + err).not_to match(/\e|\u202E/)
+      expect(Dir['config/api_recipes/*']).to eq([])
     end
 
     it 'deletes nothing that git could not bring back: a file with changes that are not committed stops it' do

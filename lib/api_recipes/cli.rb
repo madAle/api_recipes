@@ -9,6 +9,7 @@ require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
 require 'api_recipes/cli/recipes'
 require 'api_recipes/cli/convert'
+require 'api_recipes/cli/convert/snippet'
 require 'api_recipes/cli/convert/migration'
 
 module ApiRecipes
@@ -45,8 +46,8 @@ module ApiRecipes
             moves the code of each ERB tag to config.values in the file that calls
             ApiRecipes.configure, removes the old description, and lists every file it
             changed. It changes files only when git can undo it, and all at once or not at
-            all. With --to DIR it writes the recipe alone in DIR and leaves the project as it
-            is. Nothing in FILE is run: a tag becomes a variable. A header or a parameter named
+            all: when it cannot, it gives the steps and the code to paste. With --to DIR it
+            writes the recipe alone in DIR and leaves the project as it is. Nothing in FILE is run: a tag becomes a variable. A header or a parameter named
             like a credential is never copied into the recipe. --name chooses the api when
             FILE describes several; --version is the version of the recipe (1.0.0).
             Exits with 1 if FILE cannot become a recipe or the project cannot be changed
@@ -204,7 +205,7 @@ module ApiRecipes
         path = directory == '.' ? file_name : File.join(directory, file_name)
         return 2 unless place_recipe(result.text, directory, path, err)
 
-        Convert.report(result, files.first, path).each { |line| out.puts line }
+        Convert.report(result, files.first, path, out)
         0
       rescue Convert::Refused => e
         e.reasons.each { |reason| err.puts reason }

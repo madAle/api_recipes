@@ -1002,9 +1002,8 @@ What the command does:
   of an API that another source defines.
 - **`verify_with`**, which a recipe cannot carry, is written on the line where
   a class declares the API.
-- **What it prints never holds the code of a tag or the value of a header or
-  of a parameter.** A message about an option that is not valid, such as a
-  protocol that is not one, shows what was written, as `configure` does.
+- **When it changes the project it prints names and paths**, nothing of what
+  the file holds.
 
 It changes your files only when that is safe, and all at once or not at all:
 
@@ -1015,16 +1014,37 @@ It changes your files only when that is safe, and all at once or not at all:
   one, written as `ApiRecipes.configure do |config|`, and when `config.values`
   is not assigned yet or was written by this command. The result is read as
   Ruby, without running it, before it is written.
-- When a step is not possible, nothing is written and the command says why.
-  What it could not do by itself is listed under `Left to you`: a
-  `verify_with` when no class declares the API, or on an endpoint.
+- When a step is not possible, nothing is written, the command says why, and
+  it gives the steps to do by hand with the code to paste: the commands that
+  write and install the recipe, the lines for the block of
+  `ApiRecipes.configure` with the file and the line, the line that gives
+  `verify_with`, and what to remove.
+
+      2. In config/initializers/api_recipes.rb, inside the block of ApiRecipes.configure (line 1), add:
+
+          config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
+          config.values = {
+            billing: { variables: {
+              billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
+              billing_port: (ENV['BILLING_PORT'] || 443),
+              billing_client: ENV['BILLING_CLIENT']
+            }.compact }
+          }
+
+  The code is what the file holds, the code of each tag and each value that
+  was written, so that what you paste works; on a terminal it is shown in
+  colours. Only what a terminal would obey is left out, with a comment that
+  says the line to copy it from.
+- What it could not do by itself after changing the project is listed under
+  `Left to you`: a `verify_with` when no class declares the API, or on an
+  endpoint.
 - A tag that is not `<%= ... %>`, that gives the name of an option, or that
   gives a part of the protocol, of the port or of another such option, stops
   the command, which says the line.
 
 To write the recipe alone, as for the repository of the recipes, name a
-folder: the project is not touched, and the command says which variables the
-application gives.
+folder: the project is not touched, and the command gives the code for the
+block of `ApiRecipes.configure`.
 
     $ api_recipes convert config/apis/billing.yml.erb --to ../api-recipes/recipes
 

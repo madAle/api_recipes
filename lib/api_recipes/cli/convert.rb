@@ -29,7 +29,9 @@ module ApiRecipes
       # { name => Ruby code } for every variable the conversion made: the code
       # of the tag it comes from, or the value that was written, as a literal.
       # verify_with: where one was left out, as [place, method name].
-      Result = Data.define(:name, :version, :text, :calls, :changes, :variables, :defaults, :expressions, :verify_with)
+      # refs: { name => { place:, line:, credential:, literal: } }, where the
+      # value of each of those variables is in the file.
+      Result = Data.define(:name, :version, :text, :calls, :changes, :variables, :defaults, :expressions, :verify_with, :refs)
 
       Tag = Data.define(:line, :env, :default, :code)
 
@@ -72,6 +74,7 @@ module ApiRecipes
         @verify_with = []
         @secret = []
         @given = {}
+        @refs = {}
         name, options = api(parsed(plain(source)))
         @name = name
         declared = options['variables']
@@ -85,30 +88,27 @@ module ApiRecipes
         body['variables'] = (body['variables'] || {}).merge(@variables) unless @variables.empty?
         text = Text.new(name, ordered(body, API_ORDER)).to_yaml
         Result.new(name: name, version: @version, text: text, calls: checked(name, text), changes: @changes,
-                   variables: env_of(false).merge(@given), defaults: env_of(true), expressions: @expressions, verify_with: @verify_with)
+                   variables: env_of(false).merge(@given), defaults: env_of(true), expressions: @expressions, verify_with: @verify_with,
+                   refs: @refs.to_h { |variable, ref| [variable, ref.merge(credential: ref[:credential] || @secret.include?(variable))] })
       end
 
       # What is said after the recipe is written in path: what changed from
       # the file, and what the application gives from now on. It holds names
       # only, never a value of the file.
-      def self.report(result, source, path)
+      def self.report(result, source, path, out)
         calls = result.calls
-        lines = ["#{result.name} #{result.version} is written in #{path}: #{calls} call#{'s' unless calls == 1}"]
+        out.puts "#{result.name} #{result.version} is written in #{path}: #{calls} call#{'s' unless calls == 1}"
         unless result.changes.empty?
-          lines << '' << "What changed from #{Recipes::Summary.shown(source, 100)}"
-          lines.concat(result.changes.map { |change| "  #{change}" })
+          out.puts '', "What changed from #{Recipes::Summary.shown(source, 100)}"
+          result.changes.each { |change| out.puts "  #{change}" }
         end
-        given = ->(variables) { variables.map { |name, env| "#{name}: #{env ? "ENV.fetch('#{env}')" : "'...'"}" } }
-        unless result.variables.empty?
-          lines << '' << 'In the application, the variables that have no default:'
-          lines << "  config.values = { #{result.name}: { variables: { #{given.call(result.variables).join(', ')} } } }"
-        end
+        out.puts '', 'In the file that calls ApiRecipes.configure, inside its block:'
+        show(out, Snippet.new(result, source).lines)
         unless result.defaults.empty?
-          lines << '' << 'Variables with a default, to give only where the value is another:'
-          lines.concat(given.call(result.defaults).map { |one| "  #{one}" })
+          out.puts "Variables that have a default in the recipe: #{result.defaults.keys.join(', ')}. .compact leaves out " \
+                   'the ones whose code gives nil.', ''
         end
-        lines << '' << "Read the file, then check it: api_recipes check #{path}"
-        lines
+        out.puts "Read the file, then check it: api_recipes check #{path}"
       end
 
       # The apis that text describes, with every ERB tag read as the same
@@ -275,6 +275,7 @@ module ApiRecipes
           refuse("variables.#{shown(name)}.default: an ERB tag gives a part of the value: a recipe needs it written") unless match
           @expressions[name.to_s] = @tags[match[1].to_i].code
           @given[name.to_s] = @tags[match[1].to_i].env
+          @refs[name.to_s] = { place: "variables.#{name}.default", line: @tags[match[1].to_i].line, credential: false }
           @changes << "variables.#{shown(name)}.default: came from an ERB tag: the application gives the variable from now on"
           [name, spec.reject { |key, _| key == 'default' }]
         end
@@ -341,11 +342,12 @@ module ApiRecipes
       def credential(content, where, name)
         tags = content.to_s.scan(@token).flatten.map { |index| @tags[index.to_i] }
         if tags.size == 1 && content.to_s.match?(/\A#{@token.source}\z/)
-          variable = variable_for(tags.first, name, default: false)
+          variable = variable_for(tags.first, name, where, default: false)
           @changes << "#{shown(where)}: the ERB tag is now the variable {#{variable}}; the value is not in the recipe"
         else
           variable = declare(variable_name(name), nil, nil)
           @expressions[variable] ||= written(content)
+          @refs[variable] ||= { place: where, line: nil, credential: true, literal: true }
           @changes << "#{shown(where)}: looks like a credential: its value is not copied, it is now the variable {#{variable}}"
         end
         "{#{variable}}"
@@ -357,15 +359,16 @@ module ApiRecipes
 
         value.gsub(@token) do
           tag = @tags[Regexp.last_match(1).to_i]
-          variable = variable_for(tag, fallback, default: true)
+          variable = variable_for(tag, fallback, where, default: true)
           kept = @variables[variable].key?('default') ? ', with the default written in the tag' : ''
           @changes << "#{shown(where)}: the ERB tag is now the variable {#{variable}}#{kept}"
           "{#{variable}}"
         end
       end
 
-      def variable_for(tag, fallback, default:)
+      def variable_for(tag, fallback, where, default:)
         name = declare(variable_name(tag.env || fallback), tag.env, default ? tag.default : nil)
+        @refs[name] ||= { place: where, line: tag.line, credential: !default }
         # A variable that gives a credential has no default, also when the
         # same environment variable is read elsewhere with one.
         @secret << name unless default

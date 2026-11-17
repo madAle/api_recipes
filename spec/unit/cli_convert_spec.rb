@@ -167,8 +167,23 @@ describe 'api_recipes convert' do
     it 'says what to give in the application, by the names of the environment variables' do
       write('billing.yml.erb', with_erb)
       _, out, = run('convert', '--to', '.', 'billing.yml.erb')
-      expect(out).to include("config.values = { billing: { variables: { base_url: '...', billing_port: ENV.fetch('BILLING_PORT'), tenant: ENV.fetch('TENANT') } } }",
-                             "billing_host: ENV.fetch('BILLING_HOST')")
+      expect(out).to include(<<~TEXT)
+        In the file that calls ApiRecipes.configure, inside its block:
+
+            config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
+            config.values = {
+              billing: { variables: {
+                billing_host: (ENV.fetch('BILLING_HOST', 'billing.example.test')),
+                billing_port: ENV['BILLING_PORT'],
+                billing_protocol: (ENV.fetch("BILLING_PROTOCOL", "http")),
+                billing_timeout: (ENV.fetch('BILLING_TIMEOUT', 7)),
+                base_url: (Rails.application.config.x.billing_version),
+                tenant: ENV['TENANT']
+              }.compact }
+            }
+
+        Variables that have a default in the recipe: billing_host, billing_protocol, billing_timeout. .compact leaves out the ones whose code gives nil.
+      TEXT
     end
 
     it 'leaves to the application a default of a variable that a tag gave' do
@@ -177,7 +192,7 @@ describe 'api_recipes convert' do
       expect(code).to eq(0)
       expect(recipe['variables']).to eq('region' => { 'description' => 'where' })
       expect(out).to include('variables.region.default: came from an ERB tag: the application gives the variable from now on',
-                             "config.values = { billing: { variables: { region: ENV.fetch('REGION') } } }")
+                             "        region: (ENV.fetch('REGION', 'eu'))\n")
     end
 
     it 'refuses a tag that gives a part of an option that only a whole variable can give' do
@@ -234,7 +249,9 @@ describe 'api_recipes convert' do
       code, out, err = run('convert', 'billing.yml')
       expect(code).to eq(0)
       text = File.read('billing.recipe.yml')
-      expect(text + out + err).not_to match(/literal-secret-value|literal-token-value|literal-param-secret|default-client-secret/)
+      listed = out[/What changed.*?(?=\n\nIn the file)/m]
+      expect(text + listed + err).not_to match(/literal-secret-value|literal-token-value|literal-param-secret|default-client-secret/)
+      expect(out).to include('api_key_secret: "literal-secret-value",', "client: (ENV.fetch('CLIENT', 'default-client-secret')),")
       expect(recipe['default_headers']).to eq('Accept' => 'application/json', 'Api-Key-Client' => '{client}',
                                               'Api-Key-Secret' => '{api_key_secret}', 'Authorization' => '{authorization}')
       expect(recipe['default_params']).to eq('api_token' => '{api_token}', 'page' => 1)

@@ -21,7 +21,9 @@
   and lists what it changed; with `--to DIR` it writes the recipe alone. It
   runs nothing of the file, never copies a header or a parameter named like a
   credential into the recipe, checks the result as a portable recipe, changes
-  a file only when git can undo it, and changes everything or nothing.
+  a file only when git can undo it, and changes everything or nothing. When it
+  does not change the project it gives the steps to do by hand, with the code
+  to paste and where.
 - A file called `NAME.recipe.yml` that both `apis_files_paths` and
   `recipes_paths` name is left to `recipes_paths`, so that one pattern can
   match the old files and the recipes of one folder.

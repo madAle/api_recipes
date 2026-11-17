@@ -162,7 +162,7 @@ module ApiRecipes
           pairs = @result.expressions.map do |name, code|
             "#{indent}  #{name}: #{code.match?(SIMPLE_CODE) || code.match?(/\A("[^"#\\]*"|'[^'\\]*'|\d+)\z/) ? code : "(#{code})"}"
           end
-          ["#{indent}#{@result.name}: { variables: {\n", "#{pairs.join(",\n")}\n", "#{indent}}.compact }\n"]
+          ["#{indent}#{Snippet.new(@result, @source).key}: { variables: {\n", "#{pairs.join(",\n")}\n", "#{indent}}.compact }\n"]
         end
 
         # The lines of the block with the values of this api: in a new
@@ -295,9 +295,68 @@ module ApiRecipes
         def refused
           @err.puts "#{shown(@source)} can become a portable recipe, but the project was not changed:"
           @blocking.each { |reason| @err.puts "  - #{reason}" }
-          @err.puts "Nothing was written. `api_recipes convert #{shown(@source)} --to DIR` writes the recipe alone, " \
-                    'and says what the application gives.'
+          @err.puts 'Nothing was written.'
+          by_hand
           1
+        end
+
+        # What the command would have done, as steps with the code to paste.
+        def by_hand
+          recipe = File.join(@directory, "#{@result.name}#{Internals::Recipe::SUFFIX}")
+          @out.puts '', 'What to do by hand', '', '1. Write the recipe and install it:'
+          Convert.show(@out, ["bundle exec api_recipes convert #{shown(@source)} --to #{@directory}",
+                              "bundle exec api_recipes install #{recipe} --yes"], :shell)
+          configure_step
+          number = 3
+          @result.verify_with.each do |place, method|
+            next unless place == 'verify_with'
+
+            found = declaration_lines.first
+            @out.puts "#{number}. #{found ? "On the line that declares the api (#{shown(found[0])}:#{found[1] + 1})" : 'Where a class declares the api'}, give verify_with:"
+            Convert.show(@out, ["api :#{@result.name}, verify_with: #{Internals::Compiler::METHOD_NAME.match?(method) ? ":#{method}" : '...'}"])
+            number += 1
+          end
+          @out.puts "#{number}. Remove the old description: #{old_description}"
+        end
+
+        # The lines for the block of ApiRecipes.configure, with the file, the
+        # line and the name of the block parameter when there is one such file.
+        def configure_step
+          files = @project.ruby_files.select { |file| @project.text(file).to_s.match?(/\bApiRecipes\.configure\b/) }
+          text = files.size == 1 ? @project.text(files.first) : nil
+          match = text && text.scan(CONFIGURE).size == 1 ? CONFIGURE.match(text) : nil
+          unless match
+            @out.puts '2. In the file that calls ApiRecipes.configure, inside its block, add:'
+            return Convert.show(@out, Snippet.new(@result, @source).lines)
+          end
+
+          file = files.first
+          line = match.pre_match.count("\n") + 1
+          config = match[2]
+          recipes = text.match?(/\b#{config}\.recipes_paths\b/) ? nil : "Dir[File.expand_path('#{recipes_glob(file)}', __dir__)]"
+          snippet = Snippet.new(@result, @source, config: config, recipes: recipes)
+          values = text.lines.index { |one| one.match?(/\A\s*#{config}\.values\b/) }
+          if values && !@result.expressions.empty?
+            @out.puts "2. In #{shown(file)}, inside the block of ApiRecipes.configure (line #{line}), add this to the Hash that " \
+                      "#{config}.values is given at line #{values + 1}#{', and the line of recipes_paths' if recipes}:"
+            Convert.show(@out, snippet.entry + (recipes ? ['', "#{config}.recipes_paths = #{recipes}"] : []))
+          else
+            @out.puts "2. In #{shown(file)}, inside the block of ApiRecipes.configure (line #{line}), add:"
+            Convert.show(@out, snippet.lines)
+          end
+        end
+
+        def old_description
+          text = text_of(@source)
+          names = text ? Convert.shape(text).keys : [@result.name]
+          return "delete #{shown(@source)}" if names == [@result.name]
+
+          lines = text.lines
+          start = lines.index { |line| line.match?(/\A(['"]?)#{Regexp.escape(@result.name)}\1:/) }
+          finish = start && ((start + 1...lines.size).find { |index| lines[index].match?(/\A[^\s#]/) } || lines.size)
+          "take the lines of #{@result.name} out of #{shown(@source)}#{start ? " (lines #{start + 1} to #{finish})" : ''}"
+        rescue Refused, Psych::Exception
+          "take #{@result.name} out of #{shown(@source)}"
         end
 
         def report
@@ -312,6 +371,9 @@ module ApiRecipes
           unless @left.empty?
             @out.puts '', 'Left to you'
             @left.each { |one| @out.puts "  - #{one}" }
+            @result.verify_with.select { |place, method| place == 'verify_with' && Internals::Compiler::METHOD_NAME.match?(method) }.each do |_, method|
+              Convert.show(@out, ["api :#{@result.name}, verify_with: :#{method}"])
+            end
           end
           @out.puts '', 'Every change is in `git status` and `git diff`, and `git checkout` undoes it. Check the recipes with ' \
                         '`api_recipes check`, then start the application.'

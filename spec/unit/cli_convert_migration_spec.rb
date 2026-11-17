@@ -172,7 +172,7 @@ describe 'api_recipes convert, in a project' do
       before = snapshot
       code, out, err = convert('config/apis/billing.yml.erb')
       expect(code).to eq(1)
-      expect(out).to eq('')
+      expect(out).to include('What to do by hand')
       expect(err).to include('the project was not changed', expected, 'Nothing was written')
       expect(snapshot).to eq(before)
     end
@@ -225,6 +225,59 @@ describe 'api_recipes convert, in a project' do
     end
   end
 
+  it 'gives the code to paste, with the file and the line, when it does not change the project' do
+    project
+    File.write('config/apis/billing.yml.erb', "#{billing}# a note\n")
+    _, out, = convert('config/apis/billing.yml.erb')
+    expect(out).to eq(<<~TEXT)
+
+      What to do by hand
+
+      1. Write the recipe and install it:
+
+          bundle exec api_recipes convert config/apis/billing.yml.erb --to config/api_recipes
+          bundle exec api_recipes install config/api_recipes/billing.recipe.yml --yes
+
+      2. In config/initializers/api_recipes.rb, inside the block of ApiRecipes.configure (line 1), add:
+
+          config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
+          config.values = {
+            billing: { variables: {
+              billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
+              billing_port: (ENV['BILLING_PORT'] || 443),
+              billing_protocol: (ENV['BILLING_PROTOCOL'] || 'https'),
+              billing_client: ENV['BILLING_CLIENT'],
+              api_key_secret: (Settings.billing_secret)
+            }.compact }
+          }
+
+      3. On the line that declares the api (app/models/invoice.rb:3), give verify_with:
+
+          api :billing, verify_with: :expected_response?
+
+      4. Remove the old description: delete config/apis/billing.yml.erb
+    TEXT
+  end
+
+  it 'points at the config.values that is there, and at the lines to take out of a file with other apis' do
+    project('config/initializers/api_recipes.rb' => initializer.sub("end\n", "  config.values = VALUES\nend\n"),
+            'config/apis/billing.yml.erb' => "#{billing}other:\n  host: o.test\n  endpoints:\n    ping:\n")
+    _, out, = convert('config/apis/billing.yml.erb', '--name', 'billing')
+    expect(out).to include('add this to the Hash that config.values is given at line 3, and the line of recipes_paths:',
+                           "    billing: { variables: {\n", "    }.compact }\n\n    config.recipes_paths = Dir[",
+                           'take the lines of billing out of config/apis/billing.yml.erb (lines 1 to 14)')
+  end
+
+  it 'paints the code on a terminal, and only there' do
+    project
+    File.write('config/apis/billing.yml.erb', "#{billing}# a note\n")
+    terminal = StringIO.new
+    terminal.define_singleton_method(:tty?) { true }
+    ApiRecipes::CLI.run(%w[convert config/apis/billing.yml.erb], out: terminal, err: StringIO.new)
+    expect(terminal.string).to include("\e[36mbilling_client:\e[0m \e[33mENV\e[0m[\e[32m'BILLING_CLIENT'\e[0m]")
+    expect(convert('config/apis/billing.yml.erb')[1]).not_to include("\e")
+  end
+
   it 'says what it could not do by itself: verify_with when no class declares the api' do
     project('app/models/invoice.rb' => "class Invoice\nend\n")
     code, out, = convert('config/apis/billing.yml.erb')
@@ -232,7 +285,7 @@ describe 'api_recipes convert, in a project' do
     expect(out).to include('Left to you', 'verify_with: was left out of the recipe and could not be written in the code')
   end
 
-  it 'never shows the code of a tag or a value of the file' do
+  it 'shows nothing of the file when it changes the project itself' do
     project('config/apis/billing.yml.erb' => billing.sub('Settings.billing_secret', "ENV.fetch('S', 'hard-coded-secret')").sub('Accept: application/json', "Accept: application/json\n    X-Api-Token: written-secret"))
     code, out, err = convert('config/apis/billing.yml.erb')
     expect(code).to eq(0)
