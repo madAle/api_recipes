@@ -345,8 +345,10 @@ request must be a Hash.
 ## Variables
 
 A variable is a `{name}` placeholder in the `host`, the `base_url`, the `path`
-of an endpoint, or the value of a header or of a parameter sent with every
-request. Use it for what changes from one account or one environment to the
+of an endpoint, the value of a header or of a parameter sent with every
+request, or in one of the options that are read when a request is sent:
+`protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
+`ok_code`. Use it for what changes from one account or one environment to the
 next, such as the address of a shop. Declare the variables of the API, with an
 optional `default` and `description`:
 
@@ -469,6 +471,48 @@ every thread. That is why it is given only where the application starts, to
 while requests are served goes to `with` or to an object. The same holds for
 credentials.
 
+A service whose address changes with the environment is described once, and
+each environment gives its values:
+
+```yaml
+billing:
+  variables:
+    protocol:
+      default: https
+    host:
+      default: billing.example.com
+    port:
+      default: 443
+    timeout:
+      default: 5
+  protocol: '{protocol}'
+  host: '{host}'
+  port: '{port}'
+  timeout: '{timeout}'
+  endpoints:
+    invoices:
+```
+
+```ruby
+ApiRecipes.configure do |config|
+  config.values = { billing: { variables: { protocol: 'http', host: 'localhost', port: 3000 } } }
+end
+
+ApiRecipes.billing.invoices.url.to_s
+# => "http://localhost:3000/invoices"
+```
+
+In these options the variable gives a value of the option: `http` or `https`
+for the protocol, an integer from 1 to 65535 for the port, a positive number
+for the timeout, `raise` or `ignore`, a verb, a status. It is made when the
+request is built, and a value that is not one raises
+`ApiRecipes::InvalidVariable` before anything is sent, as the default of a
+variable that gives the whole option raises `ApiRecipes::ConfigurationError`
+when the configuration is loaded. `definition`, `routes` and the `api_recipes routes` command show such
+an option as it is written. What decides the shape of the tree is read when
+the configuration is loaded and takes no variable: `endpoints`, `resource`,
+`route`, the names, `verify_with` and `auth`.
+
 The value of a variable is a String, a Symbol or a number, and is kept as
 text. A value is checked for the place where it ends up. In a `host` it can contain
 only letters, digits, dots, hyphens and underscores. In a `base_url` and in a
@@ -504,8 +548,11 @@ together: they are applied in the order they are assigned, so assigning
 
 A file that is missing, empty, not valid YAML or not valid UTF-8 raises
 `ApiRecipes::RecipeFileError`, which names the file. A file called
-`something.recipe.yml` is refused here: it is a [portable recipe](#portable-recipes)
-and goes in `recipes_paths`, where it is never evaluated with ERB.
+`something.recipe.yml` is a [portable recipe](#portable-recipes) and goes in
+`recipes_paths`, where it is never evaluated with ERB: here it is refused,
+unless `recipes_paths` has it too, in which case it is left to `recipes_paths`.
+So one pattern, such as `config/apis/*.yml*`, can match both kinds of file in
+one folder.
 
 Files are evaluated with ERB before being parsed, so values can come from the
 environment:
@@ -882,6 +929,145 @@ The rules, beyond those of every description:
 A repository of recipes keeps each one in `recipes/NAME.recipe.yml`. A
 published version is the tag `NAME-VERSION`, for example `billing-1.2.0`.
 `api_recipes routes billing.recipe.yml` lists the calls of a recipe.
+
+### From a file of your project
+
+When the API is already described in a file of your project, `convert` moves
+it to a portable recipe. Run it in the root of the project: a Rails
+application or any other Ruby project, wherever `ApiRecipes.configure` is
+called.
+
+    $ bundle exec api_recipes convert config/apis/billing.yml.erb
+    billing 1.0.0 now comes from a portable recipe: 2 calls
+
+    Changed in the project
+      created  config/api_recipes/billing.recipe.yml, with its line in config/api_recipes/recipes.lock
+      edited   config/initializers/api_recipes.rb: recipes_paths and config.values
+      edited   app/models/invoice.rb: verify_with on the declaration of the api
+      deleted  config/apis/billing.yml.erb
+
+    What changed in the description
+      host: the ERB tag is now the variable {billing_host}, with the default written in the tag
+      port: the ERB tag is now the variable {billing_port}, with the default written in the tag
+      verify_with: left out, a recipe cannot carry it: give it where a class declares the api, as `api :billing, verify_with: ...`
+      default_headers.Api-Key-Client: the ERB tag is now the variable {billing_client}; the value is not in the recipe
+
+    Every change is in `git status` and `git diff`. Check the recipes with `api_recipes check`, then start the application.
+
+The project works as before, and the values still come from where they came:
+the code of each tag is moved, as it is written, to `config.values`.
+
+```ruby
+ApiRecipes.configure do |config|
+  config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)]
+  config.values = {
+    billing: { variables: {
+      billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
+      billing_port: (ENV['BILLING_PORT'] || 443),
+      billing_client: ENV['BILLING_CLIENT']
+    }.compact }
+  }
+  config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
+end
+```
+
+What the command does:
+
+- **It writes the recipe**, with the key `recipe` (the name of the API,
+  `--version`, `1.0.0` by default, and the format), and installs it in
+  `config/api_recipes` with its line in `recipes.lock`. When the file describes
+  several APIs, `--name` chooses one. Anchors, aliases and merge keys are
+  written out.
+- **An `<%= ... %>` tag becomes a variable**, in every place where a recipe
+  can have one: the `host`, the `base_url`, a `path`, the value of a header or
+  of a parameter, and the `protocol`, `port`, `timeout`, `on_bad_code`,
+  `mime_type`, `verb` and `ok_code` when the tag gives the whole value. The
+  variable is named after the environment variable that the tag reads, or
+  after its place, and a default written in the tag as plain text or as a
+  number (`ENV.fetch('NAME', 'text')`, `ENV['NAME'] || 443`) becomes the
+  default of the variable. A default that a tag gave to a variable the file
+  declares is given by the application from now on.
+- **Nothing in the file is run**, and there is no option that runs it. The
+  code of a tag goes to `config.values` as text, and each tag has its own
+  variable, also two tags in one value. `.compact` leaves out a variable whose
+  code gives `nil`: the default of the recipe applies when the tag had one
+  written, and otherwise the request says which variable is missing, where
+  2.x went on with the default of the gem.
+- **A credential is never copied into the recipe.** A header or a parameter
+  whose name contains `auth`, `key`, `token`, `secret`, `passw`, `credential`,
+  `signature`, `cookie` or `session` becomes a variable without a default,
+  unless the file already gives it with a variable it declares, and
+  its value, written in the file or given by a tag, goes to `config.values`.
+  The command cannot know a secret written anywhere else: read the recipe
+  before you share it.
+- **The old description is removed**: the file is deleted, or only the lines
+  of that API when it describes others, because a recipe never takes the place
+  of an API that another source defines.
+- **`verify_with`**, which a recipe cannot carry, is given to each `api :name`
+  that a class or a module declares. One that a tag gave, or that an endpoint
+  had, is left to you, as it is when one of the declarations gives its options
+  in a way the command cannot read, such as `**options`.
+- **When it changes the project it prints names and paths**, nothing of what
+  the file holds.
+
+It changes your files only when that is safe, and all at once or not at all:
+
+- Lines are added only to a plain file of the project that is in the last
+  commit of git. A file is deleted, or lines are taken out of it, only when
+  git has it committed as it is now. A symbolic link, and a file that git was told to skip, are never
+  changed. Outside a git repository the project is not changed.
+- Ruby is read as a tree, never matched as lines and never run, and the
+  command edits only what it can read whole:
+  - the call to `ApiRecipes.configure`, when the project has exactly one, with
+    a block `do |config|` on several lines that has no `rescue` and cannot end
+    early with `next`, `break` or `return`;
+  - `config.values`, which is added, or which gets one more entry when it is
+    given a Hash between braces whose keys are all written as names, none of
+    them the API, and whose closing brace starts a line;
+  - `config.apis_files_paths`, when the old file is deleted: it must be given
+    patterns of `Dir`, or a list between brackets of names written as text,
+    from which the one element that names the file is taken out.
+
+  Anything else stops it: another mention of the old file in the code, another
+  file that describes the API, a `recipes_paths` it cannot read.
+- Every Ruby file it changes must still be Ruby with the change, and when a
+  write fails every file is put back as it was.
+- When a step is not possible, nothing is written, the command says why, and
+  it gives the steps to do by hand with the code to paste: the commands that
+  write and install the recipe, the lines for the block of
+  `ApiRecipes.configure` with the file and the line, the line that gives
+  `verify_with`, and what to remove.
+
+      2. In config/initializers/api_recipes.rb, inside the block of ApiRecipes.configure (line 1), add:
+
+          config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]
+          config.values = {
+            billing: { variables: {
+              billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
+              billing_port: (ENV['BILLING_PORT'] || 443),
+              billing_client: ENV['BILLING_CLIENT']
+            }.compact }
+          }
+
+  The code is what the file holds, the code of each tag and each value that
+  was written, so that what you paste works; on a terminal it is shown in
+  colours. Only what a terminal would obey is left out, with a comment that
+  says the line to copy it from.
+- What it could not do by itself after changing the project is listed under
+  `Left to you`: a `verify_with` when no class declares the API, or on an
+  endpoint.
+- A tag that is not `<%= ... %>`, that gives the name of an option, or that
+  gives a part of the protocol, of the port or of another such option, stops
+  the command, which says where.
+
+To write the recipe alone, as for the repository of the recipes, name a
+folder: the project is not touched, and the command gives the code for the
+block of `ApiRecipes.configure`.
+
+    $ api_recipes convert config/apis/billing.yml.erb --to ../api-recipes/recipes
+
+The command does not publish: the recipe reaches a repository with `git`,
+through the review that every recipe gets.
 
 ## Where an API is available
 
@@ -1750,11 +1936,11 @@ Every protection has an example in [`spec/security`](spec/security); its
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `protocol` | `https` | `http` or `https` |
+| `protocol` | `https` | `http` or `https`; can be a `{variable}` |
 | `host` | `localhost` | host name, which can contain `{variables}` |
-| `port` | port of the protocol | port number |
+| `port` | port of the protocol | port number; can be a `{variable}` |
 | `base_url` | none | prefix of every path, for example `api/v1`; can contain `{variables}` |
-| `timeout` | `3` | seconds allowed for the whole request |
+| `timeout` | `3` | seconds allowed for the whole request; can be a `{variable}`, as `on_bad_code` and `mime_type` |
 | `default_headers` | none | headers sent with every request; a value can contain `{variables}` |
 | `default_params` | none | query parameters sent with every request; a value is text, a number or a boolean, and can contain `{variables}` |
 | `on_bad_code` | `raise` | `raise` or `ignore` when the response is not a success |
@@ -1769,7 +1955,7 @@ Every protection has an example in [`spec/security`](spec/security); its
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `path` | the endpoint name | segment added to the parent path; `''` adds nothing; can contain `:name` and `*name` placeholders and `{variables}` |
-| `verb` | `get` | HTTP verb |
+| `verb` | `get` | HTTP verb; can be a `{variable}`, as `ok_code` (one status), `timeout`, `on_bad_code` and `mime_type` |
 | `route` | `yes` | `no` makes the endpoint a group that cannot be called |
 | `ok_code` | any 2xx | the status, or the list of statuses, accepted as a success |
 | `timeout` | looked for up the tree | seconds allowed for the whole request |

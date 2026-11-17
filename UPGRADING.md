@@ -51,8 +51,9 @@ github:
   cannot upgrade Ruby yet, stay on 2.10.
 - **http.rb 6.** The gem needs `http` 6.0.4 or higher, below 7. http.rb 5 is no
   longer supported.
-- **Run `api_recipes upgrade`** on your code and your configuration files (see
-  [below](#the-api_recipes-upgrade-command)). It finds the removed
+- **Run `api_recipes upgrade`** in the root of your project (see
+  [below](#the-api_recipes-upgrade-command)). It finds your code and your
+  configuration files by itself, then the removed
   `route`, `base_configs`, `ApiRecipes.print_urls`, the removed error classes and
   `Hash` and `Array` methods, and a few lines that deserve a look (manual
   encoding of path parameters, a bare `rescue`, `follow:`). It then lists what it
@@ -422,8 +423,9 @@ You can adopt these when you are ready. The [README](README.md) describes each o
 - **Credentials along a chain**: the chain, the object, the class that declares
   the API, then the whole application. A credential is bound to its origin.
 - **`variables`**: `{name}` placeholders in `host`, `base_url`, the `path` of an
-  endpoint and the values of `default_headers` and `default_params`, with
-  values given at any of those levels.
+  endpoint, the values of `default_headers` and `default_params`, and in
+  `protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
+  `ok_code`, with values given at any of those levels.
 - **`default_params`**: query parameters sent with every request, as
   `default_headers` does for headers. Both can be written on an endpoint, for
   that endpoint and the ones below it.
@@ -474,37 +476,92 @@ See [Security in the README](README.md#security) for the same list in its place.
 ## The `api_recipes upgrade` command
 
 The gem installs a command that looks for the changes of this guide. It never
-changes a file.
+changes a file. Run it in the root of your project, with no argument:
 
-    $ api_recipes upgrade app lib --config config/apis/github.yml
+    $ bundle exec api_recipes upgrade
 
-- Every directory or file you list is searched for Ruby code that stops working
-  (marked `[breaks]`) and for lines that deserve a look because their result
-  changes (marked `[check]`): a manual encoding of a path parameter, a bare
-  `rescue`, `follow:`, `response.request`, the removed `Hash` and `Array`
-  methods.
-- With `--config FILE`, each configuration file is checked with the rules of
-  3.0 (marked `[config]`). Use the option once for each file.
-- A file that contains ERB is evaluated only with `--erb`, because that runs the
-  code in the file. Without it the file is reported and not read.
-- The command prints the file, the line and what to do, never the text of the
-  line, which could hold a secret.
+It finds by itself what to check, and says what it checked:
+
+- **The Ruby files of the project**, `*.rb` and `*.rake`. It leaves out the
+  folders `vendor`, `node_modules`, `tmp`, `log`, `coverage`, `public` and
+  `storage` at the top of the project, `node_modules` wherever it is, what
+  starts with a dot, and every symbolic link. Code that stops working is marked
+  `[breaks]`; a line that deserves a look because its result changes is marked
+  `[check]`: a manual encoding of a path parameter, a bare `rescue`, `follow:`,
+  `response.request`, the removed `Hash` and `Array` methods.
+- **The files that describe an API**: the YAML files (`.yml`, `.yaml`, also
+  followed by `.erb`) where a name has `endpoints`, each with its options or
+  with none, and the files called `NAME.recipe.yml`. Those under `spec`, `test`
+  and `features` are fixtures and are left out. Each is checked with the rules
+  of 3.0 (marked `[config]`).
+- **Less noise.** A bare `rescue` or a call to `CGI.escape` is in every
+  application. The checks that also match code that has nothing to do with the
+  gem are applied only to the files whose code names `ApiRecipes` or calls one
+  of your APIs by its name, and the one about the `Hash` methods is left out
+  when the project has ActiveSupport.
+- **A file that contains ERB is checked without running its code.** The value
+  that a `<%= ... %>` tag gives is not checked, and the command says how many
+  it left out; the other values are. A file where a tag gives a name, a
+  mapping or whole lines, or where a `<% ... %>` tag decides which lines exist,
+  is not guessed: the command says so, and reads it only with `--erb`, which
+  evaluates the file. That runs the code in it, and outside your application a
+  value read from the environment may be missing.
+- **It gives the code to paste** where what to write is known. The values
+  that lines such as `ApiRecipes.print_urls = ...` and
+  `ApiRecipes.github.authorization = ...` gave when the application started
+  are put together in the whole block of `ApiRecipes.configure`, to paste over
+  the one that is there, with the file and its lines. Where what to write
+  depends on the code around it, the replacement is shown under the finding.
+  The code holds what the line assigned, the value of a credential too, so
+  that it works when pasted: `--no-code` leaves it out, as in a CI whose
+  output is kept. A line is never printed as it is, and the command copies
+  only what it is sure of: one whole expression, with no `if`, `unless`,
+  `rescue`, `and` or `or` after it, on a line that is always run.
 
 ```
 app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
 app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
 config/apis/github.yml: [config] github: unknown option 'hots'
 
+Checked 214 Ruby files, 6 of them use api_recipes
+Checked 2 configuration files: config/apis/billing.yml, config/apis/github.yml
+app/models/shop.rb:4: declares the api 'shopify', and no configuration file found here describes it
+config/apis/billing.yml: 2 values come from ERB and were not checked
+
+Code to paste
+
+In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure (lines 1 to 3) with:
+
+    ApiRecipes.configure do |config|
+      config.apis_files_paths = Dir['config/apis/*.yml']
+      config.values = {
+        github: { authorization: "Bearer #{ENV['GITHUB_TOKEN']}" }
+      }
+    end
+
+Then remove the lines that gave these values: config/initializers/github.rb:1
+
 (the list of what the command cannot find)
 
 3 findings
 ```
 
-A directory is searched for `*.rb` files only; a file you name is read whatever
-its name. The command then prints the list of changes that a search in the text
+The line about `api :shopify` is said of a declaration in the code when no file
+found in the project describes that API and the code never assigns
+`apis_configs`: look for where its description comes from.
+
+To check something else, name it: every directory is searched for `*.rb` and
+`*.rake` files, a file you name is read whatever its name, and `--config FILE`,
+once for each file, checks a description. Every check then applies to every
+file.
+
+    $ api_recipes upgrade app lib --config config/apis/github.yml
+
+The command then prints the list of changes that a search in the text
 cannot find, which you check by hand (this guide has the details of each), and a
-summary line: `Nothing to change`, `1 finding` or `N findings`. The summary line
-is left out when there is no finding and something could not be read.
+summary line: `Nothing to change`, `1 finding` or `N findings`. When it found
+no description of an API it says so instead of `Nothing to change`. The summary
+line is left out when there is no finding and something could not be read.
 
 A file or a directory that could not be read (missing, binary, not valid UTF-8,
 or not readable for lack of permission) is reported on the error stream, as
@@ -513,6 +570,7 @@ least one finding, even if something could not be read; otherwise it is 2 when
 something could not be read, and 0 when there is nothing to change. It can run
 in a CI.
 
-The command does not rewrite code. What matters most depends on values that exist
-only when the program runs, and an automatic rewrite would give a false sense of
-safety. For those, use the warnings that the gem logs.
+The command does not rewrite code: it gives the code to paste where it is sure
+of it. What matters most depends on values that exist only when the program
+runs, and an automatic rewrite would give a false sense of safety. For those,
+use the warnings that the gem logs.

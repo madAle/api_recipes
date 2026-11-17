@@ -1,48 +1,83 @@
 # frozen_string_literal: true
 
+require 'securerandom'
+require 'api_recipes/cli/upgrade/project'
+
 module ApiRecipes
   module CLI
     # Looks for what api_recipes 3.0 removed or changed. It reads files and
     # never writes one. A result carries the file, the line, the kind and a fixed
     # message: never the text of the line, which can hold a secret.
     class Upgrade
-      Finding = Data.define(:file, :line, :kind, :message)
+      # hint: lines of code shown under the finding, or nil.
+      Finding = Data.define(:file, :line, :kind, :message, :hint) do
+        def initialize(file:, line:, kind:, message:, hint: nil) = super
+      end
 
-      Rule = Data.define(:kind, :pattern, :message)
+      # general: the pattern also matches code that has nothing to do with the
+      # gem. In a whole project such a rule is applied only to the files that
+      # use the gem.
+      # fix: which code to paste the line gives, when it gives one.
+      Rule = Data.define(:kind, :pattern, :message, :general, :fix) do
+        def initialize(kind:, pattern:, message:, general: false, fix: nil) = super
+      end
 
       RULES = [
-        Rule.new(:breaks, /\.route\b/, 'endpoint.route was removed: use response.fill or endpoint.definition'),
+        Rule.new(:breaks, /\.route\b/, 'endpoint.route was removed: use response.fill or endpoint.definition', false, :route),
         Rule.new(:breaks, /RouteNameClashWithExistentMethod/,
                  'this error class was removed: a name clash is now a warning'),
         Rule.new(:breaks, /RouteAndResourceNamesClashError|MissingRouteAttribute|ProvidedObjectNotAsResponseData|NoConfigurationGivenForEndpoint/,
                  'this error class was removed: nothing raised it, so the rescue clause can go'),
-        Rule.new(:breaks, /\.base_configs\b/, 'Api#base_configs was removed: use api.definition'),
+        Rule.new(:breaks, /\.base_configs\b/, 'Api#base_configs was removed: use api.definition', false, :base_configs),
         Rule.new(:breaks, /ApiRecipes::Route\b/, 'ApiRecipes::Route was removed: a request is sent with run'),
         Rule.new(:breaks, /ApiRecipes::Settings\b/,
                  'ApiRecipes::Settings was removed: the defaults are listed in the README'),
         Rule.new(:breaks, /\bconfiguration\.setup\b/,
                  'configuration.setup was removed: configure loads the configuration'),
-        Rule.new(:breaks, /ApiRecipes\.print_urls/, 'use config.print_urls inside ApiRecipes.configure'),
+        Rule.new(:breaks, /ApiRecipes\.print_urls/, 'use config.print_urls inside ApiRecipes.configure', false, :print_urls),
         Rule.new(:breaks, /_aprcps_|set_authorization_for_api|set_basic_auth_for_api|copy_global_authorizations_to_api/,
                  'internal method removed'),
         Rule.new(:breaks, /\bApiRecipes((\.|::)\w+|\[[^\]]*\])\.(authorization|basic_auth)\s*(\|\|)?=(?![=~])/,
                  'a credential of the whole application is given to ApiRecipes.configure, as ' \
-                 'config.values = { name: { authorization: ... } }: this writer now raises'),
+                 'config.values = { name: { authorization: ... } }: this writer now raises', false, :global_writer),
         Rule.new(:check, /(?<!\bApiRecipes)\.\w+\.(authorization|basic_auth)\s*(\|\|)?=(?![=~])/,
                  'authorization= and basic_auth= now work on an object only: on a class they raise, ' \
-                 'give the credential to `api :name, authorization: ...`, or to with(...) for one request'),
+                 'give the credential to `api :name, authorization: ...`, or to with(...) for one request', false, :writer),
         Rule.new(:check, /url_encode|CGI\.escape|encode_www_form_component/,
-                 'path parameters are now encoded by ApiRecipes: remove manual encoding of values passed to endpoints'),
+                 'path parameters are now encoded by ApiRecipes: remove manual encoding of values passed to endpoints', true),
         Rule.new(:check, /\brescue\s*(=>.*)?$|rescue StandardError/,
-                 'a bare rescue now catches ApiRecipes errors too'),
-        Rule.new(:check, /\bfollow:/, 'credentials are no longer sent to another origin after a redirect'),
+                 'a bare rescue now catches ApiRecipes errors too', true),
+        Rule.new(:check, /\bfollow:/, 'credentials are no longer sent to another origin after a redirect', true),
         Rule.new(:check, /\bresponse\.request\b/,
                  'response.request was removed, because the request holds the credentials: ' \
-                 'read response.uri, or response.original_response'),
+                 'read response.uri, or response.original_response', true, :request),
         Rule.new(:check, /\.(deep_merge|deep_symbolize_keys|deep_stringify_keys|symbolize_keys|stringify_keys|extract_options!|assert_valid_keys)\b/,
                  'this method came from api_recipes 2.x unless ActiveSupport is loaded: ' \
-                 'define it or add ActiveSupport')
+                 'define it or add ActiveSupport', true)
       ].freeze
+
+      # The rule about the Hash methods that ActiveSupport defines too.
+      HASH_METHODS = RULES.last
+
+      # What stands for the value of an ERB tag in a file that is checked
+      # without running its code.
+      # Options whose value is a mapping: a tag that gives one gives a part
+      # of the structure, which is not guessed.
+      CONTAINERS = %w[variables endpoints default_headers default_params auth recipe resource].freeze
+
+      # What a line assigns, read without running it, to give the code to paste.
+      WRITTEN = '\\s*(?:\\|\\|)?=(?![=~])\\s*(?<code>.+)\\z'
+      FIXES = {
+        print_urls: /\bApiRecipes\.print_urls#{WRITTEN}/,
+        global_writer: /\bApiRecipes(?:(?:\.|::)(?<api>\w+)|\[\s*[:'"](?<api>\w+)['"]?\s*\])\.(?<key>authorization|basic_auth)#{WRITTEN}/,
+        writer: /(?<![^\s(=,])(?<receiver>[\w.@:\[\]'"]+)\.(?<api>\w+)\.(?<key>authorization|basic_auth)#{WRITTEN}/,
+        base_configs: /(?<![^\s(=,])(?<receiver>[\w.@:\[\]'"]+)\.base_configs\b/,
+        route: /\.route\.fill\((?<code>.*)\)/
+      }.freeze
+      # Code longer than this is not copied into the code to paste.
+      MAX_CODE = 300
+      ERB_COMMENT = /<%#.*?%>/m
+      ERB_OUTPUT = /<%=.*?%>/m
 
       SILENT_CHANGES = [
         'path parameters encoded by hand: %2F would become %252F, remove the encoding',
@@ -80,23 +115,54 @@ module ApiRecipes
       # the file could not be checked.
       attr_reader :warnings
 
-      def initialize(paths, config: [], erb: false)
+      # What was checked and how, said after the findings. Not findings.
+      attr_reader :notes
+
+      # project: the Project the paths and the files were found in, when the
+      # command was given none.
+      # code: false leaves out the code to paste, as in a CI whose output is kept.
+      def initialize(paths, config: [], erb: false, project: nil, code: true)
+        @code = code
         @paths = Array(paths)
         @configs = Array(config)
         @erb = erb
+        @project = project
         @warnings = []
+        @notes = []
+        # What stands for the value of an ERB tag in a file that is checked
+        # without running its code: random, so that no file can write it.
+        @erb_value = "API_RECIPES_ERB_VALUE_#{SecureRandom.hex(6)}"
+      end
+
+      # The command without arguments: the project in the current directory.
+      def self.for_project(project, erb: false, code: true)
+        new(project.ruby_files, config: project.config_files, erb: erb, project: project, code: code)
       end
 
       def run
-        @warnings = []
-        findings = @paths.flat_map { |path| scan_path(path) }
-        findings + @configs.flat_map { |file| check_config(file) }
+        @warnings = @project ? @project.warnings.dup : []
+        @notes = []
+        @uses = 0
+        @startup = []
+        @configure = {}
+        findings = with_request_hints(@paths.flat_map { |path| scan_path(path) })
+        findings += @configs.flat_map { |file| check_config(file) }
+        @notes = scope + @notes if @project
+        findings
       end
 
       # Prints the results on out and the warnings on err. Returns the exit code.
       def report(out, err)
         findings = run
-        findings.each { |finding| out.puts format_finding(finding) }
+        findings.each do |finding|
+          out.puts format_finding(finding)
+          Code.show(out, finding.hint) if @code && finding.hint
+        end
+        unless @notes.empty?
+          out.puts unless findings.empty?
+          @notes.each { |note| out.puts note }
+        end
+        code_to_paste(out) if @code
         out.puts
         out.puts 'What this command cannot find'
         SILENT_CHANGES.each { |change| out.puts "  - #{change}" }
@@ -112,20 +178,47 @@ module ApiRecipes
 
       def summary(count)
         case count
-        when 0 then 'Nothing to change'
+        when 0 then nothing_found
         when 1 then '1 finding'
         else "#{count} findings"
         end
       end
 
+      # "Nothing to change" is said only of what was checked.
+      def nothing_found
+        return 'Nothing to change' unless @project && @configs.empty?
+
+        'Nothing to change in the Ruby files. No configuration file was found: if the apis are described in ' \
+          'YAML files, name each one with --config FILE'
+      end
+
+      # What a run on a project looked at.
+      def scope
+        ruby = @paths.size
+        lines = ["Checked #{ruby} Ruby file#{'s' unless ruby == 1}, #{@uses} of them use#{'s' if @uses == 1} api_recipes"]
+        lines << if @configs.empty?
+                   'No configuration file was found'
+                 else
+                   "Checked #{@configs.size} configuration file#{'s' unless @configs.size == 1}: #{@configs.map { |file| shown_path(file) }.join(', ')}"
+                 end
+        lines + @project.undescribed.map do |declared|
+          "#{shown_path(declared.file)}:#{declared.line}: declares the api '#{declared.api}', and no configuration file found here describes it"
+        end
+      end
+
+      # A name found in the project is shown without what a terminal would
+      # obey; a path that was given is shown as it was given.
+      def shown_path(file) = @project ? Recipes::Summary.shown(file, 300) : file
+
       def format_finding(finding)
-        where = finding.line ? "#{finding.file}:#{finding.line}" : finding.file
+        file = shown_path(finding.file)
+        where = finding.line ? "#{file}:#{finding.line}" : file
         "#{where}: [#{finding.kind}] #{finding.message}"
       end
 
       def scan_path(path)
         if File.directory?(path)
-          Dir.glob('**/*.rb', base: path).sort.flat_map do |relative|
+          Dir.glob('**/*.{rb,rake}', base: path).sort.flat_map do |relative|
             file = File.join(path, relative)
             File.directory?(file) ? [] : scan_file(file)
           end
@@ -141,13 +234,154 @@ module ApiRecipes
         text = read_ruby(file)
         return [] unless text
 
+        rules = rules_for(text)
+        @configure[file] = text if text.match?(/\bApiRecipes\.configure\b/)
         found = []
         text.each_line(chomp: true).with_index(1) do |line, number|
-          RULES.each do |rule|
-            found << Finding.new(file: file, line: number, kind: rule.kind, message: rule.message) if rule.pattern.match?(line)
+          rules.each do |rule|
+            next unless rule.pattern.match?(line)
+
+            found << Finding.new(file: file, line: number, kind: rule.kind, message: rule.message, hint: hint(rule.fix, line, file, number, text))
           end
         end
         found
+      end
+
+      # ---- the code to paste ----
+
+      # The code a line assigns, when it can be copied: on one line, short,
+      # and with nothing a terminal would obey.
+      def code_of(match)
+        code = without_comment(match[:code].to_s.strip)
+        return nil if code.empty? || code.length > MAX_CODE || Code::UNSAFE.match?(code) || !expression?(code)
+
+        code
+      end
+
+      # code up to a comment that follows it on the line.
+      def without_comment(code)
+        quote = nil
+        code.each_char.with_index do |char, index|
+          if quote
+            quote = nil if char == quote && code[index - 1] != '\\'
+          elsif ["'", '"', '`'].include?(char)
+            quote = char
+          elsif char == '#' && (index.zero? || code[index - 1].match?(/\s/))
+            return code[0...index].rstrip
+          end
+        end
+        code
+      end
+
+      # Whether code is one whole Ruby expression, and not one that a word
+      # after it changes (if, unless, rescue, and, or). It is read, never run.
+      def expression?(code)
+        tree = Code.tree(code)
+        return false unless tree && tree.statements.body.size == 1
+
+        node = tree.statements.body.first
+        return false if [Prism::IfNode, Prism::UnlessNode, Prism::RescueModifierNode, Prism::WhileNode, Prism::UntilNode].any? { |kind| node.is_a?(kind) }
+
+        !((node.is_a?(Prism::AndNode) || node.is_a?(Prism::OrNode)) && %w[and or].include?(node.operator_loc.slice))
+      end
+
+      # Whether the statement on line is always run when its file is: a
+      # statement of the file itself, or of the block of ApiRecipes.configure,
+      # not one inside a condition or another block.
+      def always_run?(file, text, line)
+        @direct ||= {}
+        @direct[file] ||= begin
+          tree = Code.tree(text)
+          top = tree ? tree.statements.body.map { |node| node.location.start_line } : []
+          block = Code::ConfigureBlock.in(text)
+          top + (block ? block.statement_lines : [])
+        end
+        @direct[file].include?(line)
+      end
+
+      # The lines shown under a finding. A value given when the application
+      # starts is kept aside: all of them go in one block of configure.
+      def hint(fix, line, file, number, text)
+        match = FIXES[fix]&.match(line)
+        case fix
+        when :request then ['response.uri                # the address of the request', 'response.original_response  # the http.rb response']
+        when :base_configs then match && !Code::UNSAFE.match?(match[:receiver]) ? ["#{match[:receiver]}.definition"] : nil
+        when :route then (code = match && code_of(match)) ? ["response.fill(#{code})  # response is what run returned"] : nil
+        when :writer
+          code = match && code_of(match)
+          return nil unless code && !Code::UNSAFE.match?(match[:receiver])
+
+          ['# for a class, where it declares the api:', "api :#{match[:api]}, #{match[:key]}: #{code}", '# for one request:',
+           "#{match[:receiver]}.#{match[:api]}.with(#{match[:key]}: #{code})"]
+        when :print_urls, :global_writer
+          code = match && code_of(match)
+          return nil unless code && always_run?(file, text, number)
+
+          @startup << { file: file, line: number, api: fix == :print_urls ? nil : match[:api], key: fix == :print_urls ? 'print_urls' : match[:key], code: code }
+          nil
+        end
+      end
+
+      # A credential of the application assigned in more than one place is
+      # assigned for each request: each of those lines becomes a with.
+      def with_request_hints(findings)
+        repeated = @startup.group_by { |item| [item[:api], item[:key]] }.select { |(api, _), items| api && items.size > 1 }.values.flatten
+        @startup -= repeated
+        findings.map do |finding|
+          item = repeated.find { |one| one[:file] == finding.file && one[:line] == finding.line }
+          next finding unless item && finding.hint.nil? && FIXES[:global_writer].match?('ApiRecipes.x.' + item[:key] + ' = 1') && finding.message.include?('config.values')
+
+          finding.with(hint: ["ApiRecipes.#{item[:api]}.with(#{item[:key]}: #{item[:code]})  # use the api it returns for the calls of this request"])
+        end
+      end
+
+      # The values given when the application starts, in the block of
+      # ApiRecipes.configure: the whole block when one file has it.
+      def code_to_paste(out)
+        return if @startup.empty?
+
+        file, text = @configure.size == 1 ? @configure.first : nil
+        block = Code::ConfigureBlock.in(text)
+        block = nil if block&.problem
+        config = block ? block.config : 'config'
+        inside = @startup.select { |item| block && item[:file] == file && item[:line].between?(block.first, block.last) }
+        added = @startup.select { |item| item[:api].nil? }.first(1).map { |item| "#{config}.print_urls = #{item[:code]}" }
+        added = [] if block&.line_of(:print_urls)
+        entries = @startup.select { |item| item[:api] }.group_by { |item| item[:api] }.map do |api, items|
+          "#{api.match?(/\A[a-z_]\w*\z/) ? api : "\"#{api}\""}: { #{items.map { |item| "#{item[:key]}: #{item[:code]}" }.join(', ')} }"
+        end
+        entries = entries.each_with_index.map { |entry, index| index == entries.size - 1 ? entry : "#{entry}," }
+        merged = block && block.line_of(:values)
+        added += ["#{config}.values = {", *entries.map { |entry| "  #{entry}" }, '}'] unless entries.empty? || merged
+
+        out.puts '', 'Code to paste', ''
+        if block
+          out.puts "In #{shown_path(file)}, replace the block of ApiRecipes.configure (lines #{block.first} to #{block.last}) with:"
+          Code.show(out, block.lines(added, without: inside.map { |item| item[:line] }))
+        else
+          out.puts 'Inside the block of ApiRecipes.configure:'
+          Code.show(out, added)
+        end
+        if merged && !entries.empty?
+          out.puts "and add to the Hash that #{config}.values is given at line #{merged}:"
+          Code.show(out, entries)
+        end
+        outside = (@startup - inside).map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }
+        out.puts "Then remove the lines that gave these values: #{outside.join(', ')}" unless outside.empty?
+      end
+
+      # Every rule for the paths that were given. In a project, the general
+      # ones only for a file that uses the gem, and never the one about the
+      # methods that ActiveSupport defines when the project has it.
+      def rules_for(text)
+        return RULES unless @project
+
+        @specific ||= RULES.reject(&:general)
+        @all ||= @project.active_support? ? RULES - [HASH_METHODS] : RULES
+        return @specific unless @project.uses_gem?(text)
+
+        @uses += 1
+        @all
       end
 
       # Returns the text, or nil after recording why the file was not checked.
@@ -168,15 +402,110 @@ module ApiRecipes
       end
 
       def check_config(file)
-        apis = Configuration.new.read_recipe_file(file, erb: @erb)
+        return check_recipe(file) if file.end_with?(Internals::Recipe::SUFFIX)
+        return [config_finding(file, 'describes more values than can be checked: aliases make them from a few lines')] if too_many_values?(file)
+
+        unchecked = []
+        tags = false
+        apis = Configuration.new.read_recipe_file(file, erb: @erb) do |text|
+          tags = true
+          without_erb(file, text)
+        end
+        return not_checked(file) if tags && structural_tag?(apis)
+
+        unchecked = erb_values(apis)
         Internals::Compiler.compile_all(apis)
+        note_unchecked(file, unchecked)
         []
       rescue RecipeFileError => e
+        return not_checked(file) if tags && e.errors.all? { |problem| problem.include?('invalid YAML') }
+
         e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }
       rescue ConfigurationError => e
-        e.errors.map { |problem| config_finding(file, problem) }
+        note_unchecked(file, unchecked)
+        checked(e.errors, unchecked).map { |problem| config_finding(file, problem) }
+      rescue SystemStackError
+        [config_finding(file, 'is nested too deeply to be checked')]
       rescue StandardError, ScriptError => e
         [config_finding(file, "could not be evaluated (#{e.class})")]
+      end
+
+      # A file whose tags give a name or a part of the structure is not
+      # guessed: it is said, and it is not a finding.
+      def not_checked(file)
+        @notes << "#{shown_path(file)}: an ERB tag gives a name or a part of the structure: not checked without --erb"
+        []
+      end
+
+      def structural_tag?(value)
+        case value
+        when Hash
+          value.any? do |key, inner|
+            key.to_s.include?(@erb_value) || (CONTAINERS.include?(key.to_s) && inner.to_s == @erb_value) || structural_tag?(inner)
+          end
+        when Array then value.any? { |inner| structural_tag?(inner) }
+        else false
+        end
+      end
+
+      # Aliases can make millions of values from a few lines: the file is
+      # measured, with its tags read as a word, before anything walks it.
+      def too_many_values?(file)
+        text = File.binread(file).force_encoding(Encoding::UTF_8)
+        return false unless text.valid_encoding? && text.include?('*')
+
+        data = YAML.safe_load(text.gsub(/<%.*?%>/m, 'erb'), permitted_classes: [Symbol], aliases: true)
+        !Project.within?(data, Project::MAX_VALUES)
+      rescue SystemCallError, Psych::Exception, SystemStackError
+        false
+      end
+
+      # A file called NAME.recipe.yml is a portable recipe, read as data only.
+      def check_recipe(file)
+        Internals::Recipe.read(file)
+        []
+      rescue ConfigurationError => e
+        e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }
+      rescue StandardError => e
+        [config_finding(file, "could not be read (#{e.class})")]
+      end
+
+      # The text of a file with ERB, made checkable without running anything:
+      # the value of each output tag becomes ERB_VALUE. A tag that is not an
+      # output tag can decide which lines the file has, so it is not guessed.
+      def without_erb(file, text)
+        plain = text.gsub(ERB_COMMENT, '').gsub(ERB_OUTPUT, @erb_value)
+        return plain.gsub('<%%', '<%') unless plain.gsub('<%%', '').include?('<%')
+
+        raise RecipeFileError.new(file, 'contains ERB that decides the structure of the file (<% ... %>): run again ' \
+                                       'with --erb to evaluate it (this executes the code in the file)')
+      end
+
+      # The places, as the compiler names them, whose value holds the value
+      # of a tag.
+      def erb_values(value, path = nil, found = [])
+        case value
+        when Hash then value.each { |key, inner| erb_values(inner, [path, place(key)].compact.join('.'), found) }
+        when Array then found << path if value.any? { |item| item.to_s.include?(@erb_value) }
+        else found << path if value.to_s.include?(@erb_value)
+        end
+        found
+      end
+
+      # A name as the compiler writes it in the place of a problem.
+      def place(name) = name.to_s.gsub(/[^[:print:]]/, '?')[0, 40]
+
+      # The problems that are not about a value that an ERB tag gives.
+      def checked(problems, unchecked)
+        problems.reject { |problem| unchecked.any? { |path| problem.start_with?("#{path}: ") } }
+      end
+
+      def note_unchecked(file, unchecked)
+        return if unchecked.empty?
+
+        count = unchecked.size
+        @notes << "#{shown_path(file)}: #{count} value#{'s' unless count == 1} come#{'s' if count == 1} from ERB and " \
+                  "#{count == 1 ? 'was' : 'were'} not checked"
       end
 
       def config_finding(file, message)

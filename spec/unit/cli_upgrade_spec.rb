@@ -2,6 +2,7 @@ require 'spec_helper'
 require 'api_recipes/cli'
 require 'stringio'
 require 'tmpdir'
+require 'fileutils'
 
 describe 'api_recipes upgrade' do
   let(:root) { File.expand_path('../fixtures/upgrade', __dir__) }
@@ -53,7 +54,7 @@ describe 'api_recipes upgrade' do
         ApiRecipes.github.authorization ||= ENV['TOKEN']
         ApiRecipes::github.basic_auth={ user: 'u', pass: 'p' }
       RUBY
-      code, out, = run('upgrade', dir)
+      code, out, = run('upgrade', '--no-code', dir)
       expect(code).to eq(1)
       expect(out).to match(/a\.rb:7: \[breaks\] a credential of the whole application/)
       expect(out).to match(/a\.rb:8: \[breaks\] a credential of the whole application/)
@@ -125,12 +126,14 @@ describe 'api_recipes upgrade' do
     expect(out).to include("[config] github.endpoints.users: unknown option 'method'")
   end
 
-  it 'evaluates ERB only when asked' do
-    _, out, = run('upgrade', '--config', File.join(root, 'config/with_erb.yml'))
-    expect(out).to include('contains ERB: run again with --erb')
+  it 'evaluates ERB only when asked, and without it says what it did not check' do
+    code, out, = run('upgrade', '--config', File.join(root, 'config/with_erb.yml'))
+    expect(code).to eq(0)
+    expect(out).to include('with_erb.yml: 1 value comes from ERB and was not checked', 'Nothing to change')
     code, out, = run('upgrade', '--erb', '--config', File.join(root, 'config/with_erb.yml'))
     expect(code).to eq(0)
     expect(out).to include('Nothing to change')
+    expect(out).not_to include('comes from ERB')
   end
 
   it 'changes no file' do
@@ -143,6 +146,117 @@ describe 'api_recipes upgrade' do
     expect(run('--version')).to match([0, /#{Regexp.escape(ApiRecipes::VERSION)}/, ''])
     expect(run('--help')[1]).to include('upgrade')
     expect(run('nope')).to match([2, '', /unknown command: nope/])
+  end
+
+  describe 'the code to paste' do
+    def project(files)
+      Dir.mktmpdir do |dir|
+        files.each do |name, text|
+          FileUtils.mkdir_p(File.dirname(File.join(dir, name)))
+          File.write(File.join(dir, name), text)
+        end
+        Dir.chdir(dir) { yield }
+      end
+    end
+
+    it 'is the whole block of configure, with the values that lines of the application gave when it started' do
+      project('config/boot.rb' => <<~RUBY, 'lib/setup.rb' => "ApiRecipes.billing.basic_auth = { user: 'u', pass: ENV['P'] }\n") do
+        ApiRecipes.configure do |config|
+          config.apis_files_paths = ['config/apis.yml']
+          ApiRecipes.print_urls = !production?
+        end
+        ApiRecipes.github.authorization = "Bearer \#{ENV['TOKEN']}" # the token
+      RUBY
+        _, out, = run('upgrade', 'config', 'lib')
+        expect(out).to include(<<~TEXT)
+          Code to paste
+
+          In config/boot.rb, replace the block of ApiRecipes.configure (lines 1 to 4) with:
+
+              ApiRecipes.configure do |config|
+                config.apis_files_paths = ['config/apis.yml']
+                config.print_urls = !production?
+                config.values = {
+                  github: { authorization: "Bearer \#{ENV['TOKEN']}" },
+                  billing: { basic_auth: { user: 'u', pass: ENV['P'] } }
+                }
+              end
+
+          Then remove the lines that gave these values: config/boot.rb:5, lib/setup.rb:1
+        TEXT
+      end
+    end
+
+    it 'gives the entries alone when config.values is assigned already, and the lines alone when no file has the block' do
+      project('a.rb' => "ApiRecipes.configure do |c|\n  c.values = VALUES\nend\nApiRecipes.github.authorization = token\n") do
+        _, out, = run('upgrade', 'a.rb')
+        expect(out).to include("and add to the Hash that c.values is given at line 2:\n\n    github: { authorization: token }\n")
+      end
+      project('a.rb' => "ApiRecipes.print_urls = true\n") do
+        _, out, = run('upgrade', 'a.rb')
+        expect(out).to include("Inside the block of ApiRecipes.configure:\n\n    config.print_urls = true\n\nThen remove the lines that gave these values: a.rb:1\n")
+      end
+    end
+
+    it 'is a with for each line, when a credential of the application is assigned in more than one place' do
+      project('a.rb' => "ApiRecipes.github.authorization = user.token\n", 'b.rb' => "ApiRecipes.github.authorization = other.token\n") do
+        _, out, = run('upgrade', 'a.rb', 'b.rb')
+        expect(out).to include("a.rb:1: [breaks] a credential of the whole application",
+                               "\n    ApiRecipes.github.with(authorization: user.token)  # use the api it returns for the calls of this request\n",
+                               "\n    ApiRecipes.github.with(authorization: other.token)  # use the api it returns for the calls of this request\n")
+        expect(out).not_to include('Code to paste')
+      end
+    end
+
+    it 'is shown under the finding when what to write depends on the code around it' do
+      project('a.rb' => "client.github.authorization = current_user.token\nresponse.request\napi.base_configs\nendpoint.route.fill(user)\n") do
+        _, out, = run('upgrade', 'a.rb')
+        expect(out).to include("    api :github, authorization: current_user.token\n", "    client.github.with(authorization: current_user.token)\n",
+                               "    response.uri                # the address of the request\n", "    api.definition\n",
+                               "    response.fill(user)  # response is what run returned\n")
+      end
+    end
+
+    it 'is given only for what is written whole and is always run' do
+      lines = ["ApiRecipes.github.authorization = ENV['GH'] if ENV['GH']", "ApiRecipes.jira.authorization = [a, b].join(' ') rescue nil",
+               "ApiRecipes.stripe.basic_auth = { user: 'a', pass: 'b' }; puts 'x'", 'ApiRecipes.x2.authorization = a and b',
+               "if ENV['DEV']\n  ApiRecipes.print_urls = true\nend", "self.class.svc.basic_auth = { user: u } if u", "x.tap do |l|\n  ApiRecipes.shop.authorization = t\nend"]
+      project('a.rb' => "#{lines.join("\n")}\nApiRecipes.billing.authorization = ENV['B'] || 'none'\n") do
+        code, out, = run('upgrade', 'a.rb')
+        expect(code).to eq(1)
+        expect(out).to include("Inside the block of ApiRecipes.configure:\n\n    config.values = {\n      billing: { authorization: ENV['B'] || 'none' }\n    }\n")
+        expect(out).not_to include('github:', 'jira:', 'stripe:', 'x2:', 'shop:', 'config.print_urls =', '.with(')
+      end
+    end
+
+    it 'keeps in the block it gives the lines it does not understand' do
+      project('a.rb' => "ApiRecipes.configure do |config|\n  config.logger = Logger.new($stdout).tap do |l|\n    ApiRecipes.print_urls = true\n  end\n  next if ENV['SKIP']\nend\nApiRecipes.github.authorization = token\n") do
+        _, out, = run('upgrade', 'a.rb')
+        expect(out).to include("Inside the block of ApiRecipes.configure:\n\n    config.values = {\n      github: { authorization: token }\n    }\n")
+        expect(out).not_to include('replace the block')
+      end
+    end
+
+    it 'is left out with --no-code, and for a line that goes on, or that a terminal would obey' do
+      project('a.rb' => "ApiRecipes.github.authorization = 'SECRET'\nApiRecipes.print_urls = [\n  true\n].first\nApiRecipes.billing.authorization = '\u202Ex'\n") do
+        _, out, = run('upgrade', '--no-code', 'a.rb')
+        expect(out).not_to include('SECRET', 'Code to paste')
+        _, out, = run('upgrade', 'a.rb')
+        expect(out).to include("github: { authorization: 'SECRET' }")
+        expect(out).not_to include('print_urls =', 'billing:', "\u202E")
+      end
+    end
+  end
+
+  it 'reads the rake files of a directory too, and nothing else' do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'sync.rake'), "ApiRecipes.print_urls = true\n")
+      File.write(File.join(dir, 'notes.txt'), "ApiRecipes.print_urls = true\n")
+      code, out, = run('upgrade', dir)
+      expect(code).to eq(1)
+      expect(out).to include('sync.rake:1: [breaks]')
+      expect(out).not_to include('notes.txt')
+    end
   end
 
   it 'says "1 finding" for exactly one' do
@@ -249,8 +363,10 @@ describe 'api_recipes upgrade' do
                            '--config', File.join(@dir, 'missing.yml'), '--config', @dir)
       expect(code).to eq(1)
       expect(err).to eq('')
-      expect(out.scan('[config]').size).to eq(7)
-      expect(out).to include('file is empty', 'invalid YAML', 'must contain a mapping', 'file not found')
+      expect(out.lines.grep(/\[config\]/).map { |line| File.basename(line[/\A\S+(?=: \[config\])/]) }.uniq)
+        .to contain_exactly('empty.yml', 'broken.yml', 'list.yml', 'latin.yml', 'x.recipe.yml', 'missing.yml', File.basename(@dir))
+      expect(out).to include('file is empty', 'invalid YAML', 'must contain a mapping', 'file not found',
+                             'x.recipe.yml: [config] the key recipe is required')
     end
 
     it 'reports an ERB file that fails when evaluated' do
@@ -268,10 +384,10 @@ describe 'api_recipes upgrade' do
       expect(File.exist?(marker)).to be(false)
     end
 
-    it 'asks for something to check when given nothing' do
-      code, _, err = run('upgrade')
+    it 'asks where the project is when given nothing outside a project' do
+      code, _, err = Dir.chdir(@dir) { run('upgrade') }
       expect(code).to eq(2)
-      expect(err).to include('upgrade needs')
+      expect(err).to include('there is no Gemfile here')
     end
 
     it 'rejects an unknown option' do
