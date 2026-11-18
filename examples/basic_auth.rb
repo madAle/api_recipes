@@ -1,12 +1,12 @@
 require 'api_recipes'
 require 'yaml'
 
-# Take a look at examples/config/github.yml.erb  for a full list of available options
+# Take a look at examples/config/github.recipe.yml  for a full list of available options
 
 # Setup Basic Auth. The credential of the whole application is given to
 # configure, once
 ApiRecipes.configure do |config|
-  config.apis_files_paths = ['examples/config/github.yml.erb']
+  config.recipes_paths = ['examples/config/github.recipe.yml']
   config.print_urls = true
   config.values = { github: { basic_auth: { user: ENV.fetch('GITHUB_USERNAME'), pass: ENV.fetch('GITHUB_PASSWORD') } } }
 end

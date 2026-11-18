@@ -4,7 +4,7 @@ require 'api_recipes'
 # Take a look at the files in examples/config for details
 
 ApiRecipes.configure do |config|
-  config.apis_files_paths = ['examples/config/github.yml.erb', 'examples/config/jsonplaceholder.yml.erb']
+  config.recipes_paths = ['examples/config/github.recipe.yml', 'examples/config/jsonplaceholder.recipe.yml']
 end
 
 # Let's create a simple class that uses ApiRecipes

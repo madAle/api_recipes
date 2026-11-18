@@ -1,11 +1,11 @@
 require 'api_recipes'
 
 # Configure ApiRecipes through a single yaml file.
-# Take a look at examples/config/github.yml.erb  for a list of supported options
+# Take a look at examples/config/github.recipe.yml  for a list of supported options
 
 ApiRecipes.configure do |config|
   # Give an array of paths to YAML files containing api configs. Files can contain ERB code.
-  config.apis_files_paths = ['examples/config/github.yml.erb']
+  config.recipes_paths = ['examples/config/github.recipe.yml']
   # Debug option that logs the URL of every request, at info level
   config.print_urls = true
 end
