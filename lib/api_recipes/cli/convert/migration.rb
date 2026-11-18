@@ -26,6 +26,20 @@ module ApiRecipes
         # git does not run a program that the repository names.
         GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'].freeze
 
+        # Whether the file is, byte for byte, what git has in its index and in
+        # HEAD. The ids of the three are compared: unlike `git status`, this
+        # runs no filter that the repository is configured with. git is a
+        # block that runs git with the arguments it is given.
+        def self.as_committed?(file, &git)
+          staged, listed = git.call('ls-files', '-s', '--', file)
+          head, found = git.call('rev-parse', '--verify', '-q', "HEAD:./#{Pathname.new(file).cleanpath}")
+          now, hashed = git.call('hash-object', '--no-filters', '--', file)
+          return false unless [listed, found, hashed].all? { |status| status&.success? }
+
+          id = staged.lines.size == 1 ? staged.split[1] : nil
+          !id.nil? && id == head.strip && id == now.strip
+        end
+
         # written: { file => text } for the files that the same run of the
         # command already changed, when it converts several apis.
         def initialize(result, source, out:, err:, root: '.', written: {})
@@ -65,6 +79,9 @@ module ApiRecipes
           plan_verify_with
           plan_old_description
           plan_valid
+          # What the changes were worked out from: a file changed after this
+          # is not written over.
+          @seen = (@planned.keys | [@source]).select { |file| File.file?(full(file)) }.to_h { |file| [file, File.binread(full(file))] }
           @blocking
         end
 
@@ -72,16 +89,30 @@ module ApiRecipes
         # are edited, with the text they have and the one they get, and the
         # files that are deleted.
         def preview
-          { created: { @target => @result.text },
-            edited: @planned.select { |_, text| text }.to_h { |file, text| [file, [File.read(full(file)), text]] },
+          lock = Internals::RecipeLock.read(full(@directory))
+          entry = Internals::RecipeLock::Entry.new(version: @result.version, source: nil, commit: nil, sha256: Internals::Recipe.digest(@result.text))
+          lock_text = Recipes::LockFile.text(lock.entries.merge(@result.name => entry))
+          now = File.exist?(full(@lock)) ? File.read(full(@lock)) : nil
+          edited = @planned.select { |_, text| text }.to_h { |file, text| [file, [File.read(full(file)), text]] }
+          { created: { @target => @result.text }.merge(now ? {} : { @lock => lock_text }),
+            edited: now ? { @lock => [now, lock_text] }.merge(edited) : edited,
             deleted: @planned.select { |_, text| text.nil? }.keys }
         end
 
         # Makes the changes that prepare worked out. Returns the exit code.
         def finish
+          changed = @seen.reject { |file, text| File.file?(full(file)) && File.binread(full(file)) == text }.keys
+          unless changed.empty?
+            @err.puts "the project was not changed: #{changed.map { |file| shown(file) }.join(', ')} changed after this command " \
+                      'read it. Nothing was written: run the command again'
+            return 2
+          end
+          # Only a file that git had as it was can be changed again by this
+          # run as if it were committed: one that had other changes cannot.
+          kept = @planned.keys.select { |file| committed?(file) }
           return 2 unless apply
 
-          @planned.each { |file, text| text ? @written[file] = text : @written.delete(file) }
+          @planned.each { |file, text| text && kept.include?(file) ? @written[file] = text : @written.delete(file) }
           report
           0
         end
@@ -144,8 +175,7 @@ module ApiRecipes
           # As this run left it, after a change made when git had it committed.
           return true if @written.key?(file) && File.read(full(file)) == @written[file]
 
-          changes, status = git('status', '--porcelain', '--', file)
-          status&.success? && changes.empty?
+          Migration.as_committed?(file) { |*arguments| git(*arguments) }
         end
 
         def git_reason(file)
@@ -180,7 +210,7 @@ module ApiRecipes
         def place_problems
           directory = full(@directory)
           @blocking << "#{@target} already exists" if File.exist?(full(@target)) || File.symlink?(full(@target))
-          @blocking << "#{@directory} is a symbolic link: the recipe would be written outside the project" if File.symlink?(directory)
+          @blocking << "#{@directory} is a symbolic link, or is below one: the recipe would be written outside the project" unless inside?(directory)
           _, ignored = git('check-ignore', '-q', '--', @target)
           @blocking << "#{@target} would be ignored by git: the recipe would not be committed with the rest" if ignored&.success?
           lock_problem
@@ -190,6 +220,21 @@ module ApiRecipes
             false
           end
           @blocking << "#{@result.name} is described in #{also.map { |file| shown(file) }.join(', ')} too: a recipe never takes the place of an api" unless also.empty?
+        end
+
+        # Whether path, or the folder that holds it, is in the project and not
+        # below a symbolic link: the nearest part of it that exists is
+        # where it is written.
+        def inside?(path)
+          root = File.expand_path(@root)
+          existing = File.expand_path(path)
+          existing = File.dirname(existing) until File.exist?(existing) || File.symlink?(existing) || existing == root || existing == File.dirname(existing)
+          relative = Pathname.new(existing).relative_path_from(Pathname.new(root)).to_s
+          return false if relative.start_with?('..')
+
+          File.realpath(existing) == (relative == '.' ? File.realpath(root) : File.join(File.realpath(root), relative))
+        rescue SystemCallError
+          false
         end
 
         # A recipes.lock that is there is rewritten with one more line: it must
@@ -357,7 +402,11 @@ module ApiRecipes
         # the command cannot tell what the assignment loads.
         def without_dead_assignments(block, given, text, edits, covered)
           return [edits, covered] if given.empty?
-          return [edits, covered] unless last_description? || given.all? { |node| loads_nothing?(node.arguments&.arguments&.first) }
+          loads = given.map { |node| loads(node.arguments&.arguments&.first) }
+          # Gone when nothing it names is left, or when it cannot be read and
+          # the project has no other description: never while it names one.
+          return [edits, covered] if loads.include?(:something)
+          return [edits, covered] unless loads.all?(:nothing) || last_description?
 
           lines = text.lines
           whole = given.map do |node|
@@ -384,19 +433,50 @@ module ApiRecipes
           whole_file? && others.all? { |file| File.expand_path(file, @root) == File.expand_path(@source, @root) }
         end
 
-        # Whether value, given to apis_files_paths, loads no file once the old
-        # one is gone: patterns that find nothing else, a list that names
-        # nothing else. false when the command cannot tell.
-        def loads_nothing?(value)
-          return (found = files_of(value)) && found.empty? if pattern?(value)
-          return loads_nothing?(value.receiver) && loads_nothing?(value.arguments.arguments.first) if value.is_a?(Prism::CallNode) && value.name == :+ && value.arguments&.arguments&.size == 1
-          return false unless value.is_a?(Prism::ArrayNode) && value.opening_loc&.slice == '['
+        # What value, given to apis_files_paths, loads once the old file is
+        # gone: :nothing, :something (a pattern or a list that gives another
+        # description of an api), or :unknown when the command cannot tell.
+        def loads(value)
+          if pattern?(value)
+            found = files_of(value)
+            return :unknown if found.nil?
 
-          value.elements.all? do |element|
-            if written?(element) then element.slice.include?(File.basename(@source))
-            else loads_nothing?(element.is_a?(Prism::SplatNode) ? element.expression : element)
-            end
+            return found.any? { |file| description?(file) } ? :something : :nothing
           end
+          return combined([loads(value.receiver), loads(value.arguments.arguments.first)]) if value.is_a?(Prism::CallNode) && value.name == :+ && value.arguments&.arguments&.size == 1
+          return :unknown unless value.is_a?(Prism::ArrayNode) && value.opening_loc&.slice == '['
+
+          combined(value.elements.map do |element|
+            if written?(element) then named(element)
+            else loads(element.is_a?(Prism::SplatNode) ? element.expression : element)
+            end
+          end)
+        end
+
+        # What one file named in a list gives once the old file is gone.
+        def named(element)
+          return :nothing if element.slice.include?(File.basename(@source))
+
+          path = written_path(element)
+          return :unknown unless path
+
+          description?(path) ? :something : :nothing
+        end
+
+        # Whether the file describes an api. One that cannot be read is
+        # taken as one: the command does not say that it loads nothing.
+        def description?(path)
+          return false unless File.file?(path)
+
+          Convert.shape(File.read(path)).values.any? { |options| options.is_a?(Hash) }
+        rescue Refused, Psych::Exception, SystemCallError, ArgumentError, EncodingError
+          true
+        end
+
+        def combined(states)
+          return :something if states.include?(:something)
+
+          states.all?(:nothing) ? :nothing : :unknown
         end
 
         # The files that a pattern of Dir finds now, without the recipes and

@@ -38,12 +38,17 @@ describe 'api_recipes upgrade, the changes it offers' do
     git('commit', '-q', '-m', 'start')
   end
 
-  # Runs upgrade with these answers typed on a terminal; nil for no terminal.
+  # Runs upgrade with these answers typed on a terminal, where the results
+  # are shown, without colours; nil for no terminal.
   def upgrade(answers, *arguments)
     out = StringIO.new
     input = StringIO.new(answers.to_s)
-    input.define_singleton_method(:tty?) { true } if answers
+    [input, out].each { |io| io.define_singleton_method(:tty?) { true } } if answers
+    saved = ENV.fetch('NO_COLOR', nil)
+    ENV['NO_COLOR'] = '1'
     [ApiRecipes::CLI.run(['upgrade', *arguments], out: out, err: out, input: input), out.string]
+  ensure
+    saved ? ENV['NO_COLOR'] = saved : ENV.delete('NO_COLOR')
   end
 
   it 'shows each change as a diff and makes the ones answered with yes, then says what it changed' do
@@ -114,6 +119,14 @@ describe 'api_recipes upgrade, the changes it offers' do
     expect(git('status', '--porcelain')).to eq('')
   end
 
+  it 'offers nothing in a file whose lines end with CR LF, which the change would not keep' do
+    project(files.merge('config/initializers/api_recipes.rb' => "#{initializer}ApiRecipes.print_urls = true\n".gsub("\n", "\r\n")))
+    code, out = upgrade("y\ny\n")
+    expect(out).to include('does not make the change: config/initializers/api_recipes.rb ends its lines with CR LF')
+    expect(code).to eq(1)
+    expect(git('status', '--porcelain')).to eq('')
+  end
+
   it 'offers nothing for config.values when the block already assigns it, or when two blocks call configure' do
     project(files.merge('config/initializers/api_recipes.rb' => "#{initializer.sub("end\n", "  config.values = { other: {} }\nend\n")}",
                         'config/initializers/billing.rb' => files['config/initializers/billing.rb']))
@@ -123,6 +136,71 @@ describe 'api_recipes upgrade, the changes it offers' do
     git('add', '-A')
     git('commit', '-q', '-m', 'two')
     expect(upgrade("y\n")[1]).not_to include('Make this change?')
+  end
+
+  describe 'what it leaves to the person, with the code to paste' do
+    def offered(startup, initializer_text = initializer)
+      project('Gemfile' => "gem 'api_recipes'\n", 'config/initializers/api_recipes.rb' => "#{initializer_text}#{startup}")
+      _, out = upgrade("y\ny\ny\n")
+      expect(git('status', '--porcelain')).to eq('')
+      out
+    end
+
+    it 'a line that does more than give the value: a condition, or a constant assigned with it' do
+      expect(offered("ENV['DEBUG_URLS'] && ApiRecipes.print_urls = true\n")).not_to include('Make this change?')
+      expect(offered("TOKEN = ApiRecipes.github.authorization = ENV.fetch('GITHUB_TOKEN')\n")).not_to include('Make this change?')
+    end
+
+    it 'a value that reads a local variable, an instance variable or a method of the file, which the block does not have' do
+      expect(offered("token = File.read('/etc/token').strip\nApiRecipes.github.authorization = token\n")).not_to include('Make this change?')
+      expect(offered("ApiRecipes.github.authorization = @token\n")).not_to include('Make this change?')
+      expect(offered("ApiRecipes.github.authorization = token_from_vault\n")).not_to include('Make this change?')
+    end
+
+    it 'a value given after other code that may prepare it, as a require: in the block it would be read before' do
+      expect(offered("require 'dotenv/load'\nApiRecipes.github.authorization = ENV['GITHUB_TOKEN']\n")).not_to include('Make this change?')
+    end
+
+    it 'two credentials for one api, which configure refuses together' do
+      out = offered("ApiRecipes.github.authorization = ENV['A']\nApiRecipes.github.basic_auth = [ENV['U'], ENV['P']]\n")
+      expect(out).not_to include('Give the credentials of the application')
+    end
+
+    it 'apis_files_paths given with a heredoc, whose lines the change would leave as code' do
+      heredoc = "ApiRecipes.configure do |config|\n  config.apis_files_paths = <<~LIST.split\n    config/apis/github.yml\n  LIST\n  config.log_level = :info\nend\n"
+      expect(offered('', heredoc)).not_to include('Take apis_files_paths')
+    end
+  end
+
+  describe 'when it is given what to check' do
+    before do
+      project(files.merge('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir['config/apis/*.yml']\nend\n",
+                          'config/apis/billing.yml' => "billing:\n  host: billing.example.test\n  endpoints:\n    invoices:\n"))
+    end
+
+    it 'moves no api to a recipe and does not take apis_files_paths out: what it was given is not the whole project' do
+      _, out = upgrade("n\nn\nn\n", 'config/initializers')
+      expect(out).to include('Make this change?')
+      expect(out).not_to include('Move the api', 'Take apis_files_paths')
+      _, out = upgrade("n\nn\nn\n", 'config/initializers', '--config', 'config/apis/billing.yml')
+      expect(out).not_to include('Move the api', 'Take apis_files_paths')
+      Dir.chdir('config') { expect(upgrade("n\nn\n", 'initializers', '--config', 'apis/billing.yml')[1]).not_to include('Move the api') }
+      expect(git('status', '--porcelain')).to eq('')
+    end
+
+    it 'offers no change of a rescue in a file that does not name the gem' do
+      File.write('lib_job.rb', "begin\n  work\nrescue => e\n  log(e)\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'job')
+      expect(upgrade("y\n", 'lib_job.rb')[1]).not_to include('Make this change?')
+    end
+  end
+
+  it 'reports a description that is not valid UTF-8, given with --config, as away from a terminal' do
+    project(files.merge('config/apis/bad.yml' => "bad:\n  host: h\xff\n  endpoints:\n    x:\n"))
+    code, out = upgrade("n\nn\n", 'config/initializers', '--config', 'config/apis/bad.yml')
+    expect(out).to include('config/apis/bad.yml: [config] file is not valid UTF-8')
+    expect(code).to eq(1)
   end
 
   describe 'for a rescue that names no class' do
@@ -176,6 +254,13 @@ describe 'api_recipes upgrade, the changes it offers' do
       expect(File.read('app/models/device.rb')).to eq(model.sub("  rescue => e\n", "  rescue ApiRecipes::Error\n    raise\n  rescue => e\n"))
     end
 
+    it 'offers nothing, and reports nothing, for a bare rescue after one of Exception, which catches the errors first' do
+      project('Gemfile' => "gem 'api_recipes'\n",
+              'app/models/device.rb' => "class Device\n  include ApiRecipes\n  def sync\n    work\n  rescue Exception\n    nil\n  rescue\n    nil\n  end\nend\n")
+      _, out = upgrade("y\n")
+      expect(out).not_to include('Make this change?', 'bare rescue now')
+    end
+
     it 'offers it also in a project with no block of configure, and leaves a rescue after a word to the person' do
       project('Gemfile' => "gem 'api_recipes'\n",
               'app/models/device.rb' => "class Device\n  include ApiRecipes\n  api :billing\n  def sync\n    billing.run\n  rescue StandardError, IOError => e\n    nil\n  end\nend\n",
@@ -204,7 +289,8 @@ describe 'api_recipes upgrade, the changes it offers' do
                              "config/apis/billing.yml.erb (deleted)\n", '+   config.recipes_paths = ',
                              "+       billing_host: (ENV['BILLING_HOST'] || 'billing.example.test')", '-   config.apis_files_paths = ',
                              'billing 1.0.0 now comes from a portable recipe', 'other 1.0.0 now comes from a portable recipe',
-                             "Changed in the project\n  - created config/api_recipes/billing.recipe.yml\n  - edited config/initializers/api_recipes.rb\n" \
+                             "Changed in the project\n  - created config/api_recipes/billing.recipe.yml\n  - created config/api_recipes/recipes.lock\n" \
+                             "  - edited config/initializers/api_recipes.rb\n" \
                              "  - deleted config/apis/billing.yml.erb\n  - created config/api_recipes/other.recipe.yml\n  - deleted config/apis/other.yml\n",
                              'Nothing to change')
       expect(out).not_to include('[breaks]')

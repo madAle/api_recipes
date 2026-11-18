@@ -174,6 +174,15 @@ describe 'api_recipes import' do
       end
     end
 
+    it 'refuses a file called as a recipe of another name, which a recipe could not be read from' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'api.recipe.yml')
+        code, out, err = run_cli('import', small, '--name', 'github', '--output', target)
+        expect([code, out, File.exist?(target)]).to eq([2, '', false])
+        expect(err).to include("--output: a recipe called github is read from a file called github.recipe.yml, not api.recipe.yml\n")
+      end
+    end
+
     it 'does not replace a file that exists' do
       Dir.mktmpdir do |dir|
         target = File.join(dir, 'github.yml')

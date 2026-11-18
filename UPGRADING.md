@@ -121,8 +121,9 @@ describes to a recipe in `config/api_recipes`, one after the other:
   last description;
 - the old file is deleted, and every change is listed.
 
-`api_recipes upgrade` offers the same move on a terminal, one API at a time,
-and shows the files it creates, edits and deletes before it asks. A file
+`api_recipes upgrade`, run without arguments in the root of the project,
+offers the same move on a terminal, one API at a time, and shows the files it
+creates, edits and deletes before it asks. A file
 where ERB decides the structure, with `<% if %>` or a tag that gives a name,
 cannot be converted by the command: it says so, and that description is
 rewritten by hand as a recipe. The whole of what `convert` does is in the
@@ -620,14 +621,26 @@ Make this change? [y/N]
   is taken out together with the line that is added.
 - It touches only files that git has committed as they are now, so that
   `git diff` shows the change and `git checkout` undoes it. Otherwise the
-  command says why, and gives the code to paste as before.
-- A line is taken out only when it is one whole statement. A block of
-  `configure` that the command cannot read whole, or that already assigns the
-  value, is left to you, with the code to paste.
-- A change you refuse stays among the findings, with its code to paste. A
-  `rescue` that comes after one of `ApiRecipes::Error` is no longer a finding.
-- Away from a terminal, as in a CI, and with `--no-code`, the command asks
-  nothing and changes nothing.
+  command says why, and gives the code to paste as before. A file saved while
+  the question waits is not written over: the command says so and writes
+  nothing. A file whose lines end with CR LF is left to you.
+- A line is taken out only when it is the assignment and nothing else, and
+  the value reads nothing that only that place has: a local variable, an
+  instance variable, a method of the file. A value given after other code
+  that may prepare it, as a `require`, two credentials for one API, a block of
+  `configure` that the command cannot read whole or that already assigns the
+  value, are left to you, with the code to paste.
+- A rescue is changed only in a file that names the gem. A change you refuse
+  stays among the findings, with its code to paste. A `rescue` that comes
+  after one that catches the errors of the gem first (`ApiRecipes::Error`,
+  `StandardError`, `Exception`, or one that names no class) is not a finding.
+- Given files or folders to check, the command moves no API to a recipe and
+  does not take `apis_files_paths` out: it does not know the rest of the
+  project. Run it without arguments in the root of the project for those.
+- It asks only when it reads the answers from a terminal and shows the
+  results on one. Away from a terminal, as in a CI or with the results sent
+  to a file, and with `--no-code`, the command asks nothing and changes
+  nothing.
 
 The steps at the end are those of what was found: a kind of finding that is
 not there has no step. On a terminal the same results are shown in sections,

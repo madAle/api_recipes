@@ -10,7 +10,7 @@ module ApiRecipes
       # The description cannot be imported. The message says where and why.
       class Error < ApiRecipes::Error; end
 
-      Result = Data.define(:text, :warnings, :summary)
+      Result = Data.define(:name, :text, :warnings, :summary)
       MAX_WARNINGS = 100
 
       # calls: write beside each endpoint how it is called in Ruby.
@@ -49,7 +49,7 @@ module ApiRecipes
         end
         warnings += server.warnings + security.warnings + tree.warnings
         warnings << 'no operation was imported' if tree.operations.zero?
-        Result.new(text: text, warnings: shown_warnings(warnings), summary: summary(tree, warnings.size))
+        Result.new(name: name, text: text, warnings: shown_warnings(warnings), summary: summary(tree, warnings.size))
       end
 
       private

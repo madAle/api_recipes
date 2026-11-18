@@ -37,9 +37,11 @@
   change is shown as a diff and made only after `y`, in files that git has
   committed as they are now. For a `rescue` that names no class it offers to
   put `rescue ApiRecipes::Error` with a `raise` before it, as 2.x behaved, and
-  a `rescue` that already comes after one of `ApiRecipes::Error` is no longer
-  reported. Away from a terminal, and with `--no-code`, the
-  command changes nothing.
+  a `rescue` that already comes after one that catches the errors of the gem
+  is no longer reported. It asks only when the answers come from a terminal
+  and the results go to one; away from a terminal, and with `--no-code`, the
+  command changes nothing. A file saved while the question waits is not
+  written over.
 - `api_recipes upgrade` ends with `What to do now`: the steps to take, one for
   each kind of finding that there is. What needs an answer comes last: what
   was checked and the changes the command cannot find are printed first, then

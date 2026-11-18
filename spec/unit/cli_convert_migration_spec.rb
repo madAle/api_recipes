@@ -217,6 +217,32 @@ describe 'api_recipes convert, in a project' do
       expect(File.read('config/initializers/api_recipes.rb')).to include('apis_files_paths')
     end
 
+    it 'keeps apis_files_paths while it names a description that the command did not find, as one in vendor' do
+      project('config/initializers/api_recipes.rb' => <<~RUBY, 'vendor/apis/other.yml' => other)
+        ApiRecipes.configure do |config|
+          config.apis_files_paths = [
+            File.expand_path('../apis/billing.yml.erb', __dir__),
+            File.expand_path('../../vendor/apis/other.yml', __dir__)
+          ]
+        end
+      RUBY
+      code, out, = convert
+      expect(code).to eq(0)
+      expect(out).not_to include('apis_files_paths, which loads nothing now, is gone')
+      expect(File.read('config/initializers/api_recipes.rb')).to include("File.expand_path('../../vendor/apis/other.yml', __dir__)")
+      expect(File.read('config/initializers/api_recipes.rb')).not_to include('billing.yml.erb')
+    end
+
+    it 'takes nothing out of a file that has changes git has not committed, also after it added lines to it' do
+      project('config/apis/other.yml' => other)
+      File.write('config/initializers/api_recipes.rb', initializer.sub("end\n", "  config.log_level = :debug # not committed\nend\n"))
+      code, out, = convert
+      expect(code).to eq(0)
+      expect(out).to include('billing 1.0.0 now comes from a portable recipe', 'other 1.0.0 now comes from a portable recipe',
+                             'loads no file now: you can take it out')
+      expect(File.read('config/initializers/api_recipes.rb')).to include('config.apis_files_paths =', '# not committed')
+    end
+
     it 'says so when the project describes no api in a file, and still needs a file outside a project' do
       write('Gemfile', "gem 'api_recipes'\n")
       expect(convert).to match([0, /No file of this project describes an api/, ''])

@@ -1067,9 +1067,10 @@ What the command does:
 - **The old description is removed**: the file is deleted, or only the lines
   of that API when it describes others, because a recipe never takes the place
   of an API that another source defines. With the last description of the
-  project the lines of `config.apis_files_paths` are taken out, however they
-  are written, when git has the file as it is now or as this run of the
-  command left it; otherwise the command tells you to take them out, because
+  project the lines of `config.apis_files_paths` are taken out, when git has
+  the file as it is now or as this run of the command left it, unless they
+  still name a file that describes an API, as one in `vendor` that the command
+  does not look at; otherwise the command tells you to take them out, because
   3.0 refuses the option.
 - **`verify_with`**, which a recipe cannot carry, is given to each `api :name`
   that a class or a module declares. One that a tag gave, or that an endpoint
@@ -1082,7 +1083,8 @@ It changes your files only when that is safe, and all at once or not at all:
 
 - Lines are added only to a plain file of the project that is in the last
   commit of git. A file is deleted, or lines are taken out of it, only when
-  git has it committed as it is now. A symbolic link, and a file that git was told to skip, are never
+  git has it committed as it is now: its id is compared with the one in the
+  index and in the last commit, and no filter of the repository is run. A symbolic link, and a file that git was told to skip, are never
   changed. Outside a git repository the project is not changed.
 - Ruby is read as a tree, never matched as lines and never run, and the
   command edits only what it can read whole:
@@ -1095,12 +1097,15 @@ It changes your files only when that is safe, and all at once or not at all:
   - `config.apis_files_paths`, while other files still describe an API: it
     must be given patterns of `Dir`, or a list between brackets of names
     written as text, from which the one element that names the file is taken
-    out. With the last description the whole assignment goes.
+    out. With the last description the whole assignment goes, unless it still
+    names another file that describes an API.
 
   Anything else stops it: another mention of the old file in the code, another
   file that describes the API, a `recipes_paths` it cannot read.
 - Every Ruby file it changes must still be Ruby with the change, and when a
-  write fails every file is put back as it was.
+  write fails every file is put back as it was. A file that changed after the
+  command read it is not written over. The recipe is not written below a
+  symbolic link.
 - When a step is not possible, nothing is written, the command says why, and
   it gives the steps to do by hand with the code to paste: the commands that
   write and install the recipe, the lines for the block of

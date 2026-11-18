@@ -171,7 +171,9 @@ module ApiRecipes
         summary.warnings.each { |warning| @out.puts "  warning: #{warning}" }
         return if current.nil? || current == summary.text
 
-        if entry && entry.sha256 != Recipe.digest(current)
+        if entry.nil?
+          @out.puts "  #{destination} is a recipe that recipes.lock does not name: what it holds now will be lost"
+        elsif entry.sha256 != Recipe.digest(current)
           @out.puts "  #{destination} was changed after it was installed: those changes will be lost"
         end
         summary.changes_from(installed_summary(current, destination)).each { |line| @out.puts line }

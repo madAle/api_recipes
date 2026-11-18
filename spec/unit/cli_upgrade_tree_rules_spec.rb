@@ -143,6 +143,27 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
     expect(out.string).to include('Nothing to change')
   end
 
+  it 'looks only at what an api gives, in a file that uses the gem: not at an object of the application with the same methods' do
+    found = findings(<<~RUBY)
+      class Payment
+        include ApiRecipes
+        api :github
+
+        def pay
+          payment.authorization = 12
+          self.authorization = 1
+          worker = Thread.new { 1 }.run
+          worker.to_s
+          result = runner.run
+          result.to_s
+          job.run { |step| step.name }.size
+          github.users.run.to_s
+        end
+      end
+    RUBY
+    expect(found).to eq([])
+  end
+
   it 'reads a file that is not valid Ruby with the rules on lines only' do
     expect(findings("class Client\n  github.authorization = 1\n")).to eq([])
   end

@@ -160,7 +160,7 @@ module ApiRecipes
       def report(out, err, input: nil)
         findings = run
         screen = Screen.new(out)
-        changed = @code && Fix.asks?(input) ? offered(screen, input, out, err) : []
+        changed = @code && Fix.asks?(input, out) ? offered(screen, input, out, err) : []
         findings = look_again unless changed.empty?
         unless @notes.empty?
           screen.section('🔎', 'What was checked', plain: false)
@@ -202,7 +202,9 @@ module ApiRecipes
         declined = []
         written = {}
         loop do
-          key, title, migration = conversions(ours, out, err).find { |one| !declined.include?(one.first) }
+          # Only the whole project is moved to recipes: given some files, the
+          # command does not know the others.
+          key, title, migration = (@project ? conversions(ours, out, err) : []).find { |one| !declined.include?(one.first) }
           if key
             declined << key
             preview = migration.preview
@@ -282,7 +284,10 @@ module ApiRecipes
           found << change(:print_urls, 'Move print_urls into the block of ApiRecipes.configure', urls, file, text, block,
                           ["#{block.config}.print_urls = #{urls.first[:code]}"])
         end
-        unless values.empty? || block.assigned_anywhere?(:values)
+        # Two credentials for one api, or one given twice: configure would
+        # refuse the first, and which one 2.x kept depends on the order.
+        twice = values.group_by { |item| item[:api] }.any? { |_, list| list.size > 1 }
+        unless values.empty? || twice || block.assigned_anywhere?(:values)
           found << change(:values, 'Give the credentials of the application to ApiRecipes.configure, as config.values', values, file, text,
                           block, ["#{block.config}.values = {", *entries_of(values).map { |entry| "  #{entry}" }, '}'])
         end
@@ -297,7 +302,7 @@ module ApiRecipes
         tree = text && Code.tree(text)
         clause = tree && rescue_at(tree, item[:line])&.last
         line = text && text.lines[item[:line] - 1]
-        return nil unless clause && line.match?(/\A[ \t]*rescue\b/)
+        return nil unless clause && line.match?(/\A[ \t]*rescue\b/) && names_gem?(text)
         return nil unless clause.exceptions.empty? || clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'StandardError' }
 
         indent = line[/\A[ \t]*/]
@@ -327,20 +332,34 @@ module ApiRecipes
         nil
       end
 
-      # Whether a clause before the one at line number rescues ApiRecipes::Error.
+      # Whether a clause before the one at line number catches the errors of
+      # the gem first: one that names ApiRecipes::Error, Exception or
+      # StandardError, or names no class.
       def gem_errors_handled?(text, number)
         tree = Code.tree(text)
         earlier = tree && rescue_at(tree, number)&.first
         return false unless earlier
 
-        earlier.any? { |clause| clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'ApiRecipes::Error' } }
+        earlier.any? do |clause|
+          clause.exceptions.empty? || clause.exceptions.any? { |one| %w[ApiRecipes::Error Exception StandardError].include?(one.slice.delete_prefix('::')) }
+        end
+      end
+
+      # Whether the code of a file names the gem: a change is made only there.
+      def names_gem?(text)
+        return @project.uses_gem?(text) if @project
+
+        text.each_line.reject { |line| line.lstrip.start_with?('#') }.join.match?(/\bApiRecipes\b/)
       end
 
       # apis_files_paths goes out of the block of configure once no file of
       # the project describes an api: 3.0 refuses the option.
       def without_files(file, text, block)
         given = block.assignments(:apis_files_paths)
-        return nil if given.empty? || @configs.any? { |one| !one.end_with?(Internals::Recipe::SUFFIX) }
+        # Only in the whole project the command knows that no description is left.
+        return nil if !@project || given.empty? || @configs.any? { |one| !one.end_with?(Internals::Recipe::SUFFIX) }
+        # The lines of a heredoc come after the statement that opens it.
+        return nil if given.any? { |node| !Code.nodes(node) { |one| one.respond_to?(:opening_loc) && one.opening_loc&.slice&.start_with?('<<') }.empty? }
 
         lines = text.lines
         gone = given.flat_map do |node|
@@ -361,7 +380,7 @@ module ApiRecipes
       def change(key, title, items, file, text, block, added)
         texts = items.group_by { |item| item[:file] }.to_h { |path, list| [path, [path == file ? text : read_ruby(path), list.map { |item| item[:line] }]] }
         texts[file] ||= [text, []]
-        return nil unless texts.all? { |_, (content, lines)| content && lines.all? { |number| own_statement?(content, number) } }
+        return nil unless texts.all? { |path, (content, lines)| content && lines.all? { |number| movable?(content, number, path == file ? block : nil) } }
 
         written = texts.to_h do |path, (content, lines)|
           kept = content.lines.each_with_index.reject { |_, index| lines.include?(index + 1) }
@@ -374,14 +393,39 @@ module ApiRecipes
         written.values.all? { |content| Code.tree(content) } ? Fix::Change.new(key, title, written) : nil
       end
 
-      # Whether line number of text holds one whole statement and nothing else.
-      def own_statement?(text, number)
+      MOVED = %i[print_urls= authorization= basic_auth=].freeze
+
+      # Whether line number of text holds one assignment of a value given
+      # when the application starts, and nothing else, whose value the block
+      # of configure would give the same: it reads no variable and no method
+      # of the file, and, in the file of the block, no other code comes
+      # between the block and the line, as a require that prepares it.
+      def movable?(text, number, block)
         tree = Code.tree(text)
         return false unless tree
 
         statements = Code.nodes(tree) { |node| node.is_a?(Prism::StatementsNode) }.flat_map(&:body)
         here = statements.select { |node| node.location.start_line == number && node.location.end_line == number }
-        here.size == 1 && text.lines[number - 1].strip == here.first.slice
+        return false unless here.size == 1 && text.lines[number - 1].strip == here.first.slice
+
+        node = here.first
+        return false unless node.is_a?(Prism::CallNode) && MOVED.include?(node.name) && node.arguments&.arguments&.size == 1
+        return false unless Code.nodes(node.arguments) { |one| local_value?(one) }.empty?
+        return true unless block && number > block.last
+
+        startup = @startup.select { |item| item[:line] > block.last }.map { |item| item[:line] }
+        tree.statements.body.none? do |other|
+          other.location.start_line > block.last && other.location.start_line < number && !startup.include?(other.location.start_line)
+        end
+      end
+
+      # A value that only the place where it is written has.
+      def local_value?(node)
+        case node
+        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::SelfNode then true
+        when Prism::CallNode then node.receiver.nil? && !%i[[] !].include?(node.name)
+        else false
+        end
       end
 
       def entries_of(items)
@@ -497,7 +541,7 @@ module ApiRecipes
       def in_the_tree(file, text, found)
         reported = found.select { |finding| WRITER_RULES.any? { |rule| rule.message == finding.message } }.map(&:line)
         uses = !@project || @project.uses_gem?(text)
-        TreeRules.findings(text, uses_gem: uses, reported: reported).map do |one|
+        TreeRules.findings(text, uses_gem: uses, reported: reported, apis: @project ? @project.api_names : []).map do |one|
           Finding.new(file: file, line: one.line, kind: one.kind, message: one.message)
         end
       end

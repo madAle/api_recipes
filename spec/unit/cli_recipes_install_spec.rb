@@ -261,6 +261,13 @@ RSpec.describe 'api_recipes install' do
                              "    no change in the address, the credential, the headers, the parameters or the verbs\n")
     end
 
+    it 'says that a recipe written in the project, which the lock does not name, will be replaced' do
+      FileUtils.mkdir_p(@dir)
+      File.write(destination, recipe_text('shop', 'timeout' => 10))
+      _code, out, = install(source)
+      expect(out).to include("  #{destination} is a recipe that recipes.lock does not name: what it holds now will be lost\n")
+    end
+
     it 'says when it replaces a file that is not a valid recipe' do
       FileUtils.mkdir_p(@dir)
       File.write(destination, "shop: [broken\n")

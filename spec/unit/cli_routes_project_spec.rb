@@ -67,9 +67,13 @@ describe 'api_recipes routes, in a project' do
     expect(out).to include('https://evaluated.example.test/invoices')
   end
 
-  it 'takes another name for the variable when the api has one called erb' do
-    project('config/apis/billing.yml.erb' => "billing:\n  variables:\n    erb: {}\n  host: <%= ENV['H'] %>\n  base_url: '{erb}'\n  endpoints:\n    invoices:\n")
-    expect(run_cli('routes')[1]).to eq("billing.invoices  GET  https://{erb_tag}/{erb}/invoices\n")
+  it 'takes another name for the variable when the api has one called erb, declared or only used, and says which' do
+    project('config/apis/billing.yml.erb' => "billing:\n  variables:\n    erb: {}\n  host: <%= ENV['H'] %>\n  base_url: '{erb}'\n  endpoints:\n    invoices:\n",
+            'config/apis/other.yml.erb' => "other:\n  host: <%= ENV['H'] %>\n  base_url: '{erb}'\n  endpoints:\n    ping:\n")
+    _, out, err = run_cli('routes')
+    expect(out).to eq("billing.invoices  GET  https://{erb_tag}/{erb}/invoices\nother.ping        GET  https://{erb_tag}/{erb}/ping\n")
+    expect(err).to include('config/apis/billing.yml.erb: what an ERB tag gives is shown as {erb_tag}',
+                           'config/apis/other.yml.erb: what an ERB tag gives is shown as {erb_tag}')
   end
 
   it 'says of a file whose tags it cannot show, and lists the calls of the others' do

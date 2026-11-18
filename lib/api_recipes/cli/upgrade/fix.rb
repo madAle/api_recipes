@@ -18,8 +18,9 @@ module ApiRecipes
           def initialize(key:, title:, texts:, note: nil) = super
         end
 
-        # Whether someone is there to answer.
-        def self.asks?(input) = input.respond_to?(:tty?) && input.tty? ? true : false
+        # Whether someone is there to read the question and answer it: the
+        # answers come from a terminal, and the results go to one.
+        def self.asks?(input, out) = [input, out].all? { |io| io.respond_to?(:tty?) && io.tty? }
 
         # shown: how the name of a file is shown. ours: { file => text } for
         # the files that this run of the command already changed.
@@ -64,7 +65,15 @@ module ApiRecipes
           change.texts.each { |file, text| @screen.diff(@shown.call(file), before[file], text) }
           return nil unless @screen.ask('Make this change?', @input)
 
+          changed = change.texts.keys.find { |file| File.read(full(file)) != before[file] }
+          if changed
+            @screen.line("#{@shown.call(changed)} changed while the question waited: nothing was written. Run the command again.")
+            return nil
+          end
           write(change, before) ? change.texts.keys : nil
+        rescue SystemCallError => e
+          @screen.line("The change could not be written (#{e.class.name.split('::').last}): nothing was written")
+          nil
         end
 
         private
@@ -83,7 +92,11 @@ module ApiRecipes
           return 'git was not found, and without it a change could not be seen or undone' unless status&.success?
 
           file = change.texts.keys.find { |one| !(committed?(one) || ours?(one)) || !File.writable?(full(one)) }
-          file && "#{@shown.call(file)} is not a file that git has committed as it is now, so what changes could not be brought back"
+          return "#{@shown.call(file)} is not a file that git has committed as it is now, so what changes could not be brought back" if file
+
+          # The lines of a change are written with LF, and a diff would not show the difference.
+          crlf = change.texts.keys.find { |one| File.binread(full(one)).include?("\r") }
+          crlf && "#{@shown.call(crlf)} ends its lines with CR LF, which this change would not keep"
         end
 
         # A plain file of the project: not a symbolic link, not below one,
@@ -103,26 +116,21 @@ module ApiRecipes
           listed, status = git('ls-files', '-v', '--error-unmatch', '--', file)
           return false unless plain?(file) && status&.success? && listed.start_with?('H ')
 
-          changes, clean = git('status', '--porcelain', '--', file)
-          clean&.success? && changes.empty? ? true : false
+          Convert::Migration.as_committed?(file) { |*arguments| git(*arguments) }
         end
 
         # Whether the file is as this command left it, after a change made
         # to it when git had it committed.
         def ours?(file) = plain?(file) && @ours.key?(file) && File.read(full(file)) == @ours[file]
 
-        # Writes every file of the change. When one cannot be written, the
-        # ones already written are put back.
+        # Writes every file of the change. When one cannot be written, every
+        # file is put back: also the one that failed, which can be emptied.
         def write(change, before)
-          written = []
-          change.texts.each do |file, text|
-            File.write(full(file), text)
-            written << file
-          end
+          change.texts.each { |file, text| File.write(full(file), text) }
           @ours.merge!(change.texts)
           true
         rescue SystemCallError => e
-          lost = written.reject do |file|
+          lost = change.texts.keys.reject do |file|
             File.write(full(file), before[file])
             true
           rescue SystemCallError

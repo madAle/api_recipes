@@ -138,11 +138,15 @@ classes are built once, by `configure`.
   The recipe is checked with `Internals::Recipe` before it is written, and the
   file is created with `File::EXCL`.
 - `Upgrade::Fix` edits a file of a project only after a yes typed on a
-  terminal to the diff of that change: never away from a terminal, never with
-  `--no-code`, and only files that git has committed as they are now, or as
-  the same run left them. A change writes all its files or none, takes out
-  only a line that is one whole statement, and its diff shows nothing a
-  terminal obeys. A new kind of change follows the same rules, and comes with
+  terminal to the diff of that change, shown on a terminal: never away from
+  one, never with `--no-code`, and only files that git has committed as they
+  are now, or as the same run left them after a change made when git had
+  them committed. A file that changed while the question waited is not
+  written. A change writes all its files or none, takes out only a line that
+  is the assignment it moves and nothing else, and its diff shows nothing a
+  terminal obeys. Whether a file is committed as it is now is told by
+  `Migration.as_committed?`, which compares ids and runs no filter: never by
+  `git status`. A new kind of change follows the same rules, and comes with
   its example under `spec/security`.
 - `Convert::Migration` and `Upgrade::Fix` are the only code of the gem that
   edits or deletes a file of a project. About `Convert::Migration`: It reads Ruby as a tree (`Code.tree`, Prism, a default

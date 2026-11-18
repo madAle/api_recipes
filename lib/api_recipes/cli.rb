@@ -152,6 +152,11 @@ module ApiRecipes
         end
 
         result = Import.new(paths.first, **options).call
+        expected = "#{result.name}#{Internals::Recipe::SUFFIX}"
+        if output&.end_with?(Internals::Recipe::SUFFIX) && File.basename(output) != expected
+          err.puts "--output: a recipe called #{result.name} is read from a file called #{expected}, not #{Recipes::Summary.shown(File.basename(output), 100)}"
+          return 2
+        end
         return 2 unless write_recipe(result.text, output, out, err)
 
         result.warnings.each { |warning| err.puts "warning: #{warning}" }
