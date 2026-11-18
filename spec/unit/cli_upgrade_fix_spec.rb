@@ -153,7 +153,9 @@ describe 'api_recipes upgrade, the changes it offers' do
       code, out = upgrade("y\ny\n")
       expect(out).to include('Keep the errors of ApiRecipes out of the rescue at app/models/device.rb:14, as in 2.x',
                              'Keep the errors of ApiRecipes out of the rescue at app/models/device.rb:7, as in 2.x',
-                             'In 2.x this rescue did not catch the errors of the gem.',
+                             "In 2.x this rescue did not catch the errors of api_recipes: they went on to the code that called. In 3.0 it catches them.\n" \
+                             "  - y: keep what 2.x did. The errors of api_recipes are raised again before this rescue sees them\n" \
+                             "  - n: leave the code as it is. This rescue handles the errors of api_recipes too\n",
                              "    billing.invoices.run\n+   rescue ApiRecipes::Error\n+     raise\n    rescue => e\n")
       expect(out).not_to include('[check]')
       expect(code).to eq(0)

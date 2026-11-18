@@ -64,8 +64,10 @@ module ApiRecipes
       # The rule about a rescue that names no class, and what the change
       # that the command offers for it means.
       BARE_RESCUE = RULES.find { |rule| rule.message.start_with?('a bare rescue') }
-      RESCUE_NOTE = 'In 2.x this rescue did not catch the errors of the gem. Yes keeps it so: they go on to the code that ' \
-                    'called. No lets this rescue handle them from now on.'
+      RESCUE_NOTE = ['In 2.x this rescue did not catch the errors of api_recipes: they went on to the code that called. ' \
+                     'In 3.0 it catches them.',
+                     'y: keep what 2.x did. The errors of api_recipes are raised again before this rescue sees them',
+                     'n: leave the code as it is. This rescue handles the errors of api_recipes too'].freeze
 
       # What stands for the value of an ERB tag in a file that is checked
       # without running its code.

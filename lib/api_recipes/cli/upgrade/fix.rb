@@ -12,7 +12,8 @@ module ApiRecipes
       # it can be seen and undone, and writes all its files or none.
       class Fix
         # key: what the change is, said once. texts: { file => its new text }.
-        # note: what yes and no mean, when the title does not say it.
+        # note: what yes and no mean, when the title does not say it: a line
+        # of text, then one entry for each answer.
         Change = Data.define(:key, :title, :texts, :note) do
           def initialize(key:, title:, texts:, note: nil) = super
         end
@@ -38,7 +39,11 @@ module ApiRecipes
             @screen.line("This command does not make the change: #{reason}. The code to paste is below.")
             return nil
           end
-          @screen.line(change.note) if change.note
+          if change.note
+            @screen.line(change.note.first)
+            change.note.drop(1).each { |answer| @screen.item(answer) }
+            @screen.gap
+          end
           before = change.texts.keys.to_h { |file| [file, File.read(full(file))] }
           change.texts.each { |file, text| @screen.diff(@shown.call(file), before[file], text) }
           return nil unless @screen.ask('Make this change?', @input)
