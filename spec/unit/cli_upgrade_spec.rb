@@ -58,7 +58,6 @@ describe 'api_recipes upgrade' do
       expect(code).to eq(1)
       expect(out).to match(/a\.rb:7: \[breaks\] a credential of the whole application/)
       expect(out).to match(/a\.rb:8: \[breaks\] a credential of the whole application/)
-      expect(out).to include('a credential assigned through a variable that holds the api')
       expect(out).to match(/a\.rb:1: \[breaks\] a credential of the whole application is given to ApiRecipes\.configure/)
       expect(out).to match(/a\.rb:2: \[breaks\] a credential of the whole application/)
       expect(out).to match(/a\.rb:3: \[check\] authorization= and basic_auth= now work on an object only/)
@@ -89,35 +88,19 @@ describe 'api_recipes upgrade' do
     end
   end
 
-  it 'lists the changes of the response, of the credentials and of the header values' do
+  it 'lists only the changes that reading the code cannot find' do
     _, out, = run('upgrade', File.join(root, 'app'))
-    expect(out).to include('response.request was removed',
-                           'response.to_s returns the body',
-                           'a credential that is not a String',
-                           'a {word} in a value of default_headers',
-                           'a {word} in the path of an endpoint',
-                           'without it the request raises InvalidUrl')
-  end
-
-  it 'lists the accessors and changes that a text search cannot tell apart' do
-    _, out, = run('upgrade', File.join(root, 'app'))
-    expect(out).to include('Endpoint#name, #params, #children, #api and Api#name, #configs, #object',
-                           'an object restored from a serialized form',
-                           'response.uri leaves out the credential query parameter',
-                           'a redirect to a host with non-ASCII characters needs the addressable gem',
-                           'an endpoint called with, definition, authorization, basic_auth or variables',
-                           'or run, url, with or definition')
-  end
-
-  it 'lists the changes that a search in the text cannot find' do
-    _, out, = run('upgrade', File.join(root, 'app'))
-    expect(out).to include('a class with its own host, protocol or port that relied on the global credential',
-                           'cookies set by a server during a redirect chain',
-                           'api names that are methods of Kernel',
-                           'a base_url with a placeholder in a configuration given as a Hash',
-                           'respond_to? on a response now tells the truth',
-                           'serializing an Api, an Endpoint or a Response raises TypeError',
-                           'a class that includes ApiRecipes and uses a top-level constant named Error, Internals, VERSION')
+    list = out[/What this command cannot find\n((?:  - .*\n)+)/, 1].lines
+    expect(list.size).to eq(12)
+    expect(list.join).to include('that is already encoded when it arrives', 'a / inside the value of a path parameter',
+                                 'read from STDOUT', 'a bare rescue in a file that does not name the gem',
+                                 'the message of a verify_with error', 'fill with private setters',
+                                 'cookies set by a server during a redirect chain',
+                                 'Endpoint#name, #params, #children, #api and Api#name, #configs, #object',
+                                 'an object restored from a serialized form',
+                                 'response.uri leaves out the credential query parameter',
+                                 'a redirect to a host with non-ASCII characters needs the addressable gem',
+                                 'a response that a method receives as an argument')
   end
 
   it 'validates configuration files with the 3.0 rules' do

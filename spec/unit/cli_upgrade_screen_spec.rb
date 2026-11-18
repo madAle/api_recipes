@@ -86,7 +86,7 @@ describe 'api_recipes upgrade, what it shows' do
                              "   🧩 \e[1;35mconfig\e[0m  \e[1mconfig/apis/billing.yml\e[0m\n      billing: unknown option 'hots'\n",
                              "💥 \e[1;31m3 findings\e[0m  \e[31m1 breaks\e[0m\e[2m · \e[0m\e[35m1 config\e[0m\e[2m · \e[0m\e[33m1 check\e[0m\n")
       expect(plain(out)).to include("      config.print_urls = true\n", "   1. Fix the 1 line marked breaks: that code stops working")
-      expect(plain(out)).to include(*ApiRecipes::CLI::Upgrade::SILENT_CHANGES.first(3).map { |change| "   • #{change}" })
+      expect(plain(out)).to include("   • #{ApiRecipes::CLI::Upgrade::SILENT_CHANGES[2]}\n", '🙈 What this command cannot find  12 changes')
     end
 
     it 'says in green that there is nothing to change' do
@@ -103,7 +103,7 @@ describe 'api_recipes upgrade, what it shows' do
       [60, 80, 110, 300].each do |width|
         lines = plain(run(terminal(width))[1]).lines.map(&:chomp)
         expect(lines.map(&:length).max).to be <= [width, 110].min
-        expect(lines.join(' ').squeeze(' ')).to include(ApiRecipes::CLI::Upgrade::SILENT_CHANGES[5])
+        expect(lines.join(' ').squeeze(' ')).to include(ApiRecipes::CLI::Upgrade::SILENT_CHANGES.max_by(&:length))
       end
     end
 

@@ -1,5 +1,16 @@
 ## Unreleased
 
+- `api_recipes upgrade` finds most of what it used to list as impossible to
+  find. It reads each Ruby file as a tree: a credential assigned in the body
+  of a class, through a variable, over two lines or with `send`; a credential
+  that is not text; an api name that is already a method; a class with an
+  address of its own and no credential; `apis_configs` assigned after the
+  files; a block passed to `run` whose value is used; `request`, `to_s` and
+  `respond_to?` on what `run` returned; a constant of the gem written alone in
+  a class that includes `ApiRecipes`. In a description it finds an option
+  that inner endpoints now find on the endpoint that contains them, and an
+  endpoint with no method of its own. The list of what the command cannot
+  find goes from 29 entries to 12.
 - `api_recipes upgrade` offers, on a terminal, to make the changes it is sure
   of: `ApiRecipes.print_urls = ...` and the credentials assigned on
   `ApiRecipes.NAME` move into the block of `ApiRecipes.configure`. Each

@@ -491,11 +491,25 @@ It finds by itself what to check, and says what it checked:
   `[breaks]`; a line that deserves a look because its result changes is marked
   `[check]`: a manual encoding of a path parameter, a bare `rescue`, `follow:`,
   `response.request`, the removed `Hash` and `Array` methods.
+- **What a line alone does not tell.** The command also reads each Ruby file
+  as a tree, without running it, and finds: a credential assigned in the body
+  of a class, through a variable, over two lines or with `send`; a credential
+  that is not text; `api :format` and the other names that are already
+  methods; a class that gives an API its own `host`, `protocol` or `port`
+  and no credential; `apis_configs` assigned after the files; a block passed
+  to `run` whose value is used; `request`, `to_s` and `respond_to?` called on
+  what `run` returned, whatever the variable is called; and `Error`,
+  `VERSION` or the name of an error of the gem written alone in a class that
+  includes `ApiRecipes`. A file that is not valid Ruby is read line by line
+  only.
 - **The files that describe an API**: the YAML files (`.yml`, `.yaml`, also
   followed by `.erb`) where a name has `endpoints`, each with its options or
   with none, and the files called `NAME.recipe.yml`. Those under `spec`, `test`
   and `features` are fixtures and are left out. Each is checked with the rules
-  of 3.0 (marked `[config]`).
+  of 3.0 (marked `[config]`). Two changes that give no error are marked
+  `[check]`: `timeout`, `on_bad_code`, `mime_type` or `verify_with` set on an
+  endpoint whose inner endpoints do not set it, which now find it there, and
+  an endpoint whose name is a method of the object that would have it.
 - **Less noise.** A bare `rescue` or a call to `CGI.escape` is in every
   application. The checks that also match code that has nothing to do with the
   gem are applied only to the files whose code names `ApiRecipes` or calls one

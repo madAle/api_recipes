@@ -4,6 +4,7 @@ require 'securerandom'
 require 'api_recipes/cli/upgrade/project'
 require 'api_recipes/cli/upgrade/screen'
 require 'api_recipes/cli/upgrade/fix'
+require 'api_recipes/cli/upgrade/tree_rules'
 
 module ApiRecipes
   module CLI
@@ -61,6 +62,9 @@ module ApiRecipes
       # The rule about the Hash methods that ActiveSupport defines too.
       HASH_METHODS = RULES.last
 
+      # The rules on lines about a credential assigned with a writer.
+      WRITER_RULES = RULES.select { |rule| %i[global_writer writer].include?(rule.fix) }.freeze
+
       # The rule about a rescue that names no class, and what the change
       # that the command offers for it means.
       BARE_RESCUE = RULES.find { |rule| rule.message.start_with?('a bare rescue') }
@@ -88,35 +92,19 @@ module ApiRecipes
       MAX_CODE = 300
 
       SILENT_CHANGES = [
-        'path parameters encoded by hand: %2F would become %252F, remove the encoding',
-        'a / inside a path parameter to cover several segments: use *name or two placeholders',
+        'a value of a path parameter that is already encoded when it arrives: %2F would become %252F. The gem warns when it sees one',
+        'a / inside the value of a path parameter to cover several segments: use *name or two placeholders. The gem warns when it sees one',
         'debug logs or print_urls output read from STDOUT: set log_to and log_level',
-        'a bare rescue around a call: it now catches the errors of the gem too',
-        'credentials assigned on an instance: they now take effect',
-        'a credential assigned through a variable that holds the api of the module or of a class (api = ApiRecipes.github, then api.authorization = ...), inside the body of a class (github.authorization = ...), with send, or on a statement split over two lines: the writer raises, give it to config.values or to `api :name, authorization: ...`',
+        'a bare rescue in a file that does not name the gem, around code that calls it somewhere else: it now catches the errors of the gem too',
         'the response body read from the message of a verify_with error: read it from error.response',
-        'a block passed to run whose return value is used: it is now the Response',
-        'apis_configs assigned after the files to discard them: do not assign the files',
-        'timeout, on_bad_code, mime_type or verify_with on an endpoint that contains other endpoints: one that does not set the option now finds it there, before the api',
-        'an endpoint called with, definition, authorization, basic_auth or variables (on an api), or run, url, with or definition (on an endpoint): reach it with []; the warning at configuration reports it',
         'fill with private setters, or code that relies on swallowed errors: make the setters public, handle the errors',
-        'follow: true together with a credential: the credential no longer follows to another host',
-        'a class with its own host, protocol or port that relied on the global credential: set the credential on the class',
         'cookies set by a server during a redirect chain: they are no longer carried to the next hop',
-        'api names that are methods of Kernel, such as :open or :format: they raise ApiNameClashError, use as:',
         'Endpoint#name, #params, #children, #api and Api#name, #configs, #object were removed: use definition (a search cannot tell them from other methods called like that)',
         'an object restored from a serialized form (Marshal, YAML) has no credential: assign it again',
         'response.uri leaves out the credential query parameter when the api declares auth type query',
         'a redirect to a host with non-ASCII characters needs the addressable gem: without it the request raises InvalidUrl',
-        'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable',
-        'response.request was removed, whatever the name of the variable that holds the response: the request holds the credentials, read response.uri or response.original_response',
-        'response.to_s returns the body, as the http.rb response does: it was the default text of the object',
-        'a credential that is not a String, such as a Symbol or a number: it raises InvalidCredential, convert it with to_s',
-        'a {word} in a value of default_headers in a configuration given as a Hash: it is now a variable and must be declared',
-        'a {word} in the path of an endpoint in a configuration given as a Hash: it is now a variable and must be declared; to keep the braces as text write \\{word}',
-        'respond_to? on a response now tells the truth: it answers true for the methods the response forwards and false for the others',
-        'serializing an Api, an Endpoint or a Response raises TypeError: serialize response.data or response.body.to_s',
-        'a class that includes ApiRecipes and uses a top-level constant named Error, Internals, VERSION or like a new error class of the gem (such as ConfigurationError or InvalidUrl): it now finds the gem\'s constant first, write ::Name in that class; Route and Settings no longer exist, so a top-level Route or Settings is found again'
+        'a response that a method receives as an argument: request was removed (read uri or original_response), to_s returns the body, ' \
+        'respond_to? tells the truth. Those that the code takes from run are found'
       ].freeze
 
       # Problems met while reading, as "<file>: <reason>". They are not findings:
@@ -413,13 +401,23 @@ module ApiRecipes
             found << Finding.new(file: file, line: number, kind: rule.kind, message: rule.message, hint: hint(rule.fix, line, file, number, text))
           end
         end
-        found
+        (found + in_the_tree(file, text, found)).each_with_index.sort_by { |finding, index| [finding.line, index] }.map(&:first)
       end
 
       # ---- the code to paste ----
 
       # The code a line assigns, when it can be copied: on one line, short,
       # and with nothing a terminal would obey.
+      # What only the tree of the file tells. A writer that a rule on lines
+      # found is not said twice.
+      def in_the_tree(file, text, found)
+        reported = found.select { |finding| WRITER_RULES.any? { |rule| rule.message == finding.message } }.map(&:line)
+        uses = !@project || @project.uses_gem?(text)
+        TreeRules.findings(text, uses_gem: uses, reported: reported).map do |one|
+          Finding.new(file: file, line: one.line, kind: one.kind, message: one.message)
+        end
+      end
+
       def code_of(match)
         code = without_comment(match[:code].to_s.strip)
         return nil if code.empty? || code.length > MAX_CODE || Code::UNSAFE.match?(code) || !expression?(code)
@@ -584,7 +582,7 @@ module ApiRecipes
         unchecked = erb_values(apis)
         Internals::Compiler.compile_all(apis)
         note_unchecked(file, unchecked)
-        []
+        ConfigRules.findings(apis).map { |message| Finding.new(file: file, line: nil, kind: :check, message: message) }
       rescue RecipeFileError => e
         return not_checked(file) if tags && e.errors.all? { |problem| problem.include?('invalid YAML') }
 

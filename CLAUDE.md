@@ -51,6 +51,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli.rb`, `cli/upgrade.rb`, `exe/api_recipes` | the `api_recipes` command and its `upgrade` checks |
 | `lib/api_recipes/cli/upgrade/screen.rb` | how `upgrade` shows its results: the same sections everywhere, and colours, marks and lines that fit on a terminal |
 | `lib/api_recipes/cli/upgrade/fix.rb` | the changes `upgrade` makes by itself: each shown as a diff, made after a yes on a terminal, in files that git has committed; the diff of two texts |
+| `lib/api_recipes/cli/upgrade/tree_rules.rb` | the changes of 3.0 that `upgrade` finds by reading Ruby as a tree (`TreeRules`) and a description as data (`ConfigRules`), never running either |
 | `lib/api_recipes/cli/upgrade/project.rb` | what `upgrade` without arguments finds in a project: Ruby files, descriptions of apis, the names of the apis |
 | `lib/api_recipes/cli/import.rb` | the `import` command: from an OpenAPI description to the text of a recipe, checked before it is returned |
 | `lib/api_recipes/cli/import/document.rb` | reads the description (YAML or JSON) and follows its internal `$ref` |
