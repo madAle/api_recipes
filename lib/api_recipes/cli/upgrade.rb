@@ -324,6 +324,12 @@ module ApiRecipes
         steps << 'Go through what this command cannot find: look in the code for the changes that concern the project'
         steps << 'Run this command again: go on when only check lines that you have read are left' if counts[:breaks] || counts[:config]
         steps << 'Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once'
+        described = @project ? @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) } : []
+        unless described.empty?
+          steps << "Then, if you want, move an api to a portable recipe: run `api_recipes convert FILE` for " \
+                   "#{described.first(3).map { |file| shown_path(file) }.join(', ')}#{' and the others' if described.size > 3}. " \
+                   'It changes the project by itself and says what it did; the files the project has now keep working as they are'
+        end
         screen.section('👉', 'What to do now')
         steps.each_with_index { |step, index| screen.item(step, "#{index + 1}.") }
       end

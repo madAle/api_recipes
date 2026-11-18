@@ -56,7 +56,8 @@ describe 'api_recipes upgrade, what it shows' do
     steps = run[1][/What to do now\n(.*)\z/m, 1].lines.map(&:strip)
     expect(steps).to match([/\A1\. Fix the 1 line marked breaks: .*The code to paste, above/, /\A2\. Correct what is marked config \(1\)/,
                             /\A3\. Read the 1 line marked check: .*reported at every run/, /\A4\. Go through what this command cannot find/,
-                            /\A5\. Run this command again/, /\A6\. Start the application and run its tests: ApiRecipes\.configure checks/])
+                            /\A5\. Run this command again/, /\A6\. Start the application and run its tests: ApiRecipes\.configure checks/,
+                            /\A7\. Then, if you want, move an api to a portable recipe: run `api_recipes convert FILE` for config\/apis\/billing\.yml\./])
   end
 
   it 'asks to run it again only when something has to change, and never to fix what is not there' do
@@ -65,13 +66,14 @@ describe 'api_recipes upgrade, what it shows' do
     code, out = run
     steps = out[/What to do now\n(.*)\z/m, 1].lines.map(&:strip)
     expect(code).to eq(1)
-    expect(steps).to match([/\A1\. Read the 1 line marked check/, /\A2\. Go through what this command cannot find/, /\A3\. Start the application/])
+    expect(steps).to match([/\A1\. Read the 1 line marked check/, /\A2\. Go through what this command cannot find/, /\A3\. Start the application/,
+                            /\A4\. Then, if you want, move an api to a portable recipe/])
 
     File.write('app/models/device.rb', "class Device\n  include ApiRecipes\n  api :billing\nend\n")
     code, out = run
     expect(code).to eq(0)
     expect(out).to match(/^Nothing to change$/)
-    expect(out[/What to do now\n(.*)\z/m, 1].lines.map(&:strip)).to match([/\A1\. Go through what/, /\A2\. Start the application/])
+    expect(out[/What to do now\n(.*)\z/m, 1].lines.map(&:strip)).to match([/\A1\. Go through what/, /\A2\. Start the application/, /\A3\. Then, if you want/])
   end
 
   describe 'on a terminal' do

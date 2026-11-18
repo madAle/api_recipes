@@ -115,7 +115,7 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
 
         def call
           github.users.run
-        rescue Error, ::Error, MyApp::Error => e
+        rescue Error, ::Error, MyApp::Error, ApiRecipes::Error, ApiRecipes::InvalidUrl => e
           raise ConfigurationError, VERSION
         end
       end

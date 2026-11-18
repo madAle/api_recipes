@@ -186,6 +186,10 @@ module ApiRecipes
             next unless node.is_a?(Prism::ConstantReadNode) && shadowing.include?(node.name) && !defined.include?(node.name)
             # A class or a module written inside has its own constants.
             next if parents.any? { |one| one.is_a?(Prism::ClassNode) || one.is_a?(Prism::ModuleNode) }
+            # In Name::Error only Name is looked for from here. An older
+            # Prism gives the last name of a path as a node of its own.
+            path = parents.last
+            next if path.is_a?(Prism::ConstantPathNode) && !path.parent.equal?(node)
 
             found << Found.new(at(node), :check, "#{node.name} written alone in a class that includes ApiRecipes is now ApiRecipes::#{node.name}: " \
                                                  "write ::#{node.name} for a constant of the application with that name")
