@@ -31,7 +31,7 @@ fails under 90% line coverage.
 | Path | Role |
 | --- | --- |
 | `lib/api_recipes.rb` | the `api` class macro, `configure`, `[]`, `apis`, `reset!`, `logger` |
-| `lib/api_recipes/configuration.rb` | options of `ApiRecipes.configure`, YAML and ERB loading, logger |
+| `lib/api_recipes/configuration.rb` | options of `ApiRecipes.configure`, the two sources of apis (`apis_configs` and `recipes_paths`), logger |
 | `lib/api_recipes/api.rb` | `Api`: what `ApiRecipes.github` returns; root endpoints, `with`, credentials, variables |
 | `lib/api_recipes/endpoint.rb` | `Endpoint`: one step of the chain; builds the path, `run`, `url`, `with` |
 | `lib/api_recipes/response.rb` | wraps the http.rb response and adds `data`, `success?`, `fill` |
@@ -60,6 +60,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command: the calls of the files it is given, or of every api of the project |
 | `lib/api_recipes/cli/calls.rb` | how each endpoint of a compiled api is called in Ruby: what `import --calls` and `convert --calls` write in the comments |
+| `lib/api_recipes/cli/description.rb` | reads a file of a 2.x project that describes apis, YAML with ERB: for the commands that check it, list its calls and convert it. The gem itself loads no such file |
 | `lib/api_recipes/cli/tags.rb` | the ERB tags of a file that is read without running it: each output tag replaced by a mark |
 | `lib/api_recipes/cli/code.rb` | the code a command gives to paste: how it is shown, in colours on a terminal, and the block of `ApiRecipes.configure` of a file |
 | `lib/api_recipes/cli/convert.rb` | the `convert` command: from a configuration file of a project to the text of a portable recipe |
@@ -80,7 +81,7 @@ fails under 90% line coverage.
 
 ## How a call works
 
-1. `ApiRecipes.configure` loads the sources, then the portable recipes of
+1. `ApiRecipes.configure` takes `apis_configs`, then the portable recipes of
    `recipes_paths` (each checked against its `recipes.lock`), compiles them into
    one immutable tree per api and validates them. Only if that succeeds is the new registry swapped
    in, together with one method per api on the `ApiRecipes` module. `api :name`
@@ -109,6 +110,10 @@ classes are built once, by `configure`.
 
 ## Rules for changes
 
+- An api is described by a portable recipe or by `apis_configs`. The gem
+  evaluates no ERB and loads no other file: `apis_files_paths` raises. Only
+  the commands read a file of a 2.x project, with `CLI::Description`, to check
+  it and to convert it.
 - Specs never use the network: `WebMock.disable_net_connect!` stays on.
 - A spec for existing behaviour must pass without touching `lib/`.
 - A behaviour change comes with its spec, written first.

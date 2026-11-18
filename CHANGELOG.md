@@ -1,5 +1,16 @@
 ## Unreleased
 
+- An API is described by a portable recipe, and by nothing else in a file:
+  `apis_files_paths` was removed, and the gem no longer evaluates ERB.
+  Assigning it raises `ApiRecipes::Error` with the command to run.
+  `apis_configs` stays. `api_recipes convert` with no file moves every API
+  that a file of the project describes to a recipe, in one run, and takes
+  `apis_files_paths` out with the last description. `api_recipes upgrade`
+  reports the option and each of those files, and on a terminal offers to
+  move each API, showing the files it creates, edits and deletes.
+- `api_recipes import` writes a complete portable recipe, with its `recipe`
+  key and `--version`. A description that names no server gives the host as
+  the variable `{host}`.
 - `api_recipes upgrade` finds most of what it used to list as impossible to
   find. It reads each Ruby file as a tree: a credential assigned in the body
   of a class, through a variable, over two lines or with `send`; a credential

@@ -103,6 +103,32 @@ configuration in place. Four things are worth knowing:
   else. A file called `something.recipe.yml` is refused: it is a portable
   recipe, and goes in `recipes_paths`.
 
+### An API is described by a portable recipe
+
+2.x loaded the files of `apis_files_paths`: YAML that the gem evaluated with
+ERB. 3.0 loads only portable recipes, files called `NAME.recipe.yml` that
+hold data and no code, and `apis_configs`. Assigning `apis_files_paths` raises
+`ApiRecipes::Error`, and the message names the command to run:
+
+    $ bundle exec api_recipes convert
+
+In the root of the project, with no argument, it moves every API that a file
+describes to a recipe in `config/api_recipes`, one after the other:
+
+- what an `<%= ... %>` tag gave becomes a variable of the recipe, and the code
+  of the tag moves, as it is written, to `config.values` in the file that
+  calls `ApiRecipes.configure`;
+- `config.recipes_paths` is added, and `config.apis_files_paths` goes with the
+  last description;
+- the old file is deleted, and every change is listed.
+
+`api_recipes upgrade` offers the same move on a terminal, one API at a time,
+and shows the files it creates, edits and deletes before it asks. A file
+where ERB decides the structure, with `<% if %>` or a tag that gives a name,
+cannot be converted by the command: it says so, and that description is
+rewritten by hand as a recipe. The whole of what `convert` does is in the
+README, under "From a file of your project".
+
 ### A class with its own destination needs its own credential
 
 In 2.x the credential of `ApiRecipes.github` was copied to every class that
@@ -318,13 +344,6 @@ one of these four options looks for it in the endpoints that contain it, from
 the nearest, then in the API, and takes the first value it finds. Look at the
 endpoints that set one of them and also contain other endpoints: those now
 find it there. `ok_code` is read only on its endpoint.
-
-### `apis_configs` after the files
-
-In 2.x, assigning `apis_configs` after `apis_files_paths` discarded what the
-files had loaded. Now every source is used, in the order they were assigned, and a
-later source replaces an API with the same name. If you assigned `apis_configs` to
-get rid of the files, do not assign the files.
 
 ### Endpoints named like a method
 
@@ -555,7 +574,7 @@ Code to paste
 In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure (lines 1 to 3) with:
 
     ApiRecipes.configure do |config|
-      config.apis_files_paths = Dir['config/apis/*.yml']
+      config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
       config.values = {
         github: { authorization: "Bearer #{ENV['GITHUB_TOKEN']}" }
       }
@@ -590,7 +609,7 @@ Move print_urls into the block of ApiRecipes.configure
 
 config/initializers/api_recipes.rb:1
   ApiRecipes.configure do |config|
-    config.apis_files_paths = Dir['config/apis/*.yml']
+    config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
 +   config.print_urls = true
   end
 - ApiRecipes.print_urls = true

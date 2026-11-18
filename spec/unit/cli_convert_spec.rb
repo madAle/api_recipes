@@ -357,6 +357,6 @@ describe 'api_recipes convert' do
   end
 
   it 'is listed in the help' do
-    expect(run('--help')[1]).to include('convert [--name NAME] [--version VERSION] [--calls] [--to DIR] FILE')
+    expect(run('--help')[1]).to include('convert [--name NAME] [--version VERSION] [--calls] [--to DIR] [FILE]')
   end
 end

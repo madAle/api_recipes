@@ -89,10 +89,10 @@ Spec files:
 
 | Point | Protection | Spec | Example |
 | --- | --- | --- | --- |
-| ERB is code: evaluated only for the files of `apis_files_paths` | no ERB anywhere else (observed: no code path evaluates ERB elsewhere, so no example fails by removing a protection) | `configuration_spec.rb` | `evaluates ERB in the files of apis_files_paths and nowhere else`, `never evaluates ERB found in a value of apis_configs or in a response` |
+| ERB is code: the application never evaluates it | the gem loads portable recipes and `apis_configs`, and neither goes through ERB: `apis_files_paths`, which 2.x evaluated, raises; `require 'api_recipes'` does not load ERB. A file of a 2.x project is read by the commands only, and its ERB is run only with `--erb` | `configuration_spec.rb` | `evaluates ERB nowhere when the application runs: a file with ERB is read by a command only, and run only when asked`, `never evaluates ERB found in a value of apis_configs or in a response` |
 | YAML is always read safely | `YAML.safe_load`, no Ruby objects | `configuration_spec.rb` | `does not build Ruby objects from YAML`, `reads YAML anchors and aliases without building objects, and refuses other tags`, `refuses a file that is not a mapping, is empty or is not UTF-8, without showing its content` |
 | `verify_with` calls a method, even a private one, of the calling object | allowed only in local sources, `api` and `with` | `configuration_spec.rb` | `lets verify_with call a private method of the calling object, given in api or in with` |
-| A `*.recipe.yml` passed to `apis_files_paths`, where it would be evaluated with ERB | refused, whatever the case or the link, and its ERB is not run: a portable recipe goes in `recipes_paths` | `configuration_spec.rb` | `refuses a file named *.recipe.yml in apis_files_paths, whatever the case and the link, and does not run its ERB` |
+| A `*.recipe.yml` read as a file of a 2.x project, where `--erb` would evaluate it | refused by the reader of the commands, whatever the case or the link, and its ERB is not run: a portable recipe is read as data only | `configuration_spec.rb` | `never reads a file named *.recipe.yml as a file of the project, whatever the case and the link, and does not run its ERB` |
 
 Also covered: a configuration that is refused
 before anything is built (a Hash that contains itself, a YAML alias to its own
@@ -130,7 +130,7 @@ constant.
 
 | Risk | Protection | Spec | Example |
 | --- | --- | --- | --- |
-| Code inside the recipe | a file of `recipes_paths` never goes through ERB, and neither does what the commands read; text with `<%` is refused, so it cannot wait for the day the file is given to `apis_files_paths` | `portable_recipes_spec.rb` | `code inside the recipe is never run by configure: a file of recipes_paths does not go through ERB`, `... is never run by install, update, check and routes, with or without --erb`, `... cannot wait in the file for the day it is given to apis_files_paths: text that ERB would run is refused` |
+| Code inside the recipe | a file of `recipes_paths` never goes through ERB, and neither does what the commands read; text with `<%` is refused, so no reader that evaluates ERB could ever find code in it | `portable_recipes_spec.rb` | `code inside the recipe is never run by configure: a file of recipes_paths does not go through ERB`, `... is never run by install, update, check and routes, with or without --erb`, `... cannot wait in the file for the day it is given to apis_files_paths: text that ERB would run is refused` |
 | A recipe that builds Ruby objects, or describes a huge structure in a small text | plain YAML only: tags, anchors and aliases are refused while the text is parsed, before any object is built; at most 1 MiB, checked before parsing; at most 100 levels | `portable_recipes_spec.rb` | `code inside the recipe cannot be a Ruby object: the recipe is plain YAML, without tags`, `... cannot describe a huge structure with aliases: anchors and aliases are refused while the text is parsed`, `... cannot be larger than 1 MiB: the text is not parsed` |
 | A small recipe that costs minutes and gigabytes to compile, because every endpoint keeps its whole path | a name or a value has at most 2,000 characters, a recipe at most 10,000 endpoints, those that `resource` adds among them, the path of an endpoint with the paths above it at most 4,000 characters: checked before the recipe is compiled | `portable_recipes_spec.rb` | `code inside the recipe cannot cost much more than its size: names, values, paths and the number of endpoints have a limit` |
 | A small recipe that costs gigabytes or many seconds to compile, because every endpoint would keep the headers and the parameters of the endpoints above it | an endpoint that adds none shares what it takes; the names of headers are compared through an index; the headers and parameters written on endpoints are at most 100,000, counting for each endpoint that adds some those of the endpoints above it: checked before the recipe is compiled | `portable_recipes_spec.rb`, `spec/unit/definition_spec.rb` | `code inside the recipe cannot cost much more than its size with headers and parameters that every endpoint below would keep`; `shares the headers and the parameters an endpoint takes from the one above it when it adds none` |
@@ -183,7 +183,7 @@ The application must:
   credential sent in the query.
 - Keep `follow` off for requests it does not need to follow, and not give
   `on_redirect` a hook that sends the credentials elsewhere.
-- Protect its own configuration files: ERB in `apis_files_paths` runs as code.
+- Protect the files of a 2.x project from the commands run with `--erb`: that option runs their ERB as code.
 - Read a change to `recipes.lock` as a change to the code: `update` connects to
   the address written there, with the keys and the credentials of whoever runs
   it. The command says the address first, and does not judge it.

@@ -50,9 +50,10 @@ module ApiRecipes
             without running the tag; --erb evaluates the file: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
-        convert [--name NAME] [--version VERSION] [--calls] [--to DIR] FILE
+        convert [--name NAME] [--version VERSION] [--calls] [--to DIR] [FILE]
             Moves the api that the configuration FILE of a project describes to a portable
-            recipe. In the root of a project (a folder with a Gemfile, or where a git
+            recipe. Without FILE, in the root of a project: every api that a file of the
+            project describes, one after the other. In the root of a project (a folder with a Gemfile, or where a git
             repository starts): installs NAME.recipe.yml in config/api_recipes,
             moves the code of each ERB tag to config.values in the file that calls
             ApiRecipes.configure, removes the old description, and lists every file it
