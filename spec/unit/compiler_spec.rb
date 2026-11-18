@@ -58,7 +58,6 @@ describe ApiRecipes::Internals::Compiler do
     { bogus: 1 }                                   => /svc: unknown option 'bogus'/,
     { default_headers: { 'X' => "a\r\nY: b" } }    => /svc\.default_headers/,
     { verify_with: 'not a method!' }               => /svc\.verify_with/,
-    { host: '{shop}.h.test' }                      => /svc\.host: unknown variable 'shop'/,
     { auth: { type: 'header' } }                   => /svc\.auth/,
     { auth: { type: 'magic' } }                    => /svc\.auth/,
     { endpoints: { a: 'text' } }                   => /svc\.endpoints\.a/,
@@ -124,7 +123,7 @@ describe ApiRecipes::Internals::Compiler do
     api = compile(base_url: 'v1/\{x}/{y}', variables: { y: {} })
     expect(api.base_url).to eq('v1/%7Bx%7D/{y}')
     expect(api.base_url_template.names).to eq(%i[y])
-    expect(problems(base_url: 'v1/{x}')).to eq(["svc.base_url: unknown variable 'x'"])
+    expect(compile(base_url: 'v1/{x}').variables.keys).to eq(%i[x])
   end
 
   it 'encodes the fixed text of base_url and keeps its variables' do
@@ -169,8 +168,8 @@ describe ApiRecipes::Internals::Compiler do
     expect(problems(default_headers: { 'X' => "secret\nvalue" }).join).not_to include('secret')
   end
 
-  it 'rejects a variable used in a header and not declared' do
-    expect(problems(default_headers: { 'X-Key' => '{token}' })).to include(match(/default_headers\.X-Key: unknown variable 'token'/))
+  it 'makes a variable with no default of a name used in a header and not declared' do
+    expect(compile(default_headers: { 'X-Key' => '{token}' }).variables).to eq(token: { default: nil, description: nil })
   end
 
   it 'requires the name of auth type header and query' do

@@ -65,28 +65,27 @@ describe 'Variables in the path of an endpoint' do
     expect(definition.endpoints[:plain].to_h[:path_variables]).to eq([])
   end
 
-  it 'refuses a variable that the api does not declare, in every endpoint' do
-    broken = { host: 'h.test', variables: { account: {} },
-               endpoints: { orders: { path: '/{acount}/orders', endpoints: { show: { path: '/{zone}/:id' } } } } }
-    expect { configure_test_apis(broken: broken) }
-      .to raise_error(ApiRecipes::ConfigurationError) { |e|
-        expect(e.errors).to eq(["broken.endpoints.orders.path: unknown variable 'acount'",
-                                "broken.endpoints.orders.endpoints.show.path: unknown variable 'zone'"])
-      }
+  it 'makes a variable with no default of a name that the path of any endpoint uses and the api does not declare' do
+    misspelled = { host: 'h.test', variables: { account: {} },
+                   endpoints: { orders: { path: '/{acount}/orders', endpoints: { show: { path: '/{zone}/:id' } } } } }
+    configure_test_apis(misspelled: misspelled)
+    expect(ApiRecipes.misspelled.definition.variables.keys).to eq(%i[account acount zone])
+    expect { ApiRecipes.misspelled.with(variables: { account: 'alice' }).orders.show(1).run }
+      .to raise_error(ApiRecipes::MissingVariable, "api 'misspelled' requires the variable 'acount' but it was not provided")
   end
 
-  it 'accepts the variables of the api in an endpoint that a class adds, and refuses the others when it is declared' do
+  it 'accepts in an endpoint that a class adds the variables of the api, and makes a variable of the class of another name' do
     klass = Class.new do
       include ApiRecipes
       api :shop, endpoints: { users: { path: '/{zone}/users' } }
     end
     expect(klass.shop.users.url.to_s).to eq('https://shop.example.test/v1/eu/users')
-    expect do
-      Class.new do
-        include ApiRecipes
-        api :shop, endpoints: { users: { path: '/{tenant}/users' } }
-      end
-    end.to raise_error(ApiRecipes::ConfigurationError, /endpoints\.users\.path: unknown variable 'tenant'/)
+    other = Class.new do
+      include ApiRecipes
+      api :shop, endpoints: { users: { path: '/{tenant}/users' } }, variables: { tenant: 'acme' }
+    end
+    expect(other.shop.users.url.to_s).to eq('https://shop.example.test/v1/acme/users')
+    expect(ApiRecipes.shop.definition.variables).not_to include(:tenant)
   end
 
   it 'keeps the path it was built with in the copy that with returns' do

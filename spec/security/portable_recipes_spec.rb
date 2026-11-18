@@ -313,6 +313,13 @@ describe 'Portable recipes' do
       expect(sent).to have_been_requested
     end
 
+    it 'lists every variable the recipe asks a value for, also those it uses without declaring them' do
+      text = recipe_text('shop', 'host' => '{tenant}.example.test', 'default_headers' => { 'X-Key' => '{key}' },
+                                 'variables' => { 'zone' => { 'default' => 'eu' } }, 'base_url' => '{zone}')
+      _code, out, = install_text(text, '--yes')
+      expect(out).to include("  variables:     zone: default eu\n                 tenant: to be set\n                 key: to be set\n")
+    end
+
     it 'shows the headers sent with every request, and update shows the ones that change' do
       expect(install_text(recipe_text, '--yes').first).to eq(0)
       @repository.publish('shop', recipe_text('shop', 'default_headers' => { 'X-HTTP-Method-Override' => 'DELETE' },

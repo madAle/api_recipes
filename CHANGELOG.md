@@ -1,5 +1,14 @@
 ## Unreleased
 
+- A `{name}` that a description uses is a variable of the API, declared or
+  not. `variables` declares one only to give it a `default` or a
+  `description`; one with neither has no default, and a request that needs it
+  raises `ApiRecipes::MissingVariable` until a value is given. A value for a
+  name that the API neither declares nor uses still raises
+  `ApiRecipes::ConfigurationError`. `convert` and `import` no longer write a
+  declaration with nothing in it. **A word in braces in a header, a parameter,
+  the `base_url` or a path, which was text in 2.x, is now a variable that a
+  request asks for, not a configuration error: `convert` keeps it text.**
 - An API is described by a portable recipe, and by nothing else in a file:
   `apis_files_paths` was removed, and the gem no longer evaluates ERB.
   Assigning it raises `ApiRecipes::Error` with the command to run.

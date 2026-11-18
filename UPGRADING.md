@@ -1,12 +1,11 @@
 # Upgrading from 2.x to 3.0
 
-Version 3.0 keeps the way you use the gem: the YAML files, `ApiRecipes.configure`,
-`api :name` in a class and the chain
-`ApiRecipes.github.users.show('octocat').run` work as before. A YAML file that
-is valid for 2.x needs no change, apart from what part 2 describes: options and
-values that 2.x accepted without checking them, a placeholder in `base_url` and a
-`{word}` in a header value or in a path. What changes is how the gem behaves around them: it
-checks more, it refuses more, and a few results are different.
+Version 3.0 keeps the way you use the gem: `ApiRecipes.configure`, `api :name`
+in a class and the chain `ApiRecipes.github.users.show('octocat').run` work as
+before. The YAML description of an API becomes a portable recipe, with the same
+options and endpoints: `api_recipes convert` moves every description of a
+project to one, as part 2 describes. What changes is how the gem behaves around
+them: it checks more, it refuses more, and a few results are different.
 
 This guide has six parts:
 
@@ -87,16 +86,16 @@ configuration in place. Four things are worth knowing:
 - A `base_url` with a path placeholder (`:name` or `*name`) is an error. In 2.x
   it silently became a required parameter of every root endpoint. For a value
   that changes, declare a [variable](README.md#variables) and write `{name}`.
-- A word in braces, such as `{id}`, in a value of `default_headers` is now a
-  variable, and one that is not declared is an error. To send that text as it
-  is, declare a variable whose default is the text and use the variable:
+- A word in braces, such as `{id}`, in a value of `default_headers` or of
+  `default_params`, in the `base_url` or in the `path` of an endpoint is now a
+  variable, which a request asks a value for. In 2.x it was sent as text.
+  `api_recipes convert` keeps it text: it writes `\{id}` in a path and in the
+  `base_url`, and for a header or a parameter it declares a variable whose
+  default is the text and uses the variable, as in
   `variables: { template: { default: '{id}' } }` with the header value
   `'{template}'`. Braces around anything else, such as a JSON value, are sent
-  as they are.
-- A word in braces in the `path` of an endpoint, such as `/items/{id}`, is now a
-  variable too, and one that is not declared is an error. In 2.x the braces were
-  sent as text. If you meant a value that changes at every call, write a
-  placeholder, `/items/:id`. To keep the braces as text, write `\{id}`.
+  as they are. In a path, if you meant a value that changes at every call,
+  write a placeholder, `/items/:id`.
 - A file that is missing, empty, not valid YAML or not valid UTF-8 raises
   `ApiRecipes::RecipeFileError`, which names the file. Files are read with
   `YAML.safe_load`: plain values, symbols and aliases are accepted, and nothing

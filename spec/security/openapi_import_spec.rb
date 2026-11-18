@@ -205,7 +205,7 @@ describe 'Importing an OpenAPI description' do
       allow(ApiRecipes::CLI::Import::Document).to receive(:load).and_return(ApiRecipes::CLI::Import::Document.new(root))
       result = ApiRecipes::CLI::Import.new('unused', name: 'svc').call
       expect(YAML.safe_load(result.text)).to eq(
-        'svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => '{v}.example.test', 'variables' => { 'v' => {} }, 'endpoints' => { 'users' => nil } }
+        'svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => '{v}.example.test', 'endpoints' => { 'users' => nil } }
       )
       expect(result.warnings.join.length).to be < 2000
     end

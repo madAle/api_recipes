@@ -156,7 +156,7 @@ describe 'Credentials, variables and class trees through the DSL' do
         { shopify: { authorization: 'SECRET', 'authorization' => 'SECRET' } } => ['values.shopify: authorization is given twice'],
         { "shop\nINJECTED" => {} } => ['values.shop?INJECTED: is not the name of an api'],
         { shopify: { variables: { shop: Object.new } } } => ['values.shopify.variables.shop: must be a string'],
-        { shopify: { variables: { shpo: 'SECRET' } } } => ["shopify.variables: unknown variable 'shpo' (declared: shop)"]
+        { shopify: { variables: { shpo: 'SECRET' } } } => ["shopify.variables: unknown variable 'shpo' (variables of the api: shop)"]
       }
       problems.each do |values, expected|
         expect { configure_shopify(values) }.to raise_error(ApiRecipes::ConfigurationError) { |error| expect(error.errors).to eq(expected) }

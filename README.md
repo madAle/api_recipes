@@ -356,8 +356,10 @@ of an endpoint, the value of a header or of a parameter sent with every
 request, or in one of the options that are read when a request is sent:
 `protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
 `ok_code`. Use it for what changes from one account or one environment to the
-next, such as the address of a shop. Declare the variables of the API, with an
-optional `default` and `description`:
+next, such as the address of a shop. Every `{name}` that the API uses is one of
+its variables. Declare a variable under `variables` to give it a `default` or a
+`description`; one with neither needs no declaration, and a value must be
+given to it:
 
 ```yaml
 shopify:
@@ -366,8 +368,6 @@ shopify:
       description: the part of the shop address before .myshopify.com
     api_version:
       default: '2026-10'
-    location:
-      description: the id of the location this client works for
   host: '{shop}.myshopify.com'
   base_url: admin/api/{api_version}
   auth:
@@ -378,6 +378,8 @@ shopify:
     inventory:
       path: /locations/{location}/inventory_levels
 ```
+
+Here `location` is a variable too, with no default.
 
 A variable without a value and without a default raises
 `ApiRecipes::MissingVariable` as soon as it is needed: when the chain reaches
@@ -433,8 +435,8 @@ store.shopify.products.url.to_s
 ```
 
 The options that a class gives to `api` can use the variables of the API, as in
-`api :shopify, host: '{shop}.staging.example.test'`. When an API exists only in
-a class, the names given in `variables:` are its variables, so each one gets a
+`api :shopify, host: '{shop}.staging.example.test'`, and new ones: a `{name}`
+they use is a variable of the API for that class. `variables:` gives them a
 value there, and an object or `with` can give another:
 
 ```ruby
@@ -529,8 +531,11 @@ In a parameter it is encoded like every value of a query string. Anything else
 raises `ApiRecipes::InvalidVariable`.
 A word in braces that is not a variable is written `\{word}` in a path and in
 a `base_url`.
-A name that the API does not declare raises `ApiRecipes::ConfigurationError` at
-every level, so a misspelled name is never ignored.
+A value given for a name that the API neither declares nor uses raises
+`ApiRecipes::ConfigurationError` at every level, so a name misspelled in your
+code is never ignored. A `{name}` misspelled in the description is a variable
+with no default: the first request that needs it raises
+`ApiRecipes::MissingVariable`, which names it.
 `variables` without an assignment returns the values of the level you call it
 on: those of `config.values` on `ApiRecipes.shopify`, those given to `api` on a
 class, those assigned on an object. On an object, assigning `nil` clears them,
@@ -1037,7 +1042,12 @@ What the command does:
   after its place, and a default written in the tag as plain text or as a
   number (`ENV.fetch('NAME', 'text')`, `ENV['NAME'] || 443`) becomes the
   default of the variable. A default that a tag gave to a variable the file
-  declares is given by the application from now on.
+  declares is given by the application from now on. Only a variable with a
+  default is declared in the recipe.
+- **A word in braces stays text**, as 2.x sent it, unless the file declares a
+  variable with that name: it is written `\{word}` in a `path` and in the
+  `base_url`, and a header or a parameter that holds one is given by a
+  variable whose default is its text.
 - **`--calls` writes beside each endpoint how it is called in Ruby**, as
   `show:   # .invoices.show(id)`, after the name of the API. The recipe is the
   same with or without them.
