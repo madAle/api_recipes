@@ -5,8 +5,8 @@ describe ApiRecipes::CLI::Import::Writer do
   let(:error) { ApiRecipes::CLI::Import::Error }
   let(:node) { ApiRecipes::CLI::Import::Tree::Node }
 
-  def write(nodes = [], options = { host: 'h.test' }, name: 'svc', header: nil)
-    described_class.new(name: name, options: options, nodes: nodes, header: header).to_yaml
+  def write(nodes = [], options = { host: 'h.test' }, name: 'svc', header: nil, calls: nil)
+    described_class.new(name: name, options: options, nodes: nodes, header: header, calls: calls).to_yaml
   end
 
   def leaf(name, options = {}, comment = nil, children = []) = node.new(name, options, comment, children)
@@ -62,6 +62,28 @@ describe ApiRecipes::CLI::Import::Writer do
     expect(lines).to include(match(/\A    users: +# GET \/users \(users\/list\)\z/),
                              match(/\A        show: +# GET \/users\/\{id\}\z/), '    repos:')
     expect(lines.grep(/#/).map { |line| line.index('#') }.uniq.size).to eq(1)
+  end
+
+  it 'puts the call of an endpoint under its name, where the comments start, and none where there is no call' do
+    nodes = [leaf('users', {}, 'GET /users (users/list)', [leaf('show', { path: '/:id' }, 'GET /users/{id}')]),
+             leaf('repos', { route: false }, nil, [leaf('a_name_that_is_longer_than_the_column', { path: '/:id' })])]
+    calls = { %w[users] => '.users', %w[users show] => '.users.show(id)',
+              %w[repos a_name_that_is_longer_than_the_column] => '.repos.a_name_that_is_longer_than_the_column(id)' }
+    lines = write(nodes, calls: calls).lines.map(&:chomp)
+    column = lines.find { |line| line.include?('# GET /users (') }.index('#')
+    expect(lines[lines.index { |line| line.start_with?('    users:') } + 1]).to eq("#{' ' * column}# .users")
+    expect(lines[lines.index { |line| line.start_with?('        show:') } + 1]).to eq("#{' ' * column}# .users.show(id)")
+    long = lines.index { |line| line.include?('a_name_that_is_longer_than_the_column:') }
+    expect(lines[long + 1]).to match(/\A +# \.repos\.a_name_that_is_longer_than_the_column\(id\)\z/)
+    expect(lines[lines.index('    repos:') + 1]).to eq('      route: false')
+    expect(YAML.safe_load(lines.join("\n"))).to eq(YAML.safe_load(write(nodes)))
+  end
+
+  it 'keeps a call on one line, without ERB' do
+    text = write([leaf('a', {}, 'GET /a')], calls: { %w[a] => ".a\nhost: evil.test <%= raise 'x' %>" })
+    expect(text.lines.size).to eq(5)
+    expect(text).not_to match(/<%|%>/)
+    expect(YAML.safe_load(text)).to eq('svc' => { 'host' => 'h.test', 'endpoints' => { 'a' => nil } })
   end
 
   it 'starts with a comment that names the description, when asked' do

@@ -301,6 +301,55 @@ describe 'api_recipes convert' do
     end
   end
 
+  describe 'with --calls' do
+    it 'writes beside each endpoint how it is called, and the same recipe' do
+      write('billing.yml', plain)
+      expect(run('convert', '--to', 'plain', 'billing.yml').first).to eq(0)
+      expect(run('convert', '--calls', '--to', '.', 'billing.yml')).to match([0, /billing 1\.0\.0 is written in billing\.recipe\.yml: 4 calls/, ''])
+      text = File.read('billing.recipe.yml')
+      expect(YAML.safe_load(text)).to eq(YAML.safe_load(File.read('plain/billing.recipe.yml')))
+      expect(File.read('plain/billing.recipe.yml')).not_to include('#')
+      expect(text.lines.grep(/#/).map { |line| line.strip.squeeze(' ') })
+        .to eq(['invoices: # .invoices', 'show: # .invoices.show(id)', 'create: # .invoices.create', 'monthly: # .reports.monthly'])
+      expect(text.lines.grep(/#/).map { |line| line.index('#') }.uniq).to eq([34])
+      expect(run('check', 'billing.recipe.yml').first).to eq(0)
+    end
+
+    it 'writes a call only beside an endpoint: not beside a header or a parameter with its name' do
+      write('billing.yml', <<~YAML)
+        billing:
+          host: billing.example.test
+          default_headers:
+            invoices: all
+          default_params:
+            endpoints: some
+          endpoints:
+            invoices:
+              default_params:
+                show: 1
+                endpoints: 2
+              endpoints:
+                show:
+                  path: /:id
+      YAML
+      expect(run('convert', '--calls', '--to', '.', 'billing.yml').first).to eq(0)
+      expect(File.read('billing.recipe.yml').lines.grep(/#/).map { |line| line.strip.squeeze(' ') })
+        .to eq(['invoices: # .invoices', 'show: # .invoices.show(id)'])
+    end
+
+    it 'writes them in the recipe it installs in a project too' do
+      write('Gemfile', "gem 'api_recipes'\n")
+      write('config/apis/billing.yml', plain)
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir['config/apis/*.yml']\nend\n")
+      system('git', 'init', '-q', '.', exception: true)
+      system('git', 'add', '.', exception: true)
+      system('git', '-c', 'user.name=spec', '-c', 'user.email=spec@example.test', 'commit', '-q', '-m', 'Start', exception: true)
+      expect(run('convert', '--calls', 'config/apis/billing.yml').first).to eq(0)
+      expect(File.read('config/api_recipes/billing.recipe.yml')).to match(/show: +# \.invoices\.show\(id\)\n/)
+      expect(run('check', 'config/api_recipes/billing.recipe.yml').first).to eq(0)
+    end
+  end
+
   it 'needs exactly one file, and a version a recipe can have' do
     expect(run('convert')).to match([2, '', /convert needs one configuration file/])
     write('billing.yml', plain)
@@ -308,6 +357,6 @@ describe 'api_recipes convert' do
   end
 
   it 'is listed in the help' do
-    expect(run('--help')[1]).to include('convert [--name NAME] [--version VERSION] [--to DIR] FILE')
+    expect(run('--help')[1]).to include('convert [--name NAME] [--version VERSION] [--calls] [--to DIR] FILE')
   end
 end

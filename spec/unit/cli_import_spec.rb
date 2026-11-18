@@ -17,6 +17,34 @@ describe 'api_recipes import' do
     expect(err).to eq("7 operations imported from 5 paths\n")
   end
 
+  describe 'with --calls' do
+    it 'writes under each endpoint how it is called, and the same recipe' do
+      _, plain, = run_cli('import', small, '--name', 'github')
+      code, out, err = run_cli('import', small, '--name', 'github', '--calls')
+      expect([code, err]).to eq([0, "7 operations imported from 5 paths\n"])
+      expect(YAML.safe_load(out)).to eq(YAML.safe_load(plain))
+      expect(out.lines - plain.lines).to all(match(/\A +# \.[\w.(), ]+\n\z/))
+      expect(out).to include("# GET /users/{username} (users/get-by-username)\n#{' ' * 34}# .users.show(username)\n")
+      expect(out.lines.grep(/\A +# \./).map(&:strip)).to include('# .users', '# .users.repos(username)', '# .repos.issues(owner, repo)',
+                                                                  '# .repos.issues(owner, repo).show(issue_number)')
+      expect(plain).not_to match(/# \./)
+    end
+
+    it 'writes calls that can be made as they are written, one for each call of the recipe' do
+      _, out, = run_cli('import', small, '--name', 'github', '--calls')
+      configure_with(out)
+      calls = out.lines.grep(/\A +# \./).map { |line| line.strip.delete_prefix('# ') }
+      expect(calls.size).to eq(ApiRecipes.github.definition.routes.size)
+      urls = calls.map { |call| ApiRecipes.github.instance_eval("self#{call.gsub(/\w+(?=[,)])/, "'x'")}").url.to_s }
+      expect(urls).to all(start_with('https://api.github.com/'))
+    end
+
+    it 'writes none under an endpoint that is only a group' do
+      _, out, = run_cli('import', small, '--name', 'github', '--calls')
+      expect(out).to include("    repos:\n      route: false\n")
+    end
+  end
+
   it 'produces a recipe that the gem loads and that offers the calls of the design' do
     _, out, = run_cli('import', small, '--name', 'github')
     configure_with(out)
@@ -195,7 +223,7 @@ describe 'api_recipes import' do
 
   it 'is described by the help' do
     _, out, = run_cli('--help')
-    expect(out).to include('import [--name NAME]', '--only GLOB', '--except GLOB', '--server N', '--output FILE')
+    expect(out).to include('import [--name NAME]', '--only GLOB', '--except GLOB', '--server N', '--calls', '--output FILE')
   end
 
   it 'is not loaded with the library' do

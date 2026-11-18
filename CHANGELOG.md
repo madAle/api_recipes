@@ -1,5 +1,9 @@
 ## Unreleased
 
+- `api_recipes import` and `api_recipes convert` take `--calls`: the recipe
+  they write has, in a comment beside each endpoint, how it is called in Ruby
+  (`.repos.issues(owner, repo).show(issue_number)`). The comments are made
+  from the recipe just written and do not change it.
 - `api_recipes routes` needs no file: in the root of a project it lists the
   calls of every file that describes an api and of every installed recipe.
   What an ERB tag gives is shown as the variable `{erb}`, without running the

@@ -56,6 +56,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/cli/import/tree.rb` | from the paths to the tree of endpoints: names, operations, comments, warnings |
 | `lib/api_recipes/cli/import/writer.rb` | writes the YAML with the comments and reads it back |
 | `lib/api_recipes/cli/routes.rb` | the `routes` command: the calls of the files it is given, or of every api of the project |
+| `lib/api_recipes/cli/calls.rb` | how each endpoint of a compiled api is called in Ruby: what `import --calls` and `convert --calls` write in the comments |
 | `lib/api_recipes/cli/tags.rb` | the ERB tags of a file that is read without running it: each output tag replaced by a mark |
 | `lib/api_recipes/cli/code.rb` | the code a command gives to paste: how it is shown, in colours on a terminal, and the block of `ApiRecipes.configure` of a file |
 | `lib/api_recipes/cli/convert.rb` | the `convert` command: from a configuration file of a project to the text of a portable recipe |

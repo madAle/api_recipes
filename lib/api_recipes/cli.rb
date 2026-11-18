@@ -6,6 +6,7 @@ require 'api_recipes'
 require 'api_recipes/version'
 require 'api_recipes/cli/code'
 require 'api_recipes/cli/tags'
+require 'api_recipes/cli/calls'
 require 'api_recipes/cli/upgrade'
 require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
@@ -31,11 +32,12 @@ module ApiRecipes
             gives the code to paste, with the whole block of ApiRecipes.configure; --no-code
             leaves the code out.
             Exits with 1 if it finds something, 2 if it could not read something, 0 otherwise.
-        import [--name NAME] [--only GLOB]... [--except GLOB]... [--server N] [--output FILE] FILE
+        import [--name NAME] [--only GLOB]... [--except GLOB]... [--server N] [--calls] [--output FILE] FILE
             Writes a recipe from the OpenAPI 3.0 or 3.1 description in FILE (YAML or JSON), on
             STDOUT or in the file given with --output, which must not exist. Warnings and a
             summary go to STDERR. --only and --except choose the paths: * also crosses slashes.
-            --server chooses the entry of servers, counted from 0. Nothing in FILE is run, no
+            --server chooses the entry of servers, counted from 0. --calls writes under each
+            endpoint how it is called in Ruby. Nothing in FILE is run, no
             other file is read and the network is not used.
             Exits with 1 if the description cannot be imported, 2 if the arguments are wrong.
         routes [--erb] [FILE]...
@@ -45,7 +47,7 @@ module ApiRecipes
             without running the tag; --erb evaluates the file: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
-        convert [--name NAME] [--version VERSION] [--to DIR] FILE
+        convert [--name NAME] [--version VERSION] [--calls] [--to DIR] FILE
             Moves the api that the configuration FILE of a project describes to a portable
             recipe. In the root of a project (a folder with a Gemfile, or where a git
             repository starts): installs NAME.recipe.yml in config/api_recipes,
@@ -55,7 +57,8 @@ module ApiRecipes
             all: when it cannot, it gives the steps and the code to paste. With --to DIR it
             writes the recipe alone in DIR and leaves the project as it is. Nothing in FILE is run: a tag becomes a variable. A header or a parameter named
             like a credential is never copied into the recipe. --name chooses the api when
-            FILE describes several; --version is the version of the recipe (1.0.0).
+            FILE describes several; --version is the version of the recipe (1.0.0); --calls
+            writes beside each endpoint how it is called in Ruby.
             Exits with 1 if FILE cannot become a recipe or the project cannot be changed
             safely, 2 if the arguments are wrong or something could not be read or written.
         install [--version VERSION] [--from URL] [--to DIR] [--yes] NAME|FILE
@@ -134,6 +137,7 @@ module ApiRecipes
         parser.on('--only GLOB') { |glob| options[:only] << glob }
         parser.on('--except GLOB') { |glob| options[:except] << glob }
         parser.on('--server N', Integer) { |number| options[:server] = number }
+        parser.on('--calls') { options[:calls] = true }
         parser.on('--output FILE') { |file| output = file }
         paths = parser.parse(args)
         problem = import_problem(paths, output, options[:name])
@@ -195,6 +199,7 @@ module ApiRecipes
         parser = OptionParser.new
         parser.on('--name NAME') { |name| options[:name] = name }
         parser.on('--version VERSION') { |version| options[:version] = version }
+        parser.on('--calls') { options[:calls] = true }
         parser.on('--to DIR') { |dir| directory = dir }
         files = parser.parse(args)
         unless files.size == 1
