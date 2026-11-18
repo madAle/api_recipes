@@ -160,8 +160,8 @@ module ApiRecipes
       def report(out, err, input: nil)
         findings = run
         screen = Screen.new(out)
-        changed = @code && Fix.asks?(input) ? offered(screen, input) : []
-        findings = run unless changed.empty?
+        changed = @code && Fix.asks?(input) ? offered(screen, input, out, err) : []
+        findings = look_again unless changed.empty?
         unless @notes.empty?
           screen.section('🔎', 'What was checked', plain: false)
           @notes.each { |note| screen.line(note) }
@@ -175,7 +175,7 @@ module ApiRecipes
         pasted = @code && code_to_paste(screen)
         unless changed.empty?
           screen.section('✅', 'Changed in the project')
-          changed.each { |file| screen.item("edited #{shown_path(file)}") }
+          changed.each { |file, what| screen.item("#{what} #{shown_path(file)}") }
           screen.line('Every change is in `git diff`.')
         end
         @warnings.each { |warning| err.puts warning }
@@ -188,21 +188,77 @@ module ApiRecipes
 
       private
 
-      # Offers each change the command can make. The project is read again
-      # after a change that was made. Returns the files that were written.
-      def offered(screen, input)
-        fix = Fix.new(screen, input, shown: method(:shown_path))
+      CONVERT_NOTE = ['3.0 loads only portable recipes. The description becomes one, and what its ERB tags gave is given by ' \
+                      'config.values, in the file that calls ApiRecipes.configure.',
+                      'y: move the api to a recipe now',
+                      'n: leave it, and run `api_recipes convert` later'].freeze
+
+      # Offers each change the command can make: first the apis that move to
+      # a portable recipe, then the others. The project is read again after
+      # a change that was made. Returns the files that were written.
+      def offered(screen, input, out, err)
+        ours = {}
+        fix = Fix.new(screen, input, shown: method(:shown_path), ours: ours)
         declined = []
-        written = []
-        while (change = changes.find { |one| !declined.include?(one.key) })
+        written = {}
+        loop do
+          key, title, migration = conversions(ours, out, err).find { |one| !declined.include?(one.first) }
+          if key
+            declined << key
+            preview = migration.preview
+            next unless fix.confirm(title, CONVERT_NOTE, preview) && migration.finish.zero?
+
+            preview[:created].each_key { |file| written[file] = 'created' }
+            preview[:edited].each_key { |file| written[file] ||= 'edited' }
+            preview[:deleted].each { |file| written[file] = 'deleted' }
+            look_again
+            next
+          end
+          change = changes.find { |one| !declined.include?(one.key) }
+          break unless change
+
           files = fix.offer(change)
           declined << change.key
           next unless files
 
-          written |= files
-          run
+          files.each { |file| written[file] ||= 'edited' }
+          look_again
         end
         written
+      end
+
+      # The project as the changes left it: its files are found again.
+      def look_again
+        if @project
+          @project = Project.new
+          @paths = @project.ruby_files
+          @configs = @project.config_files
+          @specific = @all = nil
+        end
+        run
+      end
+
+      # [[key, title, migration]] for each api that a file of the project
+      # describes and that the command can move to a portable recipe by
+      # itself. The others stay findings: `api_recipes convert` says why.
+      def conversions(ours, out, err)
+        described = @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+        described.sort.flat_map do |file|
+          names = begin
+            Convert.shape(File.read(file)).keys
+          rescue Convert::Refused, Psych::Exception, SystemCallError
+            []
+          end
+          names.filter_map do |name|
+            result = Convert.new(file, name: names.size > 1 ? name : nil).call
+            migration = Convert::Migration.new(result, file, out: out, err: err, written: ours)
+            next unless migration.prepare.empty?
+
+            [[:convert, file, result.name], "Move the api #{Recipes::Summary.shown(result.name, 100)} to a portable recipe", migration]
+          rescue Convert::Refused, Convert::Unusable, SystemStackError
+            nil
+          end
+        end
       end
 
       # The changes this command is sure of, in the order they are offered.
@@ -221,7 +277,7 @@ module ApiRecipes
 
         urls = @startup.select { |item| item[:api].nil? }
         values = @startup.select { |item| item[:api] }
-        found = []
+        found = [without_files(file, text, block)]
         if urls.size == 1 && !block.assigned_anywhere?(:print_urls)
           found << change(:print_urls, 'Move print_urls into the block of ApiRecipes.configure', urls, file, text, block,
                           ["#{block.config}.print_urls = #{urls.first[:code]}"])
@@ -278,6 +334,25 @@ module ApiRecipes
         return false unless earlier
 
         earlier.any? { |clause| clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'ApiRecipes::Error' } }
+      end
+
+      # apis_files_paths goes out of the block of configure once no file of
+      # the project describes an api: 3.0 refuses the option.
+      def without_files(file, text, block)
+        given = block.assignments(:apis_files_paths)
+        return nil if given.empty? || @configs.any? { |one| !one.end_with?(Internals::Recipe::SUFFIX) }
+
+        lines = text.lines
+        gone = given.flat_map do |node|
+          first = node.location.start_line
+          last = node.location.end_line
+          alone = lines[first - 1].b[0...node.location.start_column].strip.empty? && lines[last - 1].b[node.location.end_column..].to_s.strip.empty?
+          return nil unless alone
+
+          (first..last).to_a
+        end
+        written = lines.each_with_index.reject { |_, index| gone.include?(index + 1) }.map(&:first).join
+        Code.tree(written) ? Fix::Change.new(:files, 'Take apis_files_paths, which 3.0 refuses, out of the block of ApiRecipes.configure', { file => written }) : nil
       end
 
       # The texts of the files after the lines of items are taken out and

@@ -21,13 +21,29 @@ module ApiRecipes
         # Whether someone is there to answer.
         def self.asks?(input) = input.respond_to?(:tty?) && input.tty? ? true : false
 
-        # shown: how the name of a file is shown.
-        def initialize(screen, input, shown:, root: '.')
+        # shown: how the name of a file is shown. ours: { file => text } for
+        # the files that this run of the command already changed.
+        def initialize(screen, input, shown:, root: '.', ours: {})
           @screen = screen
           @input = input
           @shown = shown
           @root = root
-          @ours = {}
+          @ours = ours
+        end
+
+        # Shows a change that another part of the command works out and
+        # makes: the files it creates, edits and deletes. Returns whether
+        # the answer was yes.
+        def confirm(title, note, preview)
+          @screen.section('🔧', title)
+          if note
+            @screen.line(note.first)
+            note.drop(1).each { |answer| @screen.item(answer) }
+          end
+          preview[:created].each { |file, text| @screen.created(@shown.call(file), text) }
+          preview[:edited].each { |file, (before, after)| @screen.diff(@shown.call(file), before, after) }
+          preview[:deleted].each { |file| @screen.deleted(@shown.call(file)) }
+          @screen.ask('Make this change?', @input)
         end
 
         # Shows the change and asks. Returns the files it wrote, or nil when

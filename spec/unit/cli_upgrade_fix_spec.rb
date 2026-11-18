@@ -14,12 +14,11 @@ describe 'api_recipes upgrade, the changes it offers' do
     end
   end
 
-  let(:initializer) { "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir['config/apis/*.yml']\nend\n" }
+  let(:initializer) { "ApiRecipes.configure do |config|\n  config.log_level = :info\nend\n" }
   let(:files) do
     { 'Gemfile' => "gem 'api_recipes'\n",
       'config/initializers/api_recipes.rb' => "#{initializer}ApiRecipes.print_urls = true\n",
-      'config/initializers/billing.rb' => "# the token of billing\nApiRecipes.billing.authorization = ENV['BILLING_TOKEN']\n",
-      'config/apis/billing.yml' => "billing:\n  host: billing.example.test\n  endpoints:\n    invoices:\n" }
+      'config/initializers/billing.rb' => "# the token of billing\nApiRecipes.billing.authorization = ENV['BILLING_TOKEN']\n" }
   end
 
   def git(*arguments)
@@ -51,18 +50,17 @@ describe 'api_recipes upgrade, the changes it offers' do
     project
     code, out = upgrade("y\nyes\n")
     expect(out).to include("Move print_urls into the block of ApiRecipes.configure\n\nconfig/initializers/api_recipes.rb:1\n" \
-                           "  ApiRecipes.configure do |config|\n    config.apis_files_paths = Dir['config/apis/*.yml']\n" \
+                           "  ApiRecipes.configure do |config|\n    config.log_level = :info\n" \
                            "+   config.print_urls = true\n  end\n- ApiRecipes.print_urls = true\n\nMake this change? [y/N] ")
     expect(out).to include("+   config.values = {\n+     billing: { authorization: ENV['BILLING_TOKEN'] }\n+   }\n",
                            "config/initializers/billing.rb:1\n  # the token of billing\n- ApiRecipes.billing.authorization = ENV['BILLING_TOKEN']\n",
                            "Changed in the project\n  - edited config/initializers/api_recipes.rb\n  - edited config/initializers/billing.rb\n")
-    # What is left is the move to recipes, which convert makes.
-    expect(out).to match(/^2 findings$/)
-    expect(out).not_to include('use config.print_urls', 'this writer now raises', 'Code to paste')
-    expect(code).to eq(1)
+    expect(out).to include('Nothing to change')
+    expect(out).not_to include('[breaks]', 'Code to paste')
+    expect(code).to eq(0)
     expect(File.read('config/initializers/api_recipes.rb')).to eq(<<~RUBY)
       ApiRecipes.configure do |config|
-        config.apis_files_paths = Dir['config/apis/*.yml']
+        config.log_level = :info
         config.print_urls = true
         config.values = {
           billing: { authorization: ENV['BILLING_TOKEN'] }
@@ -78,7 +76,7 @@ describe 'api_recipes upgrade, the changes it offers' do
     ENV['BILLING_TOKEN'] = 'Bearer t'
     logger = Logger.new(IO::NULL)
     described = "config.apis_configs = { billing: { host: 'billing.example.test', endpoints: { invoices: nil } } }"
-    text = File.read('config/initializers/api_recipes.rb').sub(/config\.apis_files_paths = .*$/, described)
+    text = File.read('config/initializers/api_recipes.rb').sub(/config\.log_level = .*$/, described)
     eval(text.sub("  config.print_urls", "  config.logger = logger\n  config.print_urls")) # rubocop:disable Security/Eval
     expect(ApiRecipes.billing.authorization).to eq('Bearer t')
   ensure
@@ -90,7 +88,7 @@ describe 'api_recipes upgrade, the changes it offers' do
     code, out = upgrade("n\ny\n")
     expect(code).to eq(1)
     expect(File.read('config/initializers/api_recipes.rb')).to include('ApiRecipes.print_urls = true', "billing: { authorization: ENV['BILLING_TOKEN'] }")
-    expect(out).to include('config/initializers/api_recipes.rb:7: [breaks] use config.print_urls', 'Code to paste', '3 findings')
+    expect(out).to include('config/initializers/api_recipes.rb:7: [breaks] use config.print_urls', 'Code to paste', '1 finding')
     expect(out).not_to include('this writer now raises')
   end
 
@@ -100,7 +98,7 @@ describe 'api_recipes upgrade, the changes it offers' do
     ["n\nn\n", "\n\n", '', "maybe\nY es\n"].each do |answers|
       code, out = upgrade(answers)
       expect(code).to eq(1)
-      expect(out).to include('Make this change? [y/N]', 'Code to paste', '4 findings')
+      expect(out).to include('Make this change? [y/N]', 'Code to paste', '2 findings')
       expect(out).not_to include('Changed in the project')
     end
     expect(Dir.glob('**/*.rb').to_h { |file| [file, File.read(file)] }).to eq(before)
@@ -185,6 +183,65 @@ describe 'api_recipes upgrade, the changes it offers' do
       _, out = upgrade("n\n")
       expect(out.scan('Make this change?').size).to eq(1)
       expect(out).to include('lib/job.rb:2: [check] a bare rescue now catches', 'the rescue at app/models/device.rb:6, as in 2.x')
+    end
+  end
+
+  describe 'for a project that still describes its apis in files' do
+    let(:old) do
+      { 'Gemfile' => "gem 'api_recipes'\n",
+        'config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir['config/apis/*.yml*']\nend\n",
+        'config/apis/billing.yml.erb' => "billing:\n  host: <%= ENV['BILLING_HOST'] || 'billing.example.test' %>\n  endpoints:\n    invoices:\n",
+        'config/apis/other.yml' => "other:\n  host: other.example.test\n  endpoints:\n    ping:\n" }
+    end
+
+    def descriptions = Dir.glob('config/**/*').select { |file| File.file?(file) && !file.end_with?('.rb') }.sort
+
+    it 'offers to move each api to a portable recipe, shows what it creates, edits and deletes, and does it after a yes' do
+      project(old)
+      code, out = upgrade("y\ny\n")
+      expect(out).to include('Move the api billing to a portable recipe', 'Move the api other to a portable recipe',
+                             "config/api_recipes/billing.recipe.yml (new file)\n+ billing:\n+   recipe:\n+     name: billing\n",
+                             "config/apis/billing.yml.erb (deleted)\n", '+   config.recipes_paths = ',
+                             "+       billing_host: (ENV['BILLING_HOST'] || 'billing.example.test')", '-   config.apis_files_paths = ',
+                             'billing 1.0.0 now comes from a portable recipe', 'other 1.0.0 now comes from a portable recipe',
+                             "Changed in the project\n  - created config/api_recipes/billing.recipe.yml\n  - edited config/initializers/api_recipes.rb\n" \
+                             "  - deleted config/apis/billing.yml.erb\n  - created config/api_recipes/other.recipe.yml\n  - deleted config/apis/other.yml\n",
+                             'Nothing to change')
+      expect(out).not_to include('[breaks]')
+      expect(code).to eq(0)
+      expect(descriptions).to eq(%w[config/api_recipes/billing.recipe.yml config/api_recipes/other.recipe.yml config/api_recipes/recipes.lock])
+      expect(File.read('config/initializers/api_recipes.rb')).not_to include('apis_files_paths')
+      expect(ApiRecipes::CLI.run(['check'], out: StringIO.new, err: StringIO.new)).to eq(0)
+      expect(upgrade("y\n")).to match([0, satisfy { |text| !text.include?('Make this change?') }])
+    end
+
+    it 'leaves an api where it is when the answer is no, and says that convert moves it' do
+      project(old)
+      code, out = upgrade("n\ny\n")
+      expect(code).to eq(1)
+      expect(descriptions).to eq(%w[config/api_recipes/other.recipe.yml config/api_recipes/recipes.lock config/apis/billing.yml.erb])
+      expect(out).to include('config/apis/billing.yml.erb: [breaks] describes an api in a file of the project, which 3.0 no longer loads',
+                             '1. Run `api_recipes convert`: it moves the description of the project to portable recipes')
+      expect(File.read('config/initializers/api_recipes.rb')).to include('apis_files_paths', 'recipes_paths')
+    end
+
+    it 'offers nothing for a description it cannot convert by itself: it stays a finding' do
+      project(old.merge('config/apis/other.yml' => "<% if ENV['X'] %>\nother:\n  host: other.example.test\n<% end %>\n"))
+      code, out = upgrade("n\n")
+      expect(out.scan('Make this change?').size).to eq(1)
+      expect(out).to include('Move the api billing to a portable recipe')
+      expect(out).not_to include('Move the api other')
+      expect(code).to eq(1)
+    end
+
+    it 'takes apis_files_paths out of the block of configure when no file describes an api any more' do
+      project('Gemfile' => "gem 'api_recipes'\n",
+              'config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = [\n    'config/apis/gone.yml'\n  ]\n  config.print_urls = false\nend\n")
+      code, out = upgrade("y\n")
+      expect(out).to include('Take apis_files_paths, which 3.0 refuses, out of the block of ApiRecipes.configure',
+                             "-   config.apis_files_paths = [\n-     'config/apis/gone.yml'\n-   ]\n")
+      expect(code).to eq(0)
+      expect(File.read('config/initializers/api_recipes.rb')).to eq("ApiRecipes.configure do |config|\n  config.print_urls = false\nend\n")
     end
   end
 

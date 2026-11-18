@@ -79,6 +79,27 @@ module ApiRecipes
           gap
         end
 
+        # A file that a change creates: its first lines, and how many follow.
+        def created(file, text, limit = 30)
+          lines = text.lines(chomp: true)
+          gap
+          put(@paint ? "   #{style("#{file} (new file)", 1)}" : "#{file} (new file)")
+          lines.first(limit).each do |line|
+            shown = "#{@paint ? '   ' : ''}+ #{line.gsub(Code::UNSAFE, '?')}".rstrip
+            put(@paint ? style(shown, 32) : shown)
+          end
+          more = lines.size - limit
+          put("#{@paint ? '   ' : ''}  ... and #{more} more line#{'s' unless more == 1}") if more.positive?
+          gap
+        end
+
+        # A file that a change deletes.
+        def deleted(file)
+          gap
+          put(@paint ? "   #{style("#{file} (deleted)", 1, 31)}" : "#{file} (deleted)")
+          gap
+        end
+
         # Asks, and tells whether the answer was yes.
         def ask(question, input)
           @out.print(@paint ? "   #{style(question, 1)} [y/N] " : "#{question} [y/N] ")

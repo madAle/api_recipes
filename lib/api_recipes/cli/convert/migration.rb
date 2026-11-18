@@ -46,6 +46,14 @@ module ApiRecipes
         # Returns the exit code: 0 when the project was changed, 1 when it was
         # not, 2 when something could not be written.
         def call
+          return refused unless prepare.empty?
+
+          finish
+        end
+
+        # Works out every change without writing anything. Returns the
+        # reasons why the project cannot be changed: none when it can.
+        def prepare
           @project = Upgrade::Project.new(@root)
           inside = Pathname.new(File.expand_path(@source)).relative_path_from(Pathname.new(File.expand_path(@root))).to_s
           @source = inside unless inside.start_with?('..')
@@ -57,7 +65,20 @@ module ApiRecipes
           plan_verify_with
           plan_old_description
           plan_valid
-          return refused unless @blocking.empty?
+          @blocking
+        end
+
+        # What prepare worked out: the recipe that is created, the files that
+        # are edited, with the text they have and the one they get, and the
+        # files that are deleted.
+        def preview
+          { created: { @target => @result.text },
+            edited: @planned.select { |_, text| text }.to_h { |file, text| [file, [File.read(full(file)), text]] },
+            deleted: @planned.select { |_, text| text.nil? }.keys }
+        end
+
+        # Makes the changes that prepare worked out. Returns the exit code.
+        def finish
           return 2 unless apply
 
           @planned.each { |file, text| text ? @written[file] = text : @written.delete(file) }

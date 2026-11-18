@@ -101,7 +101,7 @@ describe 'The commands that read the files of a project' do
 
   # On a terminal `upgrade` offers to make the changes it is sure of.
   describe 'upgrade, when it offers to change the project' do
-    let(:initializer) { "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n" }
+    let(:initializer) { "ApiRecipes.configure do |config|\n  config.log_level = :info\nend\n" }
 
     def git(*arguments)
       out, status = Open3.capture2e('git', '-c', 'user.name=spec', '-c', 'user.email=spec@example.test', *arguments)
@@ -112,7 +112,6 @@ describe 'The commands that read the files of a project' do
 
     def project(startup = "ApiRecipes.print_urls = true\n")
       write('Gemfile', "gem 'api_recipes'\n")
-      write('config/apis/billing.yml', api)
       write('config/initializers/api_recipes.rb', initializer)
       write('config/initializers/startup.rb', startup)
       git('init', '-q', '.')
@@ -150,6 +149,24 @@ describe 'The commands that read the files of a project' do
       out = upgrade("y\n", '--no-code')
       expect(out).not_to include('Make this change?', 'written-secret')
       expect(snapshot).to eq(before)
+    end
+
+    it 'moves an api to a recipe under the same rules: only after a yes on a terminal, and never with --no-code' do
+      project
+      write('config/apis/billing.yml', api)
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'old')
+      before = snapshot
+      [upgrade(nil), upgrade("y\n", '--no-code')].each { |out| expect(out).not_to include('Make this change?') }
+      out = StringIO.new
+      ApiRecipes::CLI.run(['upgrade'], out: out, err: out, input: StringIO.new("y\ny\ny\n"))
+      expect(out.string).not_to include('Make this change?')
+      expect(upgrade("n\nn\n")).to include('Move the api billing to a portable recipe', 'Make this change?')
+      expect(snapshot).to eq(before)
+      upgrade("y\nn\n")
+      expect(File.exist?('config/api_recipes/billing.recipe.yml')).to be(true)
+      expect(File.exist?('config/apis/billing.yml')).to be(false)
     end
 
     it 'changes only a file that git has committed as it is now: not one with changes, one git does not know, or outside git' do
