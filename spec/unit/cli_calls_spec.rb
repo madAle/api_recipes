@@ -21,6 +21,18 @@ describe ApiRecipes::CLI::Calls do
     )
   end
 
+  it 'gives the call with [] of an endpoint whose name has no method, and of the ones it contains' do
+    configure_test_apis(odd: { host: 'odd.example.test',
+                               endpoints: { run: { path: '/run/:id', endpoints: { with: nil, show: nil } }, with: nil,
+                                            '404': { endpoints: { 'a-b': { path: '/:id' } } }, users: { endpoints: { url: nil } } } })
+    calls = described_class.of(ApiRecipes.odd.definition)
+    expect(calls).to eq(%w[run] => '.run(id)', %w[run with] => '.run(id)[:with]', %w[run show] => '.run(id).show',
+                        %w[with] => '[:with]', %w[404] => '["404"]', %w[404 a-b] => '["404"]["a-b", id]',
+                        %w[users] => '.users', %w[users url] => '.users[:url]')
+    urls = calls.values.map { |call| ApiRecipes.odd.instance_eval("self#{call.gsub(/\bid\b/, "'x'")}").url.to_s }
+    expect(urls).to eq(%w[run/x run/x/with run/x/show with 404 404/x users users/url].map { |path| "https://odd.example.test/#{path}" })
+  end
+
   it 'gives calls that can be made as they are written' do
     configure_test_apis(shop)
     calls = described_class.of(ApiRecipes.shop.definition).values
