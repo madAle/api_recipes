@@ -37,6 +37,9 @@ module ApiRecipes
                  'ApiRecipes::Settings was removed: the defaults are listed in the README'),
         Rule.new(:breaks, /\bconfiguration\.setup\b/,
                  'configuration.setup was removed: configure loads the configuration'),
+        Rule.new(:breaks, /\.apis_files_paths\b/,
+                 'apis_files_paths was removed: an api is described by a portable recipe, loaded with recipes_paths. ' \
+                 'Run `api_recipes convert`: it moves every description of the project to a recipe and changes this configuration'),
         Rule.new(:breaks, /ApiRecipes\.print_urls/, 'use config.print_urls inside ApiRecipes.configure', false, :print_urls),
         Rule.new(:breaks, /_aprcps_|set_authorization_for_api|set_basic_auth_for_api|copy_global_authorizations_to_api/,
                  'internal method removed'),
@@ -318,18 +321,18 @@ module ApiRecipes
         counts = findings.group_by(&:kind).transform_values(&:size)
         lines = ->(count) { "#{count} line#{'s' unless count == 1}" }
         steps = []
-        steps << "Fix the #{lines.call(counts[:breaks])} marked breaks: that code stops working, and each line says what to use instead#{'. The code to paste, above, does it for the values given when the application starts' if pasted}" if counts[:breaks]
+        described = @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+        unless described.empty?
+          steps << "Run `api_recipes convert`: it moves the #{described.size == 1 ? 'description' : "#{described.size} descriptions"} of the " \
+                   'project to portable recipes, changes the configuration by itself and says what it did. 3.0 loads no other file'
+        end
+        other = (counts[:breaks] || 0) - findings.count { |finding| finding.kind == :breaks && (described.include?(finding.file) || finding.message.start_with?('apis_files_paths')) }
+        steps << "Fix the #{lines.call(other)} marked breaks#{' that convert does not take care of' unless described.empty?}: that code stops working, and each line says what to use instead#{'. The code to paste, above, does it for the values given when the application starts' if pasted}" if other.positive?
         steps << "Correct what is marked config (#{counts[:config]}): each is a problem in a file that describes an api" if counts[:config]
         steps << "Read the #{lines.call(counts[:check])} marked check: the result changes, and only you can tell whether the code still does what it should. A check line is reported at every run" if counts[:check]
         steps << 'Go through what this command cannot find: look in the code for the changes that concern the project'
         steps << 'Run this command again: go on when only check lines that you have read are left' if counts[:breaks] || counts[:config]
         steps << 'Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once'
-        described = @project ? @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) } : []
-        unless described.empty?
-          steps << "Then, if you want, move an api to a portable recipe: run `api_recipes convert FILE` for " \
-                   "#{described.first(3).map { |file| shown_path(file) }.join(', ')}#{' and the others' if described.size > 3}. " \
-                   'It changes the project by itself and says what it did; the files the project has now keep working as they are'
-        end
         screen.section('👉', 'What to do now')
         steps.each_with_index { |step, index| screen.item(step, "#{index + 1}.") }
       end
@@ -588,18 +591,25 @@ module ApiRecipes
         unchecked = erb_values(apis)
         Internals::Compiler.compile_all(apis)
         note_unchecked(file, unchecked)
-        ConfigRules.findings(apis).map { |message| Finding.new(file: file, line: nil, kind: :check, message: message) }
+        [to_convert(file)] + ConfigRules.findings(apis).map { |message| Finding.new(file: file, line: nil, kind: :check, message: message) }
       rescue RecipeFileError => e
         return not_checked(file) if tags && e.errors.all? { |problem| problem.include?('invalid YAML') }
 
-        e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }
+        [to_convert(file)] + e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }
       rescue ConfigurationError => e
         note_unchecked(file, unchecked)
-        checked(e.errors, unchecked).map { |problem| config_finding(file, problem) }
+        [to_convert(file)] + checked(e.errors, unchecked).map { |problem| config_finding(file, problem) }
       rescue SystemStackError
         [config_finding(file, 'is nested too deeply to be checked')]
       rescue StandardError, ScriptError => e
         [config_finding(file, "could not be evaluated (#{e.class})")]
+      end
+
+      # 3.0 loads no file of the project that describes an api.
+      def to_convert(file)
+        Finding.new(file: file, line: nil, kind: :breaks,
+                    message: 'describes an api in a file of the project, which 3.0 no longer loads: an api is described by a ' \
+                             'portable recipe. `api_recipes convert` moves it to one')
       end
 
       # A file whose tags give a name or a part of the structure is not
