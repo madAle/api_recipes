@@ -53,10 +53,12 @@ module ApiRecipes
                      default_headers default_params].freeze
       ENDPOINT_ORDER = %w[path verb route ok_code resource timeout on_bad_code mime_type default_headers default_params].freeze
 
-      def initialize(file, name: nil, version: DEFAULT_VERSION)
+      # calls: write beside each endpoint how it is called in Ruby.
+      def initialize(file, name: nil, version: DEFAULT_VERSION, calls: false)
         @file = file
         @wanted = name
         @version = version
+        @calls = calls
         # The mark of a tag: random, so that no file can write one.
         @mark = "__API_RECIPES_ERB_#{SecureRandom.hex(8)}_"
         @token = /#{@mark}(\d+)__/
@@ -86,8 +88,13 @@ module ApiRecipes
         body = api_options(options)
         body = { 'recipe' => { 'name' => name, 'version' => @version, 'format' => Internals::Recipe::FORMAT } }.merge(body)
         body['variables'] = (body['variables'] || {}).merge(@variables) unless @variables.empty?
-        text = Text.new(name, ordered(body, API_ORDER)).to_yaml
-        Result.new(name: name, version: @version, text: text, calls: checked(name, text), changes: @changes,
+        options = ordered(body, API_ORDER)
+        text = Text.new(name, options).to_yaml
+        definition = checked(name, text)
+        # The calls are those of the recipe just checked. The text is read
+        # back when it is written: the comments leave the data as it is.
+        text = Text.new(name, options, Calls.of(definition)).to_yaml if @calls
+        Result.new(name: name, version: @version, text: text, calls: definition.routes.size, changes: @changes,
                    variables: env_of(false).merge(@given), defaults: env_of(true), expressions: @expressions, verify_with: @verify_with,
                    refs: @refs.to_h { |variable, ref| [variable, ref.merge(credential: ref[:credential] || @secret.include?(variable))] })
       end
@@ -467,10 +474,10 @@ module ApiRecipes
         (first + (options.keys - first - ['endpoints']) + (options.key?('endpoints') ? ['endpoints'] : [])).to_h { |key| [key, options[key]] }
       end
 
-      # The result must be a portable recipe. Returns the number of its calls.
+      # The result must be a portable recipe. Returns its compiled tree.
       def checked(name, text)
         file_name = "#{name}#{Internals::Recipe::SUFFIX}"
-        Internals::Recipe.parse(text, file_name, file_name: file_name).definition.routes.size
+        Internals::Recipe.parse(text, file_name, file_name: file_name).definition
       rescue ConfigurationError => e
         problems = e.errors.map { |problem| problem.delete_prefix("#{file_name}: ") }
         raise Refused.new(["#{shown(@file)} cannot become a portable recipe:"] + problems.map { |problem| "  #{problem}" })
@@ -482,14 +489,20 @@ module ApiRecipes
       class Text
         INTERNAL = 'internal error: the recipe does not read back as it was written, so nothing was written'
 
-        def initialize(name, options)
+        COMMENT_COLUMN = 34
+
+        # calls: { names of an endpoint => how it is called }, written in a
+        # comment beside the endpoint.
+        def initialize(name, options, calls = {})
           @name = name
           @options = options
+          @calls = calls
         end
 
         def to_yaml
           @lines = []
-          write(0, @name, @options)
+          line(0, "#{scalar(@name)}:")
+          options(1, @options, [])
           text = "#{@lines.join("\n")}\n"
           raise Refused.new([INTERNAL]) unless YAML.safe_load(text) == { @name => @options }
 
@@ -500,23 +513,45 @@ module ApiRecipes
 
         private
 
-        def write(indent, key, value)
-          key = scalar(key)
-          case value
-          when Hash
-            if value.empty?
-              line(indent, "#{key}: {}")
-            else
-              line(indent, "#{key}:")
-              value.each { |name, inner| write(indent + 1, name, inner) }
-            end
-          when Array then line(indent, "#{key}: [#{value.map { |item| scalar(item) }.join(', ')}]")
-          when nil then line(indent, "#{key}:")
-          else line(indent, "#{key}: #{scalar(value)}")
+        # The options of the api, or of the endpoint that names holds from the
+        # api down. Only the entries of its `endpoints` are endpoints: a
+        # header or a parameter with the name of one gets no call.
+        def options(indent, body, names)
+          body.each do |key, value|
+            next write(indent, key, value) unless key.to_s == 'endpoints' && value.is_a?(Hash) && !value.empty?
+
+            line(indent, "#{scalar(key)}:")
+            value.each { |name, inner| endpoint(indent + 1, name, inner, names + [name.to_s]) }
           end
         end
 
-        def line(indent, text) = @lines << "#{'  ' * indent}#{text}"
+        def endpoint(indent, name, body, names)
+          return write(indent, name, body, @calls[names]) unless body.is_a?(Hash) && !body.empty?
+
+          line(indent, "#{scalar(name)}:", @calls[names])
+          options(indent + 1, body, names)
+        end
+
+        def write(indent, key, value, comment = nil)
+          written = scalar(key)
+          case value
+          when Hash
+            if value.empty?
+              line(indent, "#{written}: {}", comment)
+            else
+              line(indent, "#{written}:", comment)
+              value.each { |name, inner| write(indent + 1, name, inner) }
+            end
+          when Array then line(indent, "#{written}: [#{value.map { |item| scalar(item) }.join(', ')}]", comment)
+          when nil then line(indent, "#{written}:", comment)
+          else line(indent, "#{written}: #{scalar(value)}", comment)
+          end
+        end
+
+        def line(indent, text, comment = nil)
+          text = "#{'  ' * indent}#{text}"
+          @lines << (comment ? "#{text.ljust(COMMENT_COLUMN - 1)} # #{comment}" : text)
+        end
 
         def scalar(content)
           plain = content.is_a?(String) || content.is_a?(Integer) || content.is_a?(Float) || content == true || content == false

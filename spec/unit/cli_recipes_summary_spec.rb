@@ -94,7 +94,7 @@ RSpec.describe ApiRecipes::CLI::Recipes::Summary do
     recipe = Struct.new(:name, :version, :definition, :text).new('shop', '1.0.0', definition, '')
     lines = described_class.new(recipe).lines
     expect(lines.join("\n")).not_to match(/[\u202E\u2028\u200B]/)
-    expect(lines).to include('  variables:     tenant: default e?u, safe? text', '    POST  shop.sh?ow  /a%E2%80%8Bb')
+    expect(lines).to include('  variables:     tenant: default e?u, safe? text', '    POST  shop["sh?ow"]  /a%E2%80%8Bb')
   end
 
   it 'cuts a long text' do

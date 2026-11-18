@@ -658,7 +658,18 @@ github:
 | `--only GLOB` | only the paths that match; can be repeated. `*` also crosses `/`: `--only 'repos/*'` |
 | `--except GLOB` | leaves out the paths that match; can be repeated |
 | `--server N` | which entry of `servers` gives the address, counted from 0. Default: the first |
+| `--calls` | writes under each endpoint how it is called in Ruby |
 | `--output FILE` | writes the recipe in FILE, which must not exist, instead of on STDOUT |
+
+With `--calls`, who reads the recipe sees the call beside the request it
+sends. The call starts after the name of the API, as in `github.users.show('octocat')`:
+
+    users:                        # GET /users (users/list)
+                                  # .users
+      endpoints:
+        show:                     # GET /users/{username} (users/get-by-username)
+                                  # .users.show(username)
+          path: "/:username"
 
 The input is one local file, YAML or JSON, OpenAPI 3.0 or 3.1. Warnings and a
 summary go to STDERR, so the recipe can be redirected. The command exits with 1
@@ -992,6 +1003,9 @@ What the command does:
   number (`ENV.fetch('NAME', 'text')`, `ENV['NAME'] || 443`) becomes the
   default of the variable. A default that a tag gave to a variable the file
   declares is given by the application from now on.
+- **`--calls` writes beside each endpoint how it is called in Ruby**, as
+  `show:   # .invoices.show(id)`, after the name of the API. The recipe is the
+  same with or without them.
 - **Nothing in the file is run**, and there is no option that runs it. The
   code of a tag goes to `config.values` as text, and each tag has its own
   variable, also two tags in one value. `.compact` leaves out a variable whose

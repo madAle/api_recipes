@@ -22,6 +22,17 @@ describe 'api_recipes routes' do
     expect(out.lines.map { |line| line.index('https://') }.uniq.size).to eq(1)
   end
 
+  it 'shows an endpoint whose name has no method of its own as it is reached, with []' do
+    text = { 'odd' => { 'host' => 'odd.example.test',
+                        'endpoints' => { 'run' => { 'path' => '/run/:id', 'endpoints' => { 'with' => nil } },
+                                         '404' => nil, 'users' => { 'endpoints' => { 'url' => nil } } } } }
+    with_description(YAML.dump(text), 'odd.yml') do |path|
+      _, out, = run_cli('routes', path)
+      expect(out.lines.map { |line| line.split('  ').first })
+        .to eq(['odd.run(id)', 'odd.run(id)[:with]', 'odd["404"]', 'odd.users', 'odd.users[:url]'])
+    end
+  end
+
   it 'does not list an endpoint that only groups others' do
     _, out, = run_cli('routes', recipe)
     expect(out.lines.map { |line| line.split.first }).not_to include('github.repos')
