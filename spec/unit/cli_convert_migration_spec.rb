@@ -163,21 +163,60 @@ describe 'api_recipes convert, in a project' do
       expect(initializer_text).to include('config.apis_files_paths = ')
     end
 
-    it 'stays when the command cannot tell what it loads, or when it still finds a file' do
+    it 'goes with the last description however it was written: what it named is gone' do
       project('config/initializers/api_recipes.rb' => "BASE = File.expand_path('../apis', __dir__)\nApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[File.join(BASE, '*.yml.erb')]\nend\n")
       expect(convert('config/apis/billing.yml.erb').first).to eq(0)
-      expect(initializer_text).to include('config.apis_files_paths = ')
+      expect(initializer_text).not_to include('apis_files_paths')
       FileUtils.rm_rf(Dir.children('.'))
-      project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[File.expand_path('../apis/*', __dir__)]\nend\n",
+      project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[Rails.root.join 'config', 'apis', '*']\nend\n",
               'config/apis/notes.txt' => "not a description\n")
       expect(convert('config/apis/billing.yml.erb').first).to eq(0)
-      expect(initializer_text).to include('config.apis_files_paths = ')
+      expect(initializer_text).not_to include('apis_files_paths')
     end
 
     it 'goes when it was a list that named only the file' do
       project('config/initializers/api_recipes.rb' => "ApiRecipes.configure do |config|\n  config.print_urls = false\n  config.apis_files_paths = [File.expand_path('../apis/billing.yml.erb', __dir__)]\nend\n")
       expect(convert('config/apis/billing.yml.erb').first).to eq(0)
       expect(initializer_text).to start_with("ApiRecipes.configure do |config|\n  config.print_urls = false\n  config.values = {\n")
+    end
+  end
+
+  describe 'with no file' do
+    let(:other) { "other:\n  host: other.example.test\n  endpoints:\n    ping:\n" }
+    let(:two) { "first:\n  host: first.example.test\n  endpoints:\n    ping:\n\nsecond:\n  host: second.example.test\n  endpoints:\n    ping:\n" }
+
+    it 'moves every api that the project describes to a recipe in one run, and takes apis_files_paths out' do
+      project('config/apis/other.yml' => other, 'config/apis/two.yml' => two)
+      code, out, err = convert
+      expect([code, err]).to eq([0, ''])
+      expect(out).to include('billing 1.0.0 now comes from a portable recipe', 'other 1.0.0 now comes from a portable recipe',
+                             'first 1.0.0 now comes from a portable recipe', 'second 1.0.0 now comes from a portable recipe',
+                             'apis_files_paths, which loads nothing now, is gone')
+      expect(Dir.glob('config/**/*').select { |file| File.file?(file) }.sort)
+        .to eq(%w[billing first other second].map { |name| "config/api_recipes/#{name}.recipe.yml" }.push('config/api_recipes/recipes.lock',
+                                                                                                         'config/initializers/api_recipes.rb').sort)
+      expect(File.read('config/initializers/api_recipes.rb')).not_to include('apis_files_paths')
+      boot
+      expect(ApiRecipes.apis).to contain_exactly(:billing, :other, :first, :second)
+      expect(run_cli('check').first).to eq(0)
+    end
+
+    it 'converts what it can, says what it could not, and leaves that file and apis_files_paths where they are' do
+      project('config/apis/other.yml' => "<% if ENV['X'] %>\n#{other}<% end %>\n")
+      code, out, err = convert
+      expect(code).to eq(1)
+      expect(out).to include('billing 1.0.0 now comes from a portable recipe')
+      expect(err).to include('config/apis/other.yml was not converted:')
+      expect(File.exist?('config/apis/other.yml')).to be(true)
+      expect(File.read('config/initializers/api_recipes.rb')).to include('apis_files_paths')
+    end
+
+    it 'says so when the project describes no api in a file, and still needs a file outside a project' do
+      write('Gemfile', "gem 'api_recipes'\n")
+      expect(convert).to match([0, /No file of this project describes an api/, ''])
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) { expect(convert).to match([2, '', /convert needs one configuration file, or none in the root of a project/]) }
+      end
     end
   end
 

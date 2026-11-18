@@ -26,12 +26,15 @@ module ApiRecipes
         # git does not run a program that the repository names.
         GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'].freeze
 
-        def initialize(result, source, out:, err:, root: '.')
+        # written: { file => text } for the files that the same run of the
+        # command already changed, when it converts several apis.
+        def initialize(result, source, out:, err:, root: '.', written: {})
           @result = result
           @source = source
           @out = out
           @err = err
           @root = root
+          @written = written
           @blocking = []
           @left = []
           @done = []
@@ -57,6 +60,7 @@ module ApiRecipes
           return refused unless @blocking.empty?
           return 2 unless apply
 
+          @planned.each { |file, text| text ? @written[file] = text : @written.delete(file) }
           report
           0
         end
@@ -116,6 +120,8 @@ module ApiRecipes
         # Whether git has the file committed as it is now.
         def committed?(file)
           return false unless tracked?(file)
+          # As this run left it, after a change made when git had it committed.
+          return true if @written.key?(file) && File.read(full(file)) == @written[file]
 
           changes, status = git('status', '--porcelain', '--', file)
           status&.success? && changes.empty?
@@ -329,7 +335,8 @@ module ApiRecipes
         # otherwise the person is told, and the lines stay. They stay too when
         # the command cannot tell what the assignment loads.
         def without_dead_assignments(block, given, text, edits, covered)
-          return [edits, covered] unless !given.empty? && given.all? { |node| loads_nothing?(node.arguments&.arguments&.first) }
+          return [edits, covered] if given.empty?
+          return [edits, covered] unless last_description? || given.all? { |node| loads_nothing?(node.arguments&.arguments&.first) }
 
           lines = text.lines
           whole = given.map do |node|
@@ -347,6 +354,13 @@ module ApiRecipes
           @left << "#{block.config}.apis_files_paths, at line #{given.first.location.start_line} of #{shown(@initializer)}, loads no " \
                    'file now: you can take it out'
           [edits, covered]
+        end
+
+        # Whether the project has no other file that describes an api: what
+        # apis_files_paths named is then gone, however it was written.
+        def last_description?
+          others = @project.config_files.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+          whole_file? && others.all? { |file| File.expand_path(file, @root) == File.expand_path(@source, @root) }
         end
 
         # Whether value, given to apis_files_paths, loads no file once the old

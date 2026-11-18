@@ -204,8 +204,10 @@ module ApiRecipes
         parser.on('--calls') { options[:calls] = true }
         parser.on('--to DIR') { |dir| directory = dir }
         files = parser.parse(args)
+        return convert_all(options, out, err) if files.empty? && directory.nil? && options[:name].nil? && project_root?
+
         unless files.size == 1
-          err.puts 'convert needs one configuration file'
+          err.puts 'convert needs one configuration file, or none in the root of a project: it then converts every api the project describes'
           return 2
         end
 
@@ -284,6 +286,46 @@ module ApiRecipes
       rescue OptionParser::ParseError => e
         err.puts e.message
         2
+      end
+
+      # Every api that a file of the project describes moves to a portable
+      # recipe, one at a time. Returns the highest exit code.
+      def convert_all(options, out, err)
+        described = Upgrade::Project.new.config_files.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+        if described.empty?
+          out.puts 'No file of this project describes an api: there is nothing to convert'
+          return 0
+        end
+
+        written = {}
+        codes = described.sort.flat_map do |file|
+          names = begin
+            Convert.shape(File.read(file)).keys
+          rescue Convert::Refused, Psych::Exception, SystemCallError
+            [nil]
+          end
+          names.map { |name| convert_one(file, names.size > 1 ? name : nil, options, written, out, err) }
+        end
+        codes.max
+      end
+
+      def convert_one(file, name, options, written, out, err)
+        out.puts
+        result = Convert.new(file, **options, name: name).call
+        Convert::Migration.new(result, file, out: out, err: err, written: written).call
+      rescue Convert::Refused => e
+        err.puts "#{Recipes::Summary.shown(file, 300)} was not converted:"
+        e.reasons.each { |reason| err.puts "  - #{reason}" }
+        1
+      rescue Convert::Unusable => e
+        err.puts e.message
+        2
+      rescue SystemStackError
+        err.puts "#{Recipes::Summary.shown(file, 300)}: is nested too deeply to be read"
+        1
+      rescue StandardError => e
+        err.puts "convert failed (#{e.class}): this is a defect of api_recipes, not of the file"
+        1
       end
 
       def routes(args, out, err)
