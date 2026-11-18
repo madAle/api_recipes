@@ -69,14 +69,14 @@ describe ApiRecipes::CLI::Import::Server do
   it 'writes no host for a relative address, and says to set it' do
     result = read(server('/v1'))
     expect(result.options).to eq(base_url: 'v1')
-    expect(result.warnings).to contain_exactly(match(/relative.*set host/))
+    expect(result.warnings).to contain_exactly(match(/relative: the host is the variable \{host\}/))
     expect(read(server('/')).options).to eq({})
   end
 
-  it 'writes nothing when the description names no server, and says to set the host' do
+  it 'writes nothing when the description names no server, and says that the host is a variable' do
     result = read(:absent)
     expect(result.options).to eq({})
-    expect(result.warnings).to contain_exactly(match(/no server.*set host/))
+    expect(result.warnings).to contain_exactly(match(/no server: the host is the variable \{host\}/))
     expect(read([]).options).to eq({})
   end
 

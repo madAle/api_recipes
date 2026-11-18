@@ -137,7 +137,7 @@ describe 'api_recipes import' do
   it 'says so when nothing was imported' do
     code, out, err = run_cli('import', small, '--only', 'nothing*')
     expect(code).to eq(0)
-    expect(YAML.safe_load(out)).to eq('github' => { 'host' => 'api.github.com' })
+    expect(YAML.safe_load(out)).to eq('github' => { 'recipe' => { 'name' => 'github', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.github.com' })
     expect(err).to match(/warning: no operation was imported/)
   end
 
@@ -150,7 +150,7 @@ describe 'api_recipes import' do
               "paths:\n  /a: {get: *ok}\n  /b: {get: *ok, post: *ok}\n"
     with_description(aliased) do |path|
       code, _, err = run_cli('import', path)
-      expect([code, err]).to eq([0, "warning: the description names no server: set host in the recipe\n" \
+      expect([code, err]).to eq([0, "warning: the description names no server: the host is the variable {host}, to give with config.values\n" \
                                     "3 operations imported from 2 paths, 1 warning\n"])
     end
   end

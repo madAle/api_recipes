@@ -35,7 +35,7 @@ module ApiRecipes
             gives the code to paste, with the whole block of ApiRecipes.configure; --no-code
             leaves the code out.
             Exits with 1 if it finds something, 2 if it could not read something, 0 otherwise.
-        import [--name NAME] [--only GLOB]... [--except GLOB]... [--server N] [--calls] [--output FILE] FILE
+        import [--name NAME] [--version VERSION] [--only GLOB]... [--except GLOB]... [--server N] [--calls] [--output FILE] FILE
             Writes a recipe from the OpenAPI 3.0 or 3.1 description in FILE (YAML or JSON), on
             STDOUT or in the file given with --output, which must not exist. Warnings and a
             summary go to STDERR. --only and --except choose the paths: * also crosses slashes.
@@ -140,6 +140,7 @@ module ApiRecipes
         parser.on('--only GLOB') { |glob| options[:only] << glob }
         parser.on('--except GLOB') { |glob| options[:except] << glob }
         parser.on('--server N', Integer) { |number| options[:server] = number }
+        parser.on('--version VERSION') { |version| options[:version] = version }
         parser.on('--calls') { options[:calls] = true }
         parser.on('--output FILE') { |file| output = file }
         paths = parser.parse(args)

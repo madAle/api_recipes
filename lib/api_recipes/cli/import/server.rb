@@ -49,7 +49,7 @@ module ApiRecipes
           if servers.empty?
             raise Error, "--server #{@index}: the description names no server" unless @index.zero?
 
-            @warnings << 'the description names no server: set host in the recipe'
+            @warnings << 'the description names no server: the host is the variable {host}, to give with config.values'
             return nil
           end
           unless @index.between?(0, servers.size - 1)
@@ -63,7 +63,7 @@ module ApiRecipes
         end
 
         def relative(path)
-          @warnings << 'the server address is relative: set host in the recipe'
+          @warnings << 'the server address is relative: the host is the variable {host}, to give with config.values'
           with_variables({ base_url: base_url(path) }.compact)
         end
 
