@@ -64,6 +64,30 @@ module ApiRecipes
           gap
         end
 
+        # What changes in a file: the lines taken out and the lines added,
+        # with the lines around them. A character that a terminal would
+        # obey is shown as a question mark.
+        def diff(file, old, new)
+          Diff.hunks(old, new).each do |first, lines|
+            gap
+            put(@paint ? "   #{style("#{file}:#{first}", 1)}" : "#{file}:#{first}")
+            lines.each do |sign, text|
+              shown = "#{@paint ? '   ' : ''}#{sign} #{text.gsub(Code::UNSAFE, '?')}".rstrip
+              put(@paint ? style(shown, { '-' => 31, '+' => 32 }.fetch(sign, 2)) : shown)
+            end
+          end
+          gap
+        end
+
+        # Asks, and tells whether the answer was yes.
+        def ask(question, input)
+          @out.print(@paint ? "   #{style(question, 1)} [y/N] " : "#{question} [y/N] ")
+          @out.flush if @out.respond_to?(:flush)
+          answer = input.gets.to_s.strip.downcase
+          @blank = false
+          %w[y yes].include?(answer)
+        end
+
         # The last line of the results: how many findings, and of which kinds.
         def summary(text, counts)
           gap

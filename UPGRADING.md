@@ -476,8 +476,9 @@ See [Security in the README](README.md#security) for the same list in its place.
 
 ## The `api_recipes upgrade` command
 
-The gem installs a command that looks for the changes of this guide. It never
-changes a file. Run it in the root of your project, with no argument:
+The gem installs a command that looks for the changes of this guide. It changes
+a file only when you say yes to a change it shows you. Run it in the root of
+your project, with no argument:
 
     $ bundle exec api_recipes upgrade
 
@@ -558,6 +559,38 @@ What to do now
   5. Run this command again: go on when only check lines that you have read are left
   6. Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once
 ```
+
+**On a terminal the command offers to make the changes it is sure of**, one
+at a time. Today they are the values that a line gave when the application
+started: `ApiRecipes.print_urls = ...` moves into the block of
+`ApiRecipes.configure`, and the credentials assigned on `ApiRecipes.NAME`
+become `config.values`. Each change is shown as a diff of the files it
+touches, and is made only when you answer `y` or `yes`:
+
+```
+Move print_urls into the block of ApiRecipes.configure
+
+config/initializers/api_recipes.rb:1
+  ApiRecipes.configure do |config|
+    config.apis_files_paths = Dir['config/apis/*.yml']
++   config.print_urls = true
+  end
+- ApiRecipes.print_urls = true
+
+Make this change? [y/N]
+```
+
+- A change is all the files it needs or none: the line that gave the value
+  is taken out together with the line that is added.
+- It touches only files that git has committed as they are now, so that
+  `git diff` shows the change and `git checkout` undoes it. Otherwise the
+  command says why, and gives the code to paste as before.
+- A line is taken out only when it is one whole statement. A block of
+  `configure` that the command cannot read whole, or that already assigns the
+  value, is left to you, with the code to paste.
+- A change you refuse stays among the findings, with its code to paste.
+- Away from a terminal, as in a CI, and with `--no-code`, the command asks
+  nothing and changes nothing.
 
 The steps at the end are those of what was found: a kind of finding that is
 not there has no step. On a terminal the same results are shown in sections,

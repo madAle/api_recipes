@@ -99,6 +99,142 @@ describe 'The commands that read the files of a project' do
     end
   end
 
+  # On a terminal `upgrade` offers to make the changes it is sure of.
+  describe 'upgrade, when it offers to change the project' do
+    let(:initializer) { "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n" }
+
+    def git(*arguments)
+      out, status = Open3.capture2e('git', '-c', 'user.name=spec', '-c', 'user.email=spec@example.test', *arguments)
+      raise out unless status.success?
+
+      out
+    end
+
+    def project(startup = "ApiRecipes.print_urls = true\n")
+      write('Gemfile', "gem 'api_recipes'\n")
+      write('config/apis/billing.yml', api)
+      write('config/initializers/api_recipes.rb', initializer)
+      write('config/initializers/startup.rb', startup)
+      git('init', '-q', '.')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'start')
+    end
+
+    # The answers are typed on a terminal; nil for an input that is not one.
+    def upgrade(answers, *arguments)
+      out = StringIO.new
+      input = StringIO.new(answers.to_s)
+      input.define_singleton_method(:tty?) { true } if answers
+      ApiRecipes::CLI.run(['upgrade', *arguments], out: out, err: out, input: input)
+      out.string
+    end
+
+    def snapshot = Dir.glob('**/*').to_h { |f| [f, File.file?(f) ? File.read(f) : nil] }
+
+    it 'changes a file only after a yes typed on a terminal: never away from one, whatever the input says' do
+      project
+      before = snapshot
+      expect(upgrade(nil)).not_to include('Make this change?')
+      out = StringIO.new
+      ApiRecipes::CLI.run(['upgrade'], out: out, err: out, input: StringIO.new("y\nyes\n"))
+      expect(out.string).not_to include('Make this change?')
+      expect(upgrade("n\n")).to include('Make this change?')
+      expect(snapshot).to eq(before)
+      upgrade("y\n")
+      expect(File.read('config/initializers/api_recipes.rb')).to include('config.print_urls = true')
+    end
+
+    it 'does not ask, and shows no code, with --no-code' do
+      project("ApiRecipes.billing.authorization = 'written-secret'\n")
+      before = snapshot
+      out = upgrade("y\n", '--no-code')
+      expect(out).not_to include('Make this change?', 'written-secret')
+      expect(snapshot).to eq(before)
+    end
+
+    it 'changes only a file that git has committed as it is now: not one with changes, one git does not know, or outside git' do
+      project
+      File.write('config/initializers/startup.rb', "ApiRecipes.print_urls = true\n# a note that is not committed\n")
+      before = snapshot
+      expect(upgrade("y\n")).to match(/does not make the change: config\/initializers\/startup\.rb is not a file that git has committed/)
+      expect(snapshot).to eq(before)
+
+      git('checkout', '--', '.')
+      write('config/initializers/new.rb', "ApiRecipes.billing.authorization = 'x'\n")
+      before = snapshot
+      expect(upgrade("n\ny\n")).to match(/does not make the change: config\/initializers\/new\.rb is not a file/)
+      expect(snapshot).to eq(before)
+
+      git('add', '-N', 'config/initializers/new.rb')
+      expect(upgrade("n\ny\n")).to match(/does not make the change: config\/initializers\/new\.rb is not a file/)
+      expect(snapshot).to eq(before)
+
+      FileUtils.rm_f('config/initializers/new.rb')
+      git('add', '-A')
+      git('update-index', '--assume-unchanged', 'config/initializers/startup.rb')
+      before = snapshot
+      expect(upgrade("y\n")).to match(/does not make the change: config\/initializers\/startup\.rb is not a file/)
+      expect(snapshot).to eq(before)
+
+      FileUtils.rm_rf('.git')
+      expect(upgrade("y\ny\n")).to match(/does not make the change/)
+      expect(snapshot).to eq(before)
+    end
+
+    it 'changes nothing through a symbolic link' do
+      project
+      FileUtils.mv('config/initializers/api_recipes.rb', 'real.rb')
+      File.symlink(File.join(@root, 'real.rb'), 'config/initializers/api_recipes.rb')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'link')
+      before = snapshot
+      expect(upgrade("y\n", 'config/initializers')).to match(/does not make the change: config\/initializers\/api_recipes\.rb is not a file/)
+      expect(snapshot).to eq(before)
+    end
+
+    it 'does not run a program that the repository names for git' do
+      project
+      File.write('hook.sh', "#!/bin/sh\ntouch #{marker}\n")
+      File.chmod(0o755, 'hook.sh')
+      git('config', 'core.fsmonitor', File.join(@root, 'hook.sh'))
+      git('add', '-A')
+      git('commit', '-q', '-m', 'hook')
+      FileUtils.rm_f(marker)
+      upgrade("y\n")
+      expect(File.read('config/initializers/api_recipes.rb')).to include('config.print_urls = true')
+      expect(File.exist?(marker)).to be(false)
+    end
+
+    it 'shows in the diff nothing that the terminal obeys, though the file holds it' do
+      project("# \e[2J\e]0;title\a a note\nApiRecipes.print_urls = true\n")
+      out = upgrade("n\n")
+      expect(out).to include('- ApiRecipes.print_urls = true', '# ?[2J?]0;title? a note')
+      expect(out).not_to match(/[\e\a]/)
+    end
+
+    it 'puts every file back when one cannot be written' do
+      project
+      before = snapshot
+      real = File.method(:write)
+      allow(File).to receive(:write) do |path, *rest|
+        raise Errno::ENOSPC if path.end_with?('api_recipes.rb') && rest.first.include?('print_urls')
+
+        real.call(path, *rest)
+      end
+      expect(upgrade("y\n")).to include('could not be written (ENOSPC): every file was put back as it was')
+      expect(snapshot).to eq(before)
+    end
+
+    it 'takes out only a line that is one whole statement: what shares a line with other code is left to the person' do
+      project("prepare; ApiRecipes.print_urls = true\nApiRecipes.billing.authorization = [\n  'x'\n].first\n")
+      before = snapshot
+      out = upgrade("y\ny\n")
+      expect(out).not_to include('Make this change?')
+      expect(out).to include('Code to paste')
+      expect(snapshot).to eq(before)
+    end
+  end
+
   it 'routes never runs the ERB of a file, found or given, without --erb' do
     write('Gemfile', "gem 'api_recipes'\n")
     write('config/apis/billing.yml', api.sub('billing.example.test', "<%= #{touch}; 'h.test' %>"))

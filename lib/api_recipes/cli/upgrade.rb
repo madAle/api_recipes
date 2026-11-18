@@ -3,6 +3,7 @@
 require 'securerandom'
 require 'api_recipes/cli/upgrade/project'
 require 'api_recipes/cli/upgrade/screen'
+require 'api_recipes/cli/upgrade/fix'
 
 module ApiRecipes
   module CLI
@@ -144,6 +145,7 @@ module ApiRecipes
         @uses = 0
         @startup = []
         @configure = {}
+        @direct = {}
         findings = with_request_hints(@paths.flat_map { |path| scan_path(path) })
         findings += @configs.flat_map { |file| check_config(file) }
         @notes = scope + @notes if @project
@@ -153,9 +155,13 @@ module ApiRecipes
       # Prints the results on out and the warnings on err. Returns the exit
       # code. What needs an answer comes last, where a terminal stops: what
       # was checked, what the command cannot find, the findings, what to do.
-      def report(out, err)
+      # input: where the answers come from. On a terminal the command offers
+      # the changes it can make by itself, one at a time.
+      def report(out, err, input: nil)
         findings = run
         screen = Screen.new(out)
+        changed = @code && Fix.asks?(input) ? offered(screen, input) : []
+        findings = run unless changed.empty?
         unless @notes.empty?
           screen.section('🔎', 'What was checked', plain: false)
           @notes.each { |note| screen.line(note) }
@@ -167,6 +173,11 @@ module ApiRecipes
           findings.each { |finding| screen.finding(finding.kind, where(finding), finding.message, @code ? finding.hint : nil) }
         end
         pasted = @code && code_to_paste(screen)
+        unless changed.empty?
+          screen.section('✅', 'Changed in the project')
+          changed.each { |file| screen.item("edited #{shown_path(file)}") }
+          screen.line('Every change is in `git diff`.')
+        end
         @warnings.each { |warning| err.puts warning }
         screen.summary(summary(findings.size), findings.group_by(&:kind).transform_values(&:size)) if findings.any? || @warnings.empty?
         what_to_do(screen, findings, pasted)
@@ -176,6 +187,80 @@ module ApiRecipes
       end
 
       private
+
+      # Offers each change the command can make. The project is read again
+      # after a change that was made. Returns the files that were written.
+      def offered(screen, input)
+        fix = Fix.new(screen, input, shown: method(:shown_path))
+        declined = []
+        written = []
+        while (change = changes.find { |one| !declined.include?(one.key) })
+          files = fix.offer(change)
+          declined << change.key
+          next unless files
+
+          written |= files
+          run
+        end
+        written
+      end
+
+      # The changes this command is sure of: a value that a line gives when
+      # the application starts moves into the block of ApiRecipes.configure.
+      def changes
+        file, text = @configure.size == 1 ? @configure.first : nil
+        block = Code::ConfigureBlock.in(text)
+        return [] unless block && !block.problem
+
+        urls = @startup.select { |item| item[:api].nil? }
+        values = @startup.select { |item| item[:api] }
+        found = []
+        if urls.size == 1 && !block.assigned_anywhere?(:print_urls)
+          found << change(:print_urls, 'Move print_urls into the block of ApiRecipes.configure', urls, file, text, block,
+                          ["#{block.config}.print_urls = #{urls.first[:code]}"])
+        end
+        unless values.empty? || block.assigned_anywhere?(:values)
+          found << change(:values, 'Give the credentials of the application to ApiRecipes.configure, as config.values', values, file, text,
+                          block, ["#{block.config}.values = {", *entries_of(values).map { |entry| "  #{entry}" }, '}'])
+        end
+        found.compact
+      end
+
+      # The texts of the files after the lines of items are taken out and
+      # added is written at the end of the block. nil when a line is not a
+      # whole statement of its own, or when a result is not valid Ruby.
+      def change(key, title, items, file, text, block, added)
+        texts = items.group_by { |item| item[:file] }.to_h { |path, list| [path, [path == file ? text : read_ruby(path), list.map { |item| item[:line] }]] }
+        texts[file] ||= [text, []]
+        return nil unless texts.all? { |_, (content, lines)| content && lines.all? { |number| own_statement?(content, number) } }
+
+        written = texts.to_h do |path, (content, lines)|
+          kept = content.lines.each_with_index.reject { |_, index| lines.include?(index + 1) }
+          next [path, kept.map(&:first).join] unless path == file
+
+          inside = lines.select { |number| number.between?(block.first, block.last) }
+          now = block.lines(added, without: inside).map { |line| "#{line}\n" }
+          [path, kept.flat_map { |line, index| index + 1 == block.first ? now : (index + 1).between?(block.first, block.last) ? [] : [line] }.join]
+        end
+        written.values.all? { |content| Code.tree(content) } ? Fix::Change.new(key, title, written) : nil
+      end
+
+      # Whether line number of text holds one whole statement and nothing else.
+      def own_statement?(text, number)
+        tree = Code.tree(text)
+        return false unless tree
+
+        statements = Code.nodes(tree) { |node| node.is_a?(Prism::StatementsNode) }.flat_map(&:body)
+        here = statements.select { |node| node.location.start_line == number && node.location.end_line == number }
+        here.size == 1 && text.lines[number - 1].strip == here.first.slice
+      end
+
+      def entries_of(items)
+        entries = items.group_by { |item| item[:api] }.map do |api, list|
+          "#{api.match?(/\A[a-z_]\w*\z/) ? api : "\"#{api}\""}: { #{list.map { |item| "#{item[:key]}: #{item[:code]}" }.join(', ')} }"
+        end
+        entries.each_with_index.map { |entry, index| index == entries.size - 1 ? entry : "#{entry}," }
+      end
 
       # What the person does with the results, in order.
       def what_to_do(screen, findings, pasted)
@@ -362,10 +447,7 @@ module ApiRecipes
         inside = @startup.select { |item| block && item[:file] == file && item[:line].between?(block.first, block.last) }
         added = @startup.select { |item| item[:api].nil? }.first(1).map { |item| "#{config}.print_urls = #{item[:code]}" }
         added = [] if block&.line_of(:print_urls)
-        entries = @startup.select { |item| item[:api] }.group_by { |item| item[:api] }.map do |api, items|
-          "#{api.match?(/\A[a-z_]\w*\z/) ? api : "\"#{api}\""}: { #{items.map { |item| "#{item[:key]}: #{item[:code]}" }.join(', ')} }"
-        end
-        entries = entries.each_with_index.map { |entry, index| index == entries.size - 1 ? entry : "#{entry}," }
+        entries = entries_of(@startup.select { |item| item[:api] })
         merged = block && block.line_of(:values)
         added += ["#{config}.values = {", *entries.map { |entry| "  #{entry}" }, '}'] unless entries.empty? || merged
 

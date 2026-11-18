@@ -50,6 +50,7 @@ fails under 90% line coverage.
 | `lib/api_recipes/internals/request.rb` | builds the URL and the http.rb client, sends the request, checks the outcome |
 | `lib/api_recipes/cli.rb`, `cli/upgrade.rb`, `exe/api_recipes` | the `api_recipes` command and its `upgrade` checks |
 | `lib/api_recipes/cli/upgrade/screen.rb` | how `upgrade` shows its results: the same sections everywhere, and colours, marks and lines that fit on a terminal |
+| `lib/api_recipes/cli/upgrade/fix.rb` | the changes `upgrade` makes by itself: each shown as a diff, made after a yes on a terminal, in files that git has committed; the diff of two texts |
 | `lib/api_recipes/cli/upgrade/project.rb` | what `upgrade` without arguments finds in a project: Ruby files, descriptions of apis, the names of the apis |
 | `lib/api_recipes/cli/import.rb` | the `import` command: from an OpenAPI description to the text of a recipe, checked before it is returned |
 | `lib/api_recipes/cli/import/document.rb` | reads the description (YAML or JSON) and follows its internal `$ref` |
@@ -130,8 +131,15 @@ classes are built once, by `configure`.
   The mark that stands for a tag is random, so that no file can write one.
   The recipe is checked with `Internals::Recipe` before it is written, and the
   file is created with `File::EXCL`.
-- `Convert::Migration` is the only code of the gem that edits or deletes a
-  file of a project. It reads Ruby as a tree (`Code.tree`, Prism, a default
+- `Upgrade::Fix` edits a file of a project only after a yes typed on a
+  terminal to the diff of that change: never away from a terminal, never with
+  `--no-code`, and only files that git has committed as they are now, or as
+  the same run left them. A change writes all its files or none, takes out
+  only a line that is one whole statement, and its diff shows nothing a
+  terminal obeys. A new kind of change follows the same rules, and comes with
+  its example under `spec/security`.
+- `Convert::Migration` and `Upgrade::Fix` are the only code of the gem that
+  edits or deletes a file of a project. About `Convert::Migration`: It reads Ruby as a tree (`Code.tree`, Prism, a default
   gem), never with a regular expression on lines, and never runs it. It works
   out every change in memory, each on the text the changes before it left,
   writes none when one is not possible or when a result is not valid Ruby, and
