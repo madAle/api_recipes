@@ -75,10 +75,7 @@ describe 'Importing an OpenAPI description' do
         code, = import(text, '--name', 'svc', '--output', recipe)
         expect(code).to eq(0)
         expect(File.read(recipe)).not_to match(/<%|%>/)
-        ApiRecipes.configure do |config|
-          config.logger = Logger.new(IO::NULL)
-          config.apis_files_paths = [recipe]
-        end
+        configure_test_apis(ApiRecipes::CLI::Description.read(recipe, erb: true))
         expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
         expect(File.exist?(marker)).to be(false)
       ensure

@@ -52,7 +52,7 @@ module ApiRecipes
             recipe = load_one(path, locks)
             name = recipe.apis.keys.first
             if taken.include?(name)
-              raise RecipeFileError.new(path, "the api '#{name}' is already defined by apis_configs or apis_files_paths: " \
+              raise RecipeFileError.new(path, "the api '#{name}' is already defined by apis_configs: " \
                                               'a recipe never takes the place of an api')
             end
             raise RecipeFileError.new(path, "the api '#{name}' is already given by another recipe file") if apis.key?(name)

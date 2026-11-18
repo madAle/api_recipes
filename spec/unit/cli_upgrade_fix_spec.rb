@@ -76,7 +76,9 @@ describe 'api_recipes upgrade, the changes it offers' do
     upgrade("y\ny\n")
     ENV['BILLING_TOKEN'] = 'Bearer t'
     logger = Logger.new(IO::NULL)
-    eval(File.read('config/initializers/api_recipes.rb').sub("  config.print_urls", "  config.logger = logger\n  config.print_urls")) # rubocop:disable Security/Eval
+    described = "config.apis_configs = { billing: { host: 'billing.example.test', endpoints: { invoices: nil } } }"
+    text = File.read('config/initializers/api_recipes.rb').sub(/config\.apis_files_paths = .*$/, described)
+    eval(text.sub("  config.print_urls", "  config.logger = logger\n  config.print_urls")) # rubocop:disable Security/Eval
     expect(ApiRecipes.billing.authorization).to eq('Bearer t')
   ensure
     ENV.delete('BILLING_TOKEN')

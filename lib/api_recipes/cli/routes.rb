@@ -47,7 +47,7 @@ module ApiRecipes
         apis = if file.end_with?(Internals::Recipe::SUFFIX)
                  Internals::Recipe.read(file, compile: false).apis
                else
-                 Configuration.new.read_recipe_file(file, erb: @erb) do |text|
+                 Description.read(file, erb: @erb) do |text|
                    tags = true
                    Tags.replaced(text, @mark) || raise(RecipeFileError.new(file, STRUCTURE))
                  end

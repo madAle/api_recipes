@@ -72,6 +72,9 @@ describe 'api_recipes convert, in a project' do
     stub_const('Settings', Struct.new(:billing_secret).new('from-settings'))
     env.each { |name, value| stub_const('ENV', ENV.to_h.merge(name => value)) }
     logger = Logger.new(IO::NULL)
+    # A project with descriptions still to convert assigns apis_files_paths,
+    # which 3.0 refuses: here only what the recipes give is looked at.
+    allow_any_instance_of(ApiRecipes::Configuration).to receive(:apis_files_paths=)
     allow(ApiRecipes).to receive(:configure).and_wrap_original { |original, &block| original.call { |config| config.logger = logger; block.call(config) } }
     load File.join(@root, 'config/initializers/api_recipes.rb')
   end
@@ -132,6 +135,9 @@ describe 'api_recipes convert, in a project' do
                                                         "    c.recipes_paths = Dir[File.expand_path('../../config/api_recipes/*.recipe.yml', __dir__)]\n  end\nend\n")
     stub_const('Settings', Struct.new(:billing_secret).new('from-settings'))
     logger = Logger.new(IO::NULL)
+    # A project with descriptions still to convert assigns apis_files_paths,
+    # which 3.0 refuses: here only what the recipes give is looked at.
+    allow_any_instance_of(ApiRecipes::Configuration).to receive(:apis_files_paths=)
     allow(ApiRecipes).to receive(:configure).and_wrap_original { |original, &block| original.call { |config| config.logger = logger; block.call(config) } }
     load File.join(@root, 'lib/my_app/setup.rb')
     expect(ApiRecipes.billing.invoices.show(7).url.to_s).to eq('https://billing.example.test/invoices/7')
@@ -227,6 +233,7 @@ describe 'api_recipes convert, in a project' do
     git('add', '-A')
     git('commit', '-q', '-m', 'one folder')
     expect(convert('config/api_recipes/billing.yml.erb').first).to eq(0)
+    expect(convert('config/api_recipes/other.yml').first).to eq(0)
     boot
     expect(ApiRecipes.apis).to contain_exactly(:billing, :other)
     expect(ApiRecipes.billing.invoices.show(7).url.to_s).to eq('https://billing.example.test/invoices/7')
@@ -246,7 +253,8 @@ describe 'api_recipes convert, in a project' do
     stub_request(:get, 'https://api.github.test/users').to_return(status: 200, body: '[]', headers: json)
     ApiRecipes.github.users.run
     expect(WebMock).to have_requested(:get, 'https://api.github.test/users').with(headers: { 'Authorization' => 'Bearer written-token' })
-    expect(ApiRecipes.apis).to contain_exactly(:billing, :github, :shop)
+    # shop is still described in a file: it loads once it is a recipe too.
+    expect(ApiRecipes.apis).to contain_exactly(:billing, :github)
   end
 
   describe 'when a step cannot be done safely' do
@@ -436,6 +444,7 @@ describe 'api_recipes convert, in a project' do
               'config/apis/github.yml' => "github:\n  host: api.github.test\n  endpoints:\n    users:\n")
       expect(convert('config/apis/billing.yml.erb').first).to eq(0)
       expect(initializer_text).to include(":github => { authorization: 'TOKEN-1' }, # mine\n    billing: { variables: {\n")
+      expect(convert('config/apis/github.yml').first).to eq(0)
       boot
       stub_request(:get, 'https://api.github.test/users').to_return(status: 200, body: '[]', headers: json)
       ApiRecipes.github.users.run
@@ -494,7 +503,7 @@ describe 'api_recipes convert, in a project' do
         expect(convert('config/apis/billing.yml.erb').first).to eq(0)
         expect(initializer_text).not_to include('billing.yml.erb')
         boot
-        expect(ApiRecipes.apis).to contain_exactly(:billing, :other)
+        expect(ApiRecipes.apis).to contain_exactly(:billing)
       end
     end
 

@@ -579,7 +579,7 @@ module ApiRecipes
 
         unchecked = []
         tags = false
-        apis = Configuration.new.read_recipe_file(file, erb: @erb) do |text|
+        apis = Description.read(file, erb: @erb) do |text|
           tags = true
           without_erb(file, text)
         end

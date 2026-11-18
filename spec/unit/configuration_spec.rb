@@ -1,57 +1,15 @@
 require 'spec_helper'
-require 'pathname'
 require 'tmpdir'
+require 'rbconfig'
 
 describe ApiRecipes::Configuration do
-  def fixture(name)
-    File.expand_path("../fixtures/#{name}", __dir__)
-  end
-
-  def configure_files(*names)
-    ApiRecipes.configure do |config|
-      config.logger = Logger.new(IO::NULL)
-      config.apis_files_paths = names.map { |name| fixture(name) }
-    end
-  end
-
-  it 'loads apis from a YAML file evaluated with ERB' do
-    configure_files('svc.yml.erb')
-    expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
-  end
-
-  it 'lets a later file replace an api defined by an earlier one' do
-    configure_files('svc.yml.erb', 'svc_override.yml')
-    expect(ApiRecipes.svc.definition.host).to eq('other.example.test')
-    expect(ApiRecipes.svc).not_to respond_to(:users)
-    expect(ApiRecipes.svc).to respond_to(:ping)
-  end
-
   it 'rejects apis_configs that are not a Hash' do
     expect { ApiRecipes.configuration.apis_configs = [] }.to raise_error(ArgumentError)
   end
 
-  it 'loads several apis from one file' do
-    configure_files('two_apis.yml')
-    expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
-    expect(ApiRecipes.billing.invoices.url.to_s).to eq('http://billing_service:3000/invoices')
-  end
-
-  it 'logs when a file replaces an api that is already configured' do
-    logger = Logger.new(IO::NULL)
-    expect(logger).to receive(:debug).with(/svc_override\.yml overrides config for 'svc'/)
-    ApiRecipes.configure do |config|
-      config.logger = logger
-      config.apis_files_paths = [fixture('svc.yml.erb'), fixture('svc_override.yml')]
-    end
-  end
-
-  it 'rejects apis_files_paths that are not an Array' do
-    expect { ApiRecipes.configuration.apis_files_paths = fixture('svc.yml.erb') }.to raise_error(ArgumentError)
-  end
-
-  it 'has no files and no apis until configured' do
-    expect(ApiRecipes.configuration.apis_files_paths).to eq([])
+  it 'has no apis and no recipes until configured' do
     expect(ApiRecipes.configuration.apis_configs).to eq({})
+    expect(ApiRecipes.configuration.recipes_paths).to eq([])
   end
 
   it 'accepts apis_configs with String keys' do
@@ -60,136 +18,35 @@ describe ApiRecipes::Configuration do
     expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
   end
 
-  it 'does not need the logger before the files' do
-    logger = Logger.new(IO::NULL)
-    expect(logger).to receive(:debug).with(/svc_override\.yml overrides config for 'svc'/)
-    ApiRecipes.configure do |config|
-      config.apis_files_paths = [fixture('svc.yml.erb'), fixture('svc_override.yml')]
-      config.logger = logger
-    end
-  end
-
-  it 'applies the sources in the order they are assigned' do
-    ApiRecipes.configure do |config|
-      config.logger = Logger.new(IO::NULL)
-      config.apis_files_paths = [fixture('two_apis.yml')]
-      config.apis_configs = { svc: { host: 'hash.example.test', endpoints: { users: nil } } }
-    end
-    expect(ApiRecipes.svc.users.url.to_s).to eq('https://hash.example.test/users')
-    expect(ApiRecipes.billing.invoices.url.to_s).to eq('http://billing_service:3000/invoices')
-  end
-
   it 'keeps the options between two calls to configure' do
-    configure_files('svc.yml.erb')
+    configure_test_apis('svc' => { 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
     ApiRecipes.configure { |config| config.print_urls = false }
     expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
   end
 
-  it 'refuses a path that is not a String or a Pathname, or that has a null byte, as a configuration error' do
-    [[nil], [42], [fixture('svc.yml.erb'), :sym], ["a\0b.yml"]].each do |paths|
-      expect { ApiRecipes.configure { |config| config.apis_files_paths = paths } }
-        .to raise_error(ApiRecipes::ConfigurationError, /apis_files_paths/)
-    end
-  end
+  describe 'apis_files_paths, which 2.x had' do
+    let(:message) { /\Aapis_files_paths was removed in 3\.0: an api is described by a portable recipe, loaded with recipes_paths\. Run `api_recipes convert`/ }
 
-  it 'accepts a Pathname' do
-    ApiRecipes.configure { |config| config.apis_files_paths = [Pathname.new(fixture('svc.yml.erb'))] }
-    expect(ApiRecipes.apis).to include(:svc)
-  end
-
-  it 'reads no file before load' do
-    configuration = ApiRecipes::Configuration.new
-    configuration.apis_files_paths = [fixture('missing.yml')]
-    expect { configuration.load }.to raise_error(ApiRecipes::RecipeFileError)
-  end
-
-  {
-    'missing.yml' => /missing\.yml: file not found/,
-    'empty.yml'   => /empty\.yml: file is empty/,
-    'list.yml'    => /list\.yml: must contain a mapping/,
-    'unsafe.yml'  => /unsafe\.yml: invalid YAML/
-  }.each do |name, pattern|
-    it "names the file when #{name} cannot be loaded" do
-      expect { configure_files(name) }.to raise_error(ApiRecipes::RecipeFileError, pattern)
-    end
-  end
-
-  describe 'files that are hard to read' do
-    around { |example| Dir.mktmpdir { |dir| @dir = dir; example.run } }
-
-    def write(name, content)
-      File.binwrite(File.join(@dir, name), content)
-      File.join(@dir, name)
+    it 'is refused when it is assigned, with the command that moves the files to recipes' do
+      expect { ApiRecipes.configure { |config| config.apis_files_paths = ['config/apis/github.yml'] } }.to raise_error(ApiRecipes::Error, message)
+      expect { ApiRecipes.configure { |config| config.apis_files_paths = [] } }.to raise_error(ApiRecipes::Error, message)
+      expect(ApiRecipes.apis).to eq([])
     end
 
-    def load_from(path)
-      ApiRecipes.configure do |config|
-        config.logger = Logger.new(IO::NULL)
-        config.apis_files_paths = [path]
-      end
+    it 'is refused when it is read, so that adding to it says the same' do
+      expect { ApiRecipes.configure { |config| config.apis_files_paths += ['x.yml'] } }.to raise_error(ApiRecipes::Error, message)
     end
 
-    it 'loads a file with non-ASCII UTF-8 text' do
-      path = write('utf8.yml', "svc:\n  host: api.example.test\n  endpoints:\n    users: { path: 'café' }\n")
-      expect { load_from(path) }.not_to raise_error
+    it 'leaves the configuration in force as it was' do
+      configure_test_apis
+      expect { ApiRecipes.configure { |config| config.apis_files_paths = ['x.yml'] } }.to raise_error(ApiRecipes::Error)
+      expect(ApiRecipes.apis).to include(:svc)
     end
 
-    it 'names a file that is not valid UTF-8' do
-      path = write('latin.yml', "svc: { host: \"caf\xE9\" }\n")
-      expect { load_from(path) }.to raise_error(ApiRecipes::RecipeFileError, /latin\.yml: file is not valid UTF-8/)
-    end
-
-    it 'names a directory given as a file' do
-      expect { load_from(@dir) }.to raise_error(ApiRecipes::RecipeFileError, /cannot read file \(EISDIR\)/)
-    end
-
-    it 'refuses a file with ERB when ERB is not asked for, and runs nothing' do
-      marker = File.join(@dir, 'marker')
-      path = write('erb.yml', "svc: { host: <%= File.write(#{marker.inspect}, '1') %> }\n")
-      expect { ApiRecipes::Configuration.new.read_recipe_file(path, erb: false) }
-        .to raise_error(ApiRecipes::RecipeFileError, /erb\.yml: contains ERB/)
-      expect(File.exist?(marker)).to be(false)
-    end
-
-    it 'evaluates ERB with erb: true' do
-      path = write('erb.yml', "svc: { host: <%= 'api.example.test' %> }\n")
-      expect(ApiRecipes::Configuration.new.read_recipe_file(path, erb: true)).to eq(svc: { host: 'api.example.test' })
-    end
-  end
-
-  describe 'shared recipes among the files' do
-    let(:body) { "<% raise 'evaluated' %>\nsvc:\n  host: evil.test\n" }
-
-    def expect_refused(path)
-      expect do
-        ApiRecipes.configure { |config| config.apis_files_paths = [path] }
-      end.to raise_error(ApiRecipes::RecipeFileError, /is a portable recipe \(\.recipe\.yml\): give it to recipes_paths/)
-    end
-
-    it 'refuses a shared recipe without evaluating its ERB' do
-      Dir.mktmpdir do |dir|
-        path = File.join(dir, 'x.recipe.yml')
-        File.write(path, body)
-        expect_refused(path)
-      end
-    end
-
-    it 'refuses a shared recipe whatever the letter case of the name' do
-      Dir.mktmpdir do |dir|
-        path = File.join(dir, 'x.RECIPE.YML')
-        File.write(path, body)
-        expect_refused(path)
-      end
-    end
-
-    it 'refuses a link that points to a shared recipe' do
-      Dir.mktmpdir do |dir|
-        target = File.join(dir, 'x.recipe.yml')
-        link = File.join(dir, 'plain.yml')
-        File.write(target, body)
-        File.symlink(target, link)
-        expect_refused(link)
-      end
+    it 'loads no file and does not need ERB' do
+      expect(described_class.instance_methods).not_to include(:read_recipe_file)
+      loaded = `#{RbConfig.ruby} -I#{File.expand_path('../../lib', __dir__)} -e 'require "api_recipes"; print defined?(ERB).inspect'`
+      expect(loaded).to eq('nil')
     end
   end
 

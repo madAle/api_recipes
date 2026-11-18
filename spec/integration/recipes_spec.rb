@@ -97,7 +97,7 @@ RSpec.describe 'portable recipes in recipes_paths' do
 
   it 'refuses a recipe whose api another source defines, whatever the order of the assignments' do
     path = write_recipe(@dir)
-    expected = ["#{path}: the api 'shop' is already defined by apis_configs or apis_files_paths: " \
+    expected = ["#{path}: the api 'shop' is already defined by apis_configs: " \
                 'a recipe never takes the place of an api']
     found = problems do
       ApiRecipes.configure do |config|
@@ -106,9 +106,13 @@ RSpec.describe 'portable recipes in recipes_paths' do
       end
     end
     expect(found).to eq(expected)
-    plain = File.join(@dir, 'plain.yml')
-    File.write(plain, "shop:\n  host: mine.test\n")
-    expect(problems { configure_recipes(path, apis_files_paths: [plain]) }).to eq(expected)
+    found = problems do
+      ApiRecipes.configure do |config|
+        config.apis_configs = { shop: { host: 'mine.test' } }
+        config.recipes_paths = [path]
+      end
+    end
+    expect(found).to eq(expected)
     expect(ApiRecipes.apis).to eq([])
   end
 

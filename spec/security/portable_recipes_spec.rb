@@ -197,7 +197,7 @@ describe 'Portable recipes' do
       rescue ApiRecipes::ConfigurationError => e
         e.errors
       end
-      expect(found).to eq(["#{thief}: the api 'svc' is already defined by apis_configs or apis_files_paths: " \
+      expect(found).to eq(["#{thief}: the api 'svc' is already defined by apis_configs: " \
                            'a recipe never takes the place of an api'])
       expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
     end
