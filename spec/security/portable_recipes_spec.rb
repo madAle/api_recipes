@@ -437,25 +437,36 @@ describe 'Portable recipes' do
     end
   end
 
-  describe 'a recipe file changed after it was installed' do
-    it 'stops configure, and so does a file that was never installed; the configuration stays the one it was' do
+  describe 'a recipe installed from a repository and changed afterwards' do
+    def from_a_cookbook
+      FileUtils.mkdir_p(@dir)
+      write_recipe(@dir, 'shop', recipe_text, repository: true)
+    end
+
+    it 'stops configure, and the configuration stays the one it was' do
       configure_test_apis
-      path = installed(recipe_text)
+      path = from_a_cookbook
       File.write(path, recipe_text('shop', 'host' => 'evil.example.test'))
-      expect(configure_problems(path).first).to include('was changed after it was installed')
-      File.delete(File.join(@dir, 'recipes.lock'))
-      expect(configure_problems(path).first).to include('is not in recipes.lock')
-      add_to_lock(@dir, 'other', 'x')
-      expect(configure_problems(path).first).to include('is not in recipes.lock')
+      expect(configure_problems(path).first).to include('was changed after it was installed from its repository')
       expect(ApiRecipes.apis).to eq(%i[svc versioned])
     end
 
     it 'is reported by check, which exits with 1' do
-      path = installed(recipe_text)
+      path = from_a_cookbook
       File.write(path, recipe_text('shop', 'host' => 'evil.example.test'))
       code, _out, err = run_cli('check', '--dir', @dir)
       expect(code).to eq(1)
-      expect(err).to include('was changed after it was installed')
+      expect(err).to include('was changed after it was installed from its repository')
+    end
+
+    it 'is not what a recipe of the project is: one that the lock ties to no repository is loaded as it is written' do
+      path = installed(recipe_text)
+      File.write(path, recipe_text('shop', 'host' => 'mine.example.test'))
+      expect(configure_problems(path)).to eq([])
+      expect(ApiRecipes.shop.definition.host).to eq('mine.example.test')
+      File.delete(File.join(@dir, 'recipes.lock'))
+      expect(configure_problems(path)).to eq([])
+      expect(run_cli('check', '--dir', @dir).first).to eq(0)
     end
   end
 

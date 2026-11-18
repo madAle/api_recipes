@@ -97,18 +97,21 @@ module ApiRecipes
 
       def [](name) = @entries[name]
 
-      # Why the file of the recipe called name, with this checksum, is not
-      # what was installed; nil when it is. The sentence ends where the
-      # command that settles it goes.
-      def problem_for(name, sha256)
-        entry = @entries[name]
-        if entry.nil?
-          missing = exists? ? '' : " (there is no #{FILE_NAME} in its folder)"
-          return "is not in #{FILE_NAME}#{missing}: a recipe is loaded only after it was installed. Install it with"
-        end
-        return nil if entry.sha256 == sha256
+      # Whether the lock ties the recipe called name to a repository. One
+      # that it does not is a recipe of the project: written and changed
+      # there, with nothing to compare it with.
+      def from_a_repository?(name) = !@entries[name]&.source.nil?
 
-        "was changed after it was installed: its checksum is not the one in #{FILE_NAME}. To accept the file as it is now, run"
+      # Why the file of the recipe called name, with this checksum, is not
+      # what was installed from its repository; nil when it is, and for a
+      # recipe of the project. The sentence ends where the command that
+      # settles it goes.
+      def problem_for(name, sha256)
+        return nil unless from_a_repository?(name)
+        return nil if @entries[name].sha256 == sha256
+
+        "was changed after it was installed from its repository: its checksum is not the one in #{FILE_NAME}. " \
+          'To keep the file as it is now, as a recipe of the project, run'
       end
     end
   end

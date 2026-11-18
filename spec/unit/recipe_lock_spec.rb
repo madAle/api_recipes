@@ -93,20 +93,23 @@ RSpec.describe ApiRecipes::Internals::RecipeLock do
       expect(described_class.read(@dir).problem_for('shop', sha)).to be_nil
     end
 
-    it 'says that the file was changed' do
-      write(lock_with({}))
-      expect(described_class.read(@dir).problem_for('shop', 'b' * 64))
-        .to eq('was changed after it was installed: its checksum is not the one in recipes.lock. ' \
-               'To accept the file as it is now, run')
+    it 'says that a recipe installed from a repository was changed' do
+      write(lock_with('source' => 'https://example.test/cookbook', 'commit' => 'a' * 40))
+      lock = described_class.read(@dir)
+      expect(lock.from_a_repository?('shop')).to be(true)
+      expect(lock.problem_for('shop', sha)).to be_nil
+      expect(lock.problem_for('shop', 'b' * 64))
+        .to eq('was changed after it was installed from its repository: its checksum is not the one in recipes.lock. ' \
+               'To keep the file as it is now, as a recipe of the project, run')
     end
 
-    it 'says that the file was never installed' do
+    it 'is nil for a recipe of the project: one that the lock ties to no repository, or does not name' do
       write(lock_with({}))
-      expect(described_class.read(@dir).problem_for('other', sha))
-        .to eq('is not in recipes.lock: a recipe is loaded only after it was installed. Install it with')
+      lock = described_class.read(@dir)
+      expect([lock.from_a_repository?('shop'), lock.from_a_repository?('other')]).to eq([false, false])
+      expect([lock.problem_for('shop', 'b' * 64), lock.problem_for('other', sha)]).to eq([nil, nil])
       File.delete(File.join(@dir, 'recipes.lock'))
-      expect(described_class.read(@dir).problem_for('shop', sha))
-        .to start_with('is not in recipes.lock (there is no recipes.lock in its folder)')
+      expect(described_class.read(@dir).problem_for('shop', sha)).to be_nil
     end
   end
 end
