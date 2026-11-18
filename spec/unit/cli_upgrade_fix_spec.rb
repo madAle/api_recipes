@@ -55,10 +55,11 @@ describe 'api_recipes upgrade, the changes it offers' do
                            "+   config.print_urls = true\n  end\n- ApiRecipes.print_urls = true\n\nMake this change? [y/N] ")
     expect(out).to include("+   config.values = {\n+     billing: { authorization: ENV['BILLING_TOKEN'] }\n+   }\n",
                            "config/initializers/billing.rb:1\n  # the token of billing\n- ApiRecipes.billing.authorization = ENV['BILLING_TOKEN']\n",
-                           "Changed in the project\n  - edited config/initializers/api_recipes.rb\n  - edited config/initializers/billing.rb\n",
-                           'Nothing to change')
-    expect(out).not_to include('[breaks]', 'Code to paste')
-    expect(code).to eq(0)
+                           "Changed in the project\n  - edited config/initializers/api_recipes.rb\n  - edited config/initializers/billing.rb\n")
+    # What is left is the move to recipes, which convert makes.
+    expect(out).to match(/^2 findings$/)
+    expect(out).not_to include('use config.print_urls', 'this writer now raises', 'Code to paste')
+    expect(code).to eq(1)
     expect(File.read('config/initializers/api_recipes.rb')).to eq(<<~RUBY)
       ApiRecipes.configure do |config|
         config.apis_files_paths = Dir['config/apis/*.yml']
@@ -89,7 +90,7 @@ describe 'api_recipes upgrade, the changes it offers' do
     code, out = upgrade("n\ny\n")
     expect(code).to eq(1)
     expect(File.read('config/initializers/api_recipes.rb')).to include('ApiRecipes.print_urls = true', "billing: { authorization: ENV['BILLING_TOKEN'] }")
-    expect(out).to include('config/initializers/api_recipes.rb:7: [breaks] use config.print_urls', 'Code to paste', '1 finding')
+    expect(out).to include('config/initializers/api_recipes.rb:7: [breaks] use config.print_urls', 'Code to paste', '3 findings')
     expect(out).not_to include('this writer now raises')
   end
 
@@ -99,7 +100,7 @@ describe 'api_recipes upgrade, the changes it offers' do
     ["n\nn\n", "\n\n", '', "maybe\nY es\n"].each do |answers|
       code, out = upgrade(answers)
       expect(code).to eq(1)
-      expect(out).to include('Make this change? [y/N]', 'Code to paste', '2 findings')
+      expect(out).to include('Make this change? [y/N]', 'Code to paste', '4 findings')
       expect(out).not_to include('Changed in the project')
     end
     expect(Dir.glob('**/*.rb').to_h { |file| [file, File.read(file)] }).to eq(before)

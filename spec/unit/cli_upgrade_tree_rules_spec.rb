@@ -70,12 +70,6 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
                          '6: [check] this class gives the api its own'])
   end
 
-  it 'finds apis_configs assigned after the files' do
-    ruby = "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['a.yml']\n  config.apis_configs = { b: {} }\nend\n"
-    expect(findings(ruby)).to eq(['3: [check] apis_configs assigned after apis_'])
-    expect(findings(ruby.sub("  config.apis_files_paths = ['a.yml']\n", ''))).to eq([])
-  end
-
   it 'finds a block passed to run whose value is used, and not one whose value is dropped' do
     found = findings(<<~RUBY)
       names = ApiRecipes.github.users.run { |response| response.data.map(&:name) }
@@ -191,7 +185,8 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
       found = config_findings(yaml)
       expect(found).to include(match(/\A\[check\] billing\.endpoints\.with: an endpoint with this name has no method of its own.*reach it with \[:with\]/),
                                match(/\A\[check\] billing\.endpoints\.users\.endpoints\.url: .*reach it with \[:url\]/))
-      expect(found.size).to eq(4)
+      expect(found).to include(match(/\A\[breaks\] describes an api in a file of the project, which 3\.0 no longer loads/))
+      expect(found.size).to eq(5)
     end
 
     it 'says nothing of a portable recipe, which is written for 3.0' do

@@ -15,8 +15,6 @@ module ApiRecipes
         WRITER = 'authorization= and basic_auth= now work on an object only: on ApiRecipes.name, on a class and on a module ' \
                  'they raise. Give the credential to config.values, to `api :name, authorization: ...`, or to with(...) for one request'
         NOT_TEXT = 'a credential must be a String: a Symbol or a number raises InvalidCredential, convert it with to_s'
-        SOURCES = 'apis_configs assigned after apis_files_paths no longer discards the files: the two sources add up. ' \
-                  'Take out the files that must not be loaded'
         RUN_VALUE = 'run with a block now returns the Response, not what the block returns: take the value inside the block, or from the response'
         RESPONSE = {
           request: 'request was removed from the response, because the request holds the credentials: read uri, or original_response',
@@ -31,7 +29,7 @@ module ApiRecipes
           tree = Code.tree(text)
           return [] unless tree
 
-          found = sources(text)
+          found = []
           responses = uses_gem ? responses_of(tree) : []
           each(tree) do |node, parents|
             constants(node, found) if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
@@ -55,13 +53,6 @@ module ApiRecipes
         end
 
         def self.at(node) = node.location.start_line
-
-        def self.sources(text)
-          block = Code::ConfigureBlock.in(text)
-          files = block&.line_of(:apis_files_paths)
-          configs = block&.line_of(:apis_configs)
-          files && configs && files < configs ? [Found.new(configs, :check, SOURCES)] : []
-        end
 
         # The keys of the keywords of a call, when they are written as names.
         def self.keywords(call)
