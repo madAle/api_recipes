@@ -476,8 +476,9 @@ See [Security in the README](README.md#security) for the same list in its place.
 
 ## The `api_recipes upgrade` command
 
-The gem installs a command that looks for the changes of this guide. It never
-changes a file. Run it in the root of your project, with no argument:
+The gem installs a command that looks for the changes of this guide. It changes
+a file only when you say yes to a change it shows you. Run it in the root of
+your project, with no argument:
 
     $ bundle exec api_recipes upgrade
 
@@ -490,11 +491,25 @@ It finds by itself what to check, and says what it checked:
   `[breaks]`; a line that deserves a look because its result changes is marked
   `[check]`: a manual encoding of a path parameter, a bare `rescue`, `follow:`,
   `response.request`, the removed `Hash` and `Array` methods.
+- **What a line alone does not tell.** The command also reads each Ruby file
+  as a tree, without running it, and finds: a credential assigned in the body
+  of a class, through a variable, over two lines or with `send`; a credential
+  that is not text; `api :format` and the other names that are already
+  methods; a class that gives an API its own `host`, `protocol` or `port`
+  and no credential; `apis_configs` assigned after the files; a block passed
+  to `run` whose value is used; `request`, `to_s` and `respond_to?` called on
+  what `run` returned, whatever the variable is called; and `Error`,
+  `VERSION` or the name of an error of the gem written alone in a class that
+  includes `ApiRecipes`. A file that is not valid Ruby is read line by line
+  only.
 - **The files that describe an API**: the YAML files (`.yml`, `.yaml`, also
   followed by `.erb`) where a name has `endpoints`, each with its options or
   with none, and the files called `NAME.recipe.yml`. Those under `spec`, `test`
   and `features` are fixtures and are left out. Each is checked with the rules
-  of 3.0 (marked `[config]`).
+  of 3.0 (marked `[config]`). Two changes that give no error are marked
+  `[check]`: `timeout`, `on_bad_code`, `mime_type` or `verify_with` set on an
+  endpoint whose inner endpoints do not set it, which now find it there, and
+  an endpoint whose name is a method of the object that would have it.
 - **Less noise.** A bare `rescue` or a call to `CGI.escape` is in every
   application. The checks that also match code that has nothing to do with the
   gem are applied only to the files whose code names `ApiRecipes` or calls one
@@ -519,15 +534,21 @@ It finds by itself what to check, and says what it checked:
   only what it is sure of: one whole expression, with no `if`, `unless`,
   `rescue`, `and` or `or` after it, on a line that is always run.
 
-```
-app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
-app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
-config/apis/github.yml: [config] github: unknown option 'hots'
+What needs an answer comes last, where the terminal stops: what was checked,
+the changes the command cannot find, the findings, and what to do.
 
+```
 Checked 214 Ruby files, 6 of them use api_recipes
 Checked 2 configuration files: config/apis/billing.yml, config/apis/github.yml
 app/models/shop.rb:4: declares the api 'shopify', and no configuration file found here describes it
 config/apis/billing.yml: 2 values come from ERB and were not checked
+
+What this command cannot find
+(the list of the changes that a search in the text cannot find)
+
+app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
+app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
+config/apis/github.yml: [config] github: unknown option 'hots'
 
 Code to paste
 
@@ -542,10 +563,59 @@ In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure
 
 Then remove the lines that gave these values: config/initializers/github.rb:1
 
-(the list of what the command cannot find)
-
 3 findings
+
+What to do now
+  1. Fix the 1 line marked breaks: that code stops working, and each line says what to use instead
+  2. Correct what is marked config (1): each is a problem in a file that describes an api
+  3. Read the 1 line marked check: the result changes, and only you can tell whether the code still does what it should. A check line is reported at every run
+  4. Go through what this command cannot find: look in the code for the changes that concern the project
+  5. Run this command again: go on when only check lines that you have read are left
+  6. Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once
 ```
+
+**On a terminal the command offers to make the changes it is sure of**, one
+at a time. Today they are the values that a line gave when the application
+started: `ApiRecipes.print_urls = ...` moves into the block of
+`ApiRecipes.configure`, and the credentials assigned on `ApiRecipes.NAME`
+become `config.values`. For a `rescue` that names no class, or
+`StandardError`, it offers to put before it `rescue ApiRecipes::Error` with a
+`raise`, which is what 2.x did: the errors of the gem go on to the code that
+called. Answer no when that rescue should handle them from now on. Each change
+is shown as a diff of the files it touches, and is made only when you answer
+`y` or `yes`:
+
+```
+Move print_urls into the block of ApiRecipes.configure
+
+config/initializers/api_recipes.rb:1
+  ApiRecipes.configure do |config|
+    config.apis_files_paths = Dir['config/apis/*.yml']
++   config.print_urls = true
+  end
+- ApiRecipes.print_urls = true
+
+Make this change? [y/N]
+```
+
+- A change is all the files it needs or none: the line that gave the value
+  is taken out together with the line that is added.
+- It touches only files that git has committed as they are now, so that
+  `git diff` shows the change and `git checkout` undoes it. Otherwise the
+  command says why, and gives the code to paste as before.
+- A line is taken out only when it is one whole statement. A block of
+  `configure` that the command cannot read whole, or that already assigns the
+  value, is left to you, with the code to paste.
+- A change you refuse stays among the findings, with its code to paste. A
+  `rescue` that comes after one of `ApiRecipes::Error` is no longer a finding.
+- Away from a terminal, as in a CI, and with `--no-code`, the command asks
+  nothing and changes nothing.
+
+The steps at the end are those of what was found: a kind of finding that is
+not there has no step. On a terminal the same results are shown in sections,
+with a colour for each kind of finding and lines that fit the width of the
+window. Away from a terminal, as in a CI or through a pipe, and with
+`NO_COLOR` set, the text is the one above, with no colours.
 
 The line about `api :shopify` is said of a declaration in the code when no file
 found in the project describes that API and the code never assigns
@@ -558,9 +628,9 @@ file.
 
     $ api_recipes upgrade app lib --config config/apis/github.yml
 
-The command then prints the list of changes that a search in the text
-cannot find, which you check by hand (this guide has the details of each), and a
-summary line: `Nothing to change`, `1 finding` or `N findings`. When it found
+The list of the changes that a search in the text cannot find is the same at
+every run: you check them by hand, and this guide has the details of each. The
+summary line is `Nothing to change`, `1 finding` or `N findings`. When it found
 no description of an API it says so instead of `Nothing to change`. The summary
 line is left out when there is no finding and something could not be read.
 

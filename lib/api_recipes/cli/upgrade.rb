@@ -2,6 +2,9 @@
 
 require 'securerandom'
 require 'api_recipes/cli/upgrade/project'
+require 'api_recipes/cli/upgrade/screen'
+require 'api_recipes/cli/upgrade/fix'
+require 'api_recipes/cli/upgrade/tree_rules'
 
 module ApiRecipes
   module CLI
@@ -59,6 +62,17 @@ module ApiRecipes
       # The rule about the Hash methods that ActiveSupport defines too.
       HASH_METHODS = RULES.last
 
+      # The rules on lines about a credential assigned with a writer.
+      WRITER_RULES = RULES.select { |rule| %i[global_writer writer].include?(rule.fix) }.freeze
+
+      # The rule about a rescue that names no class, and what the change
+      # that the command offers for it means.
+      BARE_RESCUE = RULES.find { |rule| rule.message.start_with?('a bare rescue') }
+      RESCUE_NOTE = ['In 2.x this rescue did not catch the errors of api_recipes: they went on to the code that called. ' \
+                     'In 3.0 it catches them.',
+                     'y: keep what 2.x did. The errors of api_recipes are raised again before this rescue sees them',
+                     'n: leave the code as it is. This rescue handles the errors of api_recipes too'].freeze
+
       # What stands for the value of an ERB tag in a file that is checked
       # without running its code.
       # Options whose value is a mapping: a tag that gives one gives a part
@@ -78,35 +92,19 @@ module ApiRecipes
       MAX_CODE = 300
 
       SILENT_CHANGES = [
-        'path parameters encoded by hand: %2F would become %252F, remove the encoding',
-        'a / inside a path parameter to cover several segments: use *name or two placeholders',
+        'a value of a path parameter that is already encoded when it arrives: %2F would become %252F. The gem warns when it sees one',
+        'a / inside the value of a path parameter to cover several segments: use *name or two placeholders. The gem warns when it sees one',
         'debug logs or print_urls output read from STDOUT: set log_to and log_level',
-        'a bare rescue around a call: it now catches the errors of the gem too',
-        'credentials assigned on an instance: they now take effect',
-        'a credential assigned through a variable that holds the api of the module or of a class (api = ApiRecipes.github, then api.authorization = ...), inside the body of a class (github.authorization = ...), with send, or on a statement split over two lines: the writer raises, give it to config.values or to `api :name, authorization: ...`',
+        'a bare rescue in a file that does not name the gem, around code that calls it somewhere else: it now catches the errors of the gem too',
         'the response body read from the message of a verify_with error: read it from error.response',
-        'a block passed to run whose return value is used: it is now the Response',
-        'apis_configs assigned after the files to discard them: do not assign the files',
-        'timeout, on_bad_code, mime_type or verify_with on an endpoint that contains other endpoints: one that does not set the option now finds it there, before the api',
-        'an endpoint called with, definition, authorization, basic_auth or variables (on an api), or run, url, with or definition (on an endpoint): reach it with []; the warning at configuration reports it',
         'fill with private setters, or code that relies on swallowed errors: make the setters public, handle the errors',
-        'follow: true together with a credential: the credential no longer follows to another host',
-        'a class with its own host, protocol or port that relied on the global credential: set the credential on the class',
         'cookies set by a server during a redirect chain: they are no longer carried to the next hop',
-        'api names that are methods of Kernel, such as :open or :format: they raise ApiNameClashError, use as:',
         'Endpoint#name, #params, #children, #api and Api#name, #configs, #object were removed: use definition (a search cannot tell them from other methods called like that)',
         'an object restored from a serialized form (Marshal, YAML) has no credential: assign it again',
         'response.uri leaves out the credential query parameter when the api declares auth type query',
         'a redirect to a host with non-ASCII characters needs the addressable gem: without it the request raises InvalidUrl',
-        'a base_url with a placeholder in a configuration given as a Hash: it is now an error, use a variable',
-        'response.request was removed, whatever the name of the variable that holds the response: the request holds the credentials, read response.uri or response.original_response',
-        'response.to_s returns the body, as the http.rb response does: it was the default text of the object',
-        'a credential that is not a String, such as a Symbol or a number: it raises InvalidCredential, convert it with to_s',
-        'a {word} in a value of default_headers in a configuration given as a Hash: it is now a variable and must be declared',
-        'a {word} in the path of an endpoint in a configuration given as a Hash: it is now a variable and must be declared; to keep the braces as text write \\{word}',
-        'respond_to? on a response now tells the truth: it answers true for the methods the response forwards and false for the others',
-        'serializing an Api, an Endpoint or a Response raises TypeError: serialize response.data or response.body.to_s',
-        'a class that includes ApiRecipes and uses a top-level constant named Error, Internals, VERSION or like a new error class of the gem (such as ConfigurationError or InvalidUrl): it now finds the gem\'s constant first, write ::Name in that class; Route and Settings no longer exist, so a top-level Route or Settings is found again'
+        'a response that a method receives as an argument: request was removed (read uri or original_response), to_s returns the body, ' \
+        'respond_to? tells the truth. Those that the code takes from run are found'
       ].freeze
 
       # Problems met while reading, as "<file>: <reason>". They are not findings:
@@ -143,36 +141,198 @@ module ApiRecipes
         @uses = 0
         @startup = []
         @configure = {}
+        @direct = {}
+        @rescues = []
         findings = with_request_hints(@paths.flat_map { |path| scan_path(path) })
         findings += @configs.flat_map { |file| check_config(file) }
         @notes = scope + @notes if @project
         findings
       end
 
-      # Prints the results on out and the warnings on err. Returns the exit code.
-      def report(out, err)
+      # Prints the results on out and the warnings on err. Returns the exit
+      # code. What needs an answer comes last, where a terminal stops: what
+      # was checked, what the command cannot find, the findings, what to do.
+      # input: where the answers come from. On a terminal the command offers
+      # the changes it can make by itself, one at a time.
+      def report(out, err, input: nil)
         findings = run
-        findings.each do |finding|
-          out.puts format_finding(finding)
-          Code.show(out, finding.hint) if @code && finding.hint
-        end
+        screen = Screen.new(out)
+        changed = @code && Fix.asks?(input) ? offered(screen, input) : []
+        findings = run unless changed.empty?
         unless @notes.empty?
-          out.puts unless findings.empty?
-          @notes.each { |note| out.puts note }
+          screen.section('🔎', 'What was checked', plain: false)
+          @notes.each { |note| screen.line(note) }
         end
-        code_to_paste(out) if @code
-        out.puts
-        out.puts 'What this command cannot find'
-        SILENT_CHANGES.each { |change| out.puts "  - #{change}" }
-        out.puts
+        screen.section('🙈', 'What this command cannot find', "#{SILENT_CHANGES.size} changes")
+        SILENT_CHANGES.each { |change| screen.item(change) }
+        unless findings.empty?
+          screen.section('📌', 'Findings', plain: false)
+          findings.each { |finding| screen.finding(finding.kind, where(finding), finding.message, @code ? finding.hint : nil) }
+        end
+        pasted = @code && code_to_paste(screen)
+        unless changed.empty?
+          screen.section('✅', 'Changed in the project')
+          changed.each { |file| screen.item("edited #{shown_path(file)}") }
+          screen.line('Every change is in `git diff`.')
+        end
         @warnings.each { |warning| err.puts warning }
-        out.puts summary(findings.size) if findings.any? || @warnings.empty?
+        screen.summary(summary(findings.size), findings.group_by(&:kind).transform_values(&:size)) if findings.any? || @warnings.empty?
+        what_to_do(screen, findings, pasted)
         return 1 if findings.any?
 
         @warnings.empty? ? 0 : 2
       end
 
       private
+
+      # Offers each change the command can make. The project is read again
+      # after a change that was made. Returns the files that were written.
+      def offered(screen, input)
+        fix = Fix.new(screen, input, shown: method(:shown_path))
+        declined = []
+        written = []
+        while (change = changes.find { |one| !declined.include?(one.key) })
+          files = fix.offer(change)
+          declined << change.key
+          next unless files
+
+          written |= files
+          run
+        end
+        written
+      end
+
+      # The changes this command is sure of, in the order they are offered.
+      # The rescues of a file come from the last one, so that a change does
+      # not move the ones still to offer.
+      def changes
+        startup_changes + @rescues.sort_by { |item| [item[:file], -item[:line]] }.filter_map { |item| rescue_change(item) }
+      end
+
+      # A value that a line gives when the application starts moves into the
+      # block of ApiRecipes.configure, when one file has it and it is read whole.
+      def startup_changes
+        file, text = @configure.size == 1 ? @configure.first : nil
+        block = Code::ConfigureBlock.in(text)
+        return [] unless block && !block.problem
+
+        urls = @startup.select { |item| item[:api].nil? }
+        values = @startup.select { |item| item[:api] }
+        found = []
+        if urls.size == 1 && !block.assigned_anywhere?(:print_urls)
+          found << change(:print_urls, 'Move print_urls into the block of ApiRecipes.configure', urls, file, text, block,
+                          ["#{block.config}.print_urls = #{urls.first[:code]}"])
+        end
+        unless values.empty? || block.assigned_anywhere?(:values)
+          found << change(:values, 'Give the credentials of the application to ApiRecipes.configure, as config.values', values, file, text,
+                          block, ["#{block.config}.values = {", *entries_of(values).map { |entry| "  #{entry}" }, '}'])
+        end
+        found.compact
+      end
+
+      # A rescue that names no class gets, before it, a rescue of the errors
+      # of the gem that raises them again: what 2.x did. nil for a rescue
+      # that does not start a line of its own, as in `x rescue y`.
+      def rescue_change(item)
+        text = read_ruby(item[:file])
+        tree = text && Code.tree(text)
+        clause = tree && rescue_at(tree, item[:line])&.last
+        line = text && text.lines[item[:line] - 1]
+        return nil unless clause && line.match?(/\A[ \t]*rescue\b/)
+        return nil unless clause.exceptions.empty? || clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'StandardError' }
+
+        indent = line[/\A[ \t]*/]
+        written = text.lines.insert(item[:line] - 1, "#{indent}rescue ApiRecipes::Error\n", "#{indent}  raise\n").join
+        return nil unless gem_errors_handled?(written, item[:line] + 2)
+
+        # Counted from the end of the file, the place of a rescue stays the
+        # same when a change is made above it.
+        Fix::Change.new([:rescue, item[:file], text.lines.size - item[:line]],
+                        "Keep the errors of ApiRecipes out of the rescue at #{shown_path(item[:file])}:#{item[:line]}, as in 2.x",
+                        { item[:file] => written }, RESCUE_NOTE)
+      end
+
+      # The rescue clause that starts at line number, after the clauses of
+      # the same begin that come before it: [[earlier clauses], clause].
+      def rescue_at(tree, number)
+        Code.nodes(tree) { |node| node.is_a?(Prism::BeginNode) && node.rescue_clause }.each do |owner|
+          earlier = []
+          clause = owner.rescue_clause
+          while clause
+            return [earlier, clause] if clause.location.start_line == number
+
+            earlier << clause
+            clause = clause.compact_child_nodes.find { |child| child.is_a?(Prism::RescueNode) }
+          end
+        end
+        nil
+      end
+
+      # Whether a clause before the one at line number rescues ApiRecipes::Error.
+      def gem_errors_handled?(text, number)
+        tree = Code.tree(text)
+        earlier = tree && rescue_at(tree, number)&.first
+        return false unless earlier
+
+        earlier.any? { |clause| clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'ApiRecipes::Error' } }
+      end
+
+      # The texts of the files after the lines of items are taken out and
+      # added is written at the end of the block. nil when a line is not a
+      # whole statement of its own, or when a result is not valid Ruby.
+      def change(key, title, items, file, text, block, added)
+        texts = items.group_by { |item| item[:file] }.to_h { |path, list| [path, [path == file ? text : read_ruby(path), list.map { |item| item[:line] }]] }
+        texts[file] ||= [text, []]
+        return nil unless texts.all? { |_, (content, lines)| content && lines.all? { |number| own_statement?(content, number) } }
+
+        written = texts.to_h do |path, (content, lines)|
+          kept = content.lines.each_with_index.reject { |_, index| lines.include?(index + 1) }
+          next [path, kept.map(&:first).join] unless path == file
+
+          inside = lines.select { |number| number.between?(block.first, block.last) }
+          now = block.lines(added, without: inside).map { |line| "#{line}\n" }
+          [path, kept.flat_map { |line, index| index + 1 == block.first ? now : (index + 1).between?(block.first, block.last) ? [] : [line] }.join]
+        end
+        written.values.all? { |content| Code.tree(content) } ? Fix::Change.new(key, title, written) : nil
+      end
+
+      # Whether line number of text holds one whole statement and nothing else.
+      def own_statement?(text, number)
+        tree = Code.tree(text)
+        return false unless tree
+
+        statements = Code.nodes(tree) { |node| node.is_a?(Prism::StatementsNode) }.flat_map(&:body)
+        here = statements.select { |node| node.location.start_line == number && node.location.end_line == number }
+        here.size == 1 && text.lines[number - 1].strip == here.first.slice
+      end
+
+      def entries_of(items)
+        entries = items.group_by { |item| item[:api] }.map do |api, list|
+          "#{api.match?(/\A[a-z_]\w*\z/) ? api : "\"#{api}\""}: { #{list.map { |item| "#{item[:key]}: #{item[:code]}" }.join(', ')} }"
+        end
+        entries.each_with_index.map { |entry, index| index == entries.size - 1 ? entry : "#{entry}," }
+      end
+
+      # What the person does with the results, in order.
+      def what_to_do(screen, findings, pasted)
+        counts = findings.group_by(&:kind).transform_values(&:size)
+        lines = ->(count) { "#{count} line#{'s' unless count == 1}" }
+        steps = []
+        steps << "Fix the #{lines.call(counts[:breaks])} marked breaks: that code stops working, and each line says what to use instead#{'. The code to paste, above, does it for the values given when the application starts' if pasted}" if counts[:breaks]
+        steps << "Correct what is marked config (#{counts[:config]}): each is a problem in a file that describes an api" if counts[:config]
+        steps << "Read the #{lines.call(counts[:check])} marked check: the result changes, and only you can tell whether the code still does what it should. A check line is reported at every run" if counts[:check]
+        steps << 'Go through what this command cannot find: look in the code for the changes that concern the project'
+        steps << 'Run this command again: go on when only check lines that you have read are left' if counts[:breaks] || counts[:config]
+        steps << 'Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once'
+        described = @project ? @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) } : []
+        unless described.empty?
+          steps << "Then, if you want, move an api to a portable recipe: run `api_recipes convert FILE` for " \
+                   "#{described.first(3).map { |file| shown_path(file) }.join(', ')}#{' and the others' if described.size > 3}. " \
+                   'It changes the project by itself and says what it did; the files the project has now keep working as they are'
+        end
+        screen.section('👉', 'What to do now')
+        steps.each_with_index { |step, index| screen.item(step, "#{index + 1}.") }
+      end
 
       def summary(count)
         case count
@@ -208,10 +368,9 @@ module ApiRecipes
       # obey; a path that was given is shown as it was given.
       def shown_path(file) = @project ? Recipes::Summary.shown(file, 300) : file
 
-      def format_finding(finding)
+      def where(finding)
         file = shown_path(finding.file)
-        where = finding.line ? "#{file}:#{finding.line}" : file
-        "#{where}: [#{finding.kind}] #{finding.message}"
+        finding.line ? "#{file}:#{finding.line}" : file
       end
 
       def scan_path(path)
@@ -239,16 +398,32 @@ module ApiRecipes
           rules.each do |rule|
             next unless rule.pattern.match?(line)
 
+            if rule.equal?(BARE_RESCUE)
+              # A rescue that comes after one of ApiRecipes::Error never sees them.
+              next if gem_errors_handled?(text, number)
+
+              @rescues << { file: file, line: number }
+            end
             found << Finding.new(file: file, line: number, kind: rule.kind, message: rule.message, hint: hint(rule.fix, line, file, number, text))
           end
         end
-        found
+        (found + in_the_tree(file, text, found)).each_with_index.sort_by { |finding, index| [finding.line, index] }.map(&:first)
       end
 
       # ---- the code to paste ----
 
       # The code a line assigns, when it can be copied: on one line, short,
       # and with nothing a terminal would obey.
+      # What only the tree of the file tells. A writer that a rule on lines
+      # found is not said twice.
+      def in_the_tree(file, text, found)
+        reported = found.select { |finding| WRITER_RULES.any? { |rule| rule.message == finding.message } }.map(&:line)
+        uses = !@project || @project.uses_gem?(text)
+        TreeRules.findings(text, uses_gem: uses, reported: reported).map do |one|
+          Finding.new(file: file, line: one.line, kind: one.kind, message: one.message)
+        end
+      end
+
       def code_of(match)
         code = without_comment(match[:code].to_s.strip)
         return nil if code.empty? || code.length > MAX_CODE || Code::UNSAFE.match?(code) || !expression?(code)
@@ -335,8 +510,8 @@ module ApiRecipes
 
       # The values given when the application starts, in the block of
       # ApiRecipes.configure: the whole block when one file has it.
-      def code_to_paste(out)
-        return if @startup.empty?
+      def code_to_paste(screen)
+        return false if @startup.empty?
 
         file, text = @configure.size == 1 ? @configure.first : nil
         block = Code::ConfigureBlock.in(text)
@@ -345,27 +520,26 @@ module ApiRecipes
         inside = @startup.select { |item| block && item[:file] == file && item[:line].between?(block.first, block.last) }
         added = @startup.select { |item| item[:api].nil? }.first(1).map { |item| "#{config}.print_urls = #{item[:code]}" }
         added = [] if block&.line_of(:print_urls)
-        entries = @startup.select { |item| item[:api] }.group_by { |item| item[:api] }.map do |api, items|
-          "#{api.match?(/\A[a-z_]\w*\z/) ? api : "\"#{api}\""}: { #{items.map { |item| "#{item[:key]}: #{item[:code]}" }.join(', ')} }"
-        end
-        entries = entries.each_with_index.map { |entry, index| index == entries.size - 1 ? entry : "#{entry}," }
+        entries = entries_of(@startup.select { |item| item[:api] })
         merged = block && block.line_of(:values)
         added += ["#{config}.values = {", *entries.map { |entry| "  #{entry}" }, '}'] unless entries.empty? || merged
 
-        out.puts '', 'Code to paste', ''
+        screen.section('📋', 'Code to paste')
+        screen.gap
         if block
-          out.puts "In #{shown_path(file)}, replace the block of ApiRecipes.configure (lines #{block.first} to #{block.last}) with:"
-          Code.show(out, block.lines(added, without: inside.map { |item| item[:line] }))
+          screen.line("In #{shown_path(file)}, replace the block of ApiRecipes.configure (lines #{block.first} to #{block.last}) with:")
+          screen.code(block.lines(added, without: inside.map { |item| item[:line] }))
         else
-          out.puts 'Inside the block of ApiRecipes.configure:'
-          Code.show(out, added)
+          screen.line('Inside the block of ApiRecipes.configure:')
+          screen.code(added)
         end
         if merged && !entries.empty?
-          out.puts "and add to the Hash that #{config}.values is given at line #{merged}:"
-          Code.show(out, entries)
+          screen.line("and add to the Hash that #{config}.values is given at line #{merged}:")
+          screen.code(entries)
         end
         outside = (@startup - inside).map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }
-        out.puts "Then remove the lines that gave these values: #{outside.join(', ')}" unless outside.empty?
+        screen.line("Then remove the lines that gave these values: #{outside.join(', ')}") unless outside.empty?
+        true
       end
 
       # Every rule for the paths that were given. In a project, the general
@@ -414,7 +588,7 @@ module ApiRecipes
         unchecked = erb_values(apis)
         Internals::Compiler.compile_all(apis)
         note_unchecked(file, unchecked)
-        []
+        ConfigRules.findings(apis).map { |message| Finding.new(file: file, line: nil, kind: :check, message: message) }
       rescue RecipeFileError => e
         return not_checked(file) if tags && e.errors.all? { |problem| problem.include?('invalid YAML') }
 

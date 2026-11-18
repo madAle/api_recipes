@@ -26,7 +26,9 @@ module ApiRecipes
             Without arguments, in the root of a project: finds its Ruby files and the files
             that describe an api, and looks for what changed in api_recipes 3.0. It says what
             it checked. With arguments: the Ruby files under each PATH, and each configuration
-            FILE checked with the 3.0 rules. It never changes a file. A file that contains ERB
+            FILE checked with the 3.0 rules. On a terminal it offers to make the changes it is
+            sure of, one at a time: it shows each as a diff and changes a file only when the
+            answer is y. Away from a terminal it never changes a file. A file that contains ERB
             is checked without running its code, leaving out what its tags give; --erb
             evaluates it instead: this runs the code in it. Where what to write is known it
             gives the code to paste, with the whole block of ApiRecipes.configure; --no-code
@@ -106,7 +108,7 @@ module ApiRecipes
           out.puts USAGE
           0
         when 'upgrade'
-          upgrade(args, out, err)
+          upgrade(args, out, err, input)
         when 'import'
           import(args, out, err)
         when 'routes'
@@ -307,7 +309,7 @@ module ApiRecipes
         2
       end
 
-      def upgrade(args, out, err)
+      def upgrade(args, out, err, input)
         configs = []
         erb = false
         parser = OptionParser.new
@@ -316,7 +318,7 @@ module ApiRecipes
         parser.on('--erb') { erb = true }
         parser.on('--no-code') { code = false }
         paths = parser.parse(args)
-        return Upgrade.new(paths, config: configs, erb: erb, code: code).report(out, err) unless paths.empty? && configs.empty?
+        return Upgrade.new(paths, config: configs, erb: erb, code: code).report(out, err, input: input) unless paths.empty? && configs.empty?
 
         unless File.file?('Gemfile')
           err.puts 'upgrade without arguments checks the project in the current directory, and there is no Gemfile ' \
@@ -324,7 +326,7 @@ module ApiRecipes
           return 2
         end
 
-        Upgrade.for_project(Upgrade::Project.new, erb: erb, code: code).report(out, err)
+        Upgrade.for_project(Upgrade::Project.new, erb: erb, code: code).report(out, err, input: input)
       rescue OptionParser::ParseError => e
         err.puts e.message
         2

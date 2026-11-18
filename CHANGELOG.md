@@ -1,5 +1,32 @@
 ## Unreleased
 
+- `api_recipes upgrade` finds most of what it used to list as impossible to
+  find. It reads each Ruby file as a tree: a credential assigned in the body
+  of a class, through a variable, over two lines or with `send`; a credential
+  that is not text; an api name that is already a method; a class with an
+  address of its own and no credential; `apis_configs` assigned after the
+  files; a block passed to `run` whose value is used; `request`, `to_s` and
+  `respond_to?` on what `run` returned; a constant of the gem written alone in
+  a class that includes `ApiRecipes`. In a description it finds an option
+  that inner endpoints now find on the endpoint that contains them, and an
+  endpoint with no method of its own. The list of what the command cannot
+  find goes from 29 entries to 12.
+- `api_recipes upgrade` offers, on a terminal, to make the changes it is sure
+  of: `ApiRecipes.print_urls = ...` and the credentials assigned on
+  `ApiRecipes.NAME` move into the block of `ApiRecipes.configure`. Each
+  change is shown as a diff and made only after `y`, in files that git has
+  committed as they are now. For a `rescue` that names no class it offers to
+  put `rescue ApiRecipes::Error` with a `raise` before it, as 2.x behaved, and
+  a `rescue` that already comes after one of `ApiRecipes::Error` is no longer
+  reported. Away from a terminal, and with `--no-code`, the
+  command changes nothing.
+- `api_recipes upgrade` ends with `What to do now`: the steps to take, one for
+  each kind of finding that there is. What needs an answer comes last: what
+  was checked and the changes the command cannot find are printed first, then
+  the findings, the code to paste and the summary. On a terminal the results
+  are in sections with a colour for each kind of finding, and the lines fit
+  the width of the window; through a pipe and with `NO_COLOR` the text has no
+  colours.
 - `api_recipes import` and `api_recipes convert` take `--calls`: the recipe
   they write has, in a comment beside each endpoint, how it is called in Ruby
   (`.repos.issues(owner, repo).show(issue_number)`). The comments are made
