@@ -730,30 +730,34 @@ A portable recipe is a recipe made to be shared: one API in one file, and
 nothing but data. You install it with a command that shows what it does before
 it writes anything, and you load it with `recipes_paths`.
 
-    $ api_recipes install github
-    github 1.0.0
-      summary:       GitHub REST API, users, repositories, issues and pull requests
+    $ api_recipes install github_essentials
+    reading github_essentials from https://github.com/madAle/api_recipes-cookbook
+    github_essentials 1.0.0
+      summary:       GitHub REST API, the most used calls on users, repositories, issues and pull requests
       homepage:      https://docs.github.com/en/rest
-      from:          https://github.com/madAle/api_recipes-cookbook, commit a4e8dd017d05
+      from:          https://github.com/madAle/api_recipes-cookbook, commit cd19ca58aea1
       address:       https://api.github.com
       credential:    in the Authorization header
       headers:       Accept: application/vnd.github+json
       calls:         14, of which 2 are not GET:
-        POST  github.repos.issues(owner, repo).create                         /repos/:owner/:repo/issues
-        POST  github.repos.issues(owner, repo).comments(issue_number).create  /repos/:owner/:repo/issues/:issue_number/comments
-    Install github 1.0.0 in config/api_recipes? [y/N] y
-    github 1.0.0 is installed in config/api_recipes/github.recipe.yml
+        POST  github_essentials.repos.issues(owner, repo).create                         /repos/:owner/:repo/issues
+        POST  github_essentials.repos.issues(owner, repo).comments(issue_number).create  /repos/:owner/:repo/issues/:issue_number/comments
+    Install github_essentials 1.0.0 in config/api_recipes? [y/N] y
+    github_essentials 1.0.0 is installed in config/api_recipes/github_essentials.recipe.yml
 
 ```ruby
 ApiRecipes.configure do |config|
   config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
 end
 
-ApiRecipes.github.users.show('octocat').run
+ApiRecipes.github_essentials.users.show('octocat').run
 ```
 
+`github_essentials` has the most used calls of the GitHub API; the recipe
+called `github` has every operation, 1,281 calls with the same names.
+
 The command writes two files in `config/api_recipes`: the recipe,
-`github.recipe.yml`, and `recipes.lock`, which records the version, the
+`github_essentials.recipe.yml`, and `recipes.lock`, which records the version, the
 repository, the commit and the checksum of each installed recipe. Commit both
 to your repository: the application downloads nothing when it starts.
 
@@ -765,7 +769,7 @@ layout.
 ### Installing, updating and checking
 
     $ api_recipes install github                      # the recipe at the head of the cookbook
-    $ api_recipes install github --version 1.0.0      # the one at the tag github-1.0.0
+    $ api_recipes install github --version 2.0.0      # the one at the tag github-2.0.0
     $ api_recipes install billing --from https://github.com/acme/api-recipes
     $ api_recipes install ./billing.recipe.yml        # a file of yours
     $ api_recipes update github
