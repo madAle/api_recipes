@@ -61,6 +61,12 @@ module ApiRecipes
       # The rule about the Hash methods that ActiveSupport defines too.
       HASH_METHODS = RULES.last
 
+      # The rule about a rescue that names no class, and what the change
+      # that the command offers for it means.
+      BARE_RESCUE = RULES.find { |rule| rule.message.start_with?('a bare rescue') }
+      RESCUE_NOTE = 'In 2.x this rescue did not catch the errors of the gem. Yes keeps it so: they go on to the code that ' \
+                    'called. No lets this rescue handle them from now on.'
+
       # What stands for the value of an ERB tag in a file that is checked
       # without running its code.
       # Options whose value is a mapping: a tag that gives one gives a part
@@ -146,6 +152,7 @@ module ApiRecipes
         @startup = []
         @configure = {}
         @direct = {}
+        @rescues = []
         findings = with_request_hints(@paths.flat_map { |path| scan_path(path) })
         findings += @configs.flat_map { |file| check_config(file) }
         @notes = scope + @notes if @project
@@ -205,9 +212,16 @@ module ApiRecipes
         written
       end
 
-      # The changes this command is sure of: a value that a line gives when
-      # the application starts moves into the block of ApiRecipes.configure.
+      # The changes this command is sure of, in the order they are offered.
+      # The rescues of a file come from the last one, so that a change does
+      # not move the ones still to offer.
       def changes
+        startup_changes + @rescues.sort_by { |item| [item[:file], -item[:line]] }.filter_map { |item| rescue_change(item) }
+      end
+
+      # A value that a line gives when the application starts moves into the
+      # block of ApiRecipes.configure, when one file has it and it is read whole.
+      def startup_changes
         file, text = @configure.size == 1 ? @configure.first : nil
         block = Code::ConfigureBlock.in(text)
         return [] unless block && !block.problem
@@ -224,6 +238,53 @@ module ApiRecipes
                           block, ["#{block.config}.values = {", *entries_of(values).map { |entry| "  #{entry}" }, '}'])
         end
         found.compact
+      end
+
+      # A rescue that names no class gets, before it, a rescue of the errors
+      # of the gem that raises them again: what 2.x did. nil for a rescue
+      # that does not start a line of its own, as in `x rescue y`.
+      def rescue_change(item)
+        text = read_ruby(item[:file])
+        tree = text && Code.tree(text)
+        clause = tree && rescue_at(tree, item[:line])&.last
+        line = text && text.lines[item[:line] - 1]
+        return nil unless clause && line.match?(/\A[ \t]*rescue\b/)
+        return nil unless clause.exceptions.empty? || clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'StandardError' }
+
+        indent = line[/\A[ \t]*/]
+        written = text.lines.insert(item[:line] - 1, "#{indent}rescue ApiRecipes::Error\n", "#{indent}  raise\n").join
+        return nil unless gem_errors_handled?(written, item[:line] + 2)
+
+        # Counted from the end of the file, the place of a rescue stays the
+        # same when a change is made above it.
+        Fix::Change.new([:rescue, item[:file], text.lines.size - item[:line]],
+                        "Keep the errors of ApiRecipes out of the rescue at #{shown_path(item[:file])}:#{item[:line]}, as in 2.x",
+                        { item[:file] => written }, RESCUE_NOTE)
+      end
+
+      # The rescue clause that starts at line number, after the clauses of
+      # the same begin that come before it: [[earlier clauses], clause].
+      def rescue_at(tree, number)
+        Code.nodes(tree) { |node| node.is_a?(Prism::BeginNode) && node.rescue_clause }.each do |owner|
+          earlier = []
+          clause = owner.rescue_clause
+          while clause
+            return [earlier, clause] if clause.location.start_line == number
+
+            earlier << clause
+            clause = clause.compact_child_nodes.find { |child| child.is_a?(Prism::RescueNode) }
+          end
+        end
+        nil
+      end
+
+      # Whether a clause before the one at line number rescues ApiRecipes::Error.
+      def gem_errors_handled?(text, number)
+        tree = Code.tree(text)
+        earlier = tree && rescue_at(tree, number)&.first
+        return false unless earlier
+
+        earlier.any? { |clause| clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'ApiRecipes::Error' } }
       end
 
       # The texts of the files after the lines of items are taken out and
@@ -341,6 +402,12 @@ module ApiRecipes
           rules.each do |rule|
             next unless rule.pattern.match?(line)
 
+            if rule.equal?(BARE_RESCUE)
+              # A rescue that comes after one of ApiRecipes::Error never sees them.
+              next if gem_errors_handled?(text, number)
+
+              @rescues << { file: file, line: number }
+            end
             found << Finding.new(file: file, line: number, kind: rule.kind, message: rule.message, hint: hint(rule.fix, line, file, number, text))
           end
         end

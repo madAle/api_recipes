@@ -564,8 +564,12 @@ What to do now
 at a time. Today they are the values that a line gave when the application
 started: `ApiRecipes.print_urls = ...` moves into the block of
 `ApiRecipes.configure`, and the credentials assigned on `ApiRecipes.NAME`
-become `config.values`. Each change is shown as a diff of the files it
-touches, and is made only when you answer `y` or `yes`:
+become `config.values`. For a `rescue` that names no class, or
+`StandardError`, it offers to put before it `rescue ApiRecipes::Error` with a
+`raise`, which is what 2.x did: the errors of the gem go on to the code that
+called. Answer no when that rescue should handle them from now on. Each change
+is shown as a diff of the files it touches, and is made only when you answer
+`y` or `yes`:
 
 ```
 Move print_urls into the block of ApiRecipes.configure
@@ -588,7 +592,8 @@ Make this change? [y/N]
 - A line is taken out only when it is one whole statement. A block of
   `configure` that the command cannot read whole, or that already assigns the
   value, is left to you, with the code to paste.
-- A change you refuse stays among the findings, with its code to paste.
+- A change you refuse stays among the findings, with its code to paste. A
+  `rescue` that comes after one of `ApiRecipes::Error` is no longer a finding.
 - Away from a terminal, as in a CI, and with `--no-code`, the command asks
   nothing and changes nothing.
 

@@ -124,6 +124,65 @@ describe 'api_recipes upgrade, the changes it offers' do
     expect(upgrade("y\n")[1]).not_to include('Make this change?')
   end
 
+  describe 'for a rescue that names no class' do
+    let(:model) do
+      <<~RUBY
+        class Device
+          include ApiRecipes
+          api :billing
+
+          def sync
+            billing.invoices.run
+          rescue => e
+            log(e)
+          end
+
+          def load
+            begin
+              billing.invoices.run
+            rescue StandardError
+              nil
+            end
+          end
+        end
+      RUBY
+    end
+
+    it 'offers to put before it a rescue of the errors of the gem that raises them again, as 2.x behaved' do
+      project('Gemfile' => "gem 'api_recipes'\n", 'app/models/device.rb' => model)
+      code, out = upgrade("y\ny\n")
+      expect(out).to include('Keep the errors of ApiRecipes out of the rescue at app/models/device.rb:14, as in 2.x',
+                             'Keep the errors of ApiRecipes out of the rescue at app/models/device.rb:7, as in 2.x',
+                             'In 2.x this rescue did not catch the errors of the gem.',
+                             "    billing.invoices.run\n+   rescue ApiRecipes::Error\n+     raise\n    rescue => e\n")
+      expect(out).not_to include('[check]')
+      expect(code).to eq(0)
+      expect(File.read('app/models/device.rb')).to eq(
+        model.sub("  rescue => e\n", "  rescue ApiRecipes::Error\n    raise\n  rescue => e\n")
+             .sub("    rescue StandardError\n", "    rescue ApiRecipes::Error\n      raise\n    rescue StandardError\n")
+      )
+      expect(upgrade("y\n")).to match([0, satisfy { |text| !text.include?('Make this change?') && !text.include?('bare rescue now') }])
+    end
+
+    it 'asks about each rescue once, and a refused one stays a finding where it is now' do
+      project('Gemfile' => "gem 'api_recipes'\n", 'app/models/device.rb' => model)
+      code, out = upgrade("n\ny\n")
+      expect(out.scan('Make this change?').size).to eq(2)
+      expect(code).to eq(1)
+      expect(out).to include('app/models/device.rb:16: [check] a bare rescue now catches ApiRecipes errors too', '1 finding')
+      expect(File.read('app/models/device.rb')).to eq(model.sub("  rescue => e\n", "  rescue ApiRecipes::Error\n    raise\n  rescue => e\n"))
+    end
+
+    it 'offers it also in a project with no block of configure, and leaves a rescue after a word to the person' do
+      project('Gemfile' => "gem 'api_recipes'\n",
+              'app/models/device.rb' => "class Device\n  include ApiRecipes\n  api :billing\n  def sync\n    billing.run\n  rescue StandardError, IOError => e\n    nil\n  end\nend\n",
+              'lib/job.rb' => "ApiRecipes.billing.invoices.run\nbegin; work; rescue StandardError; end\n")
+      _, out = upgrade("n\n")
+      expect(out.scan('Make this change?').size).to eq(1)
+      expect(out).to include('lib/job.rb:2: [check] a bare rescue now catches', 'the rescue at app/models/device.rb:6, as in 2.x')
+    end
+  end
+
   describe ApiRecipes::CLI::Upgrade::Diff do
     it 'gives the lines taken out and added with the lines around them, in parts that say where they start' do
       old = (1..20).map { |number| "line #{number}\n" }.join

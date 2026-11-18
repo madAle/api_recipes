@@ -4,7 +4,10 @@
   of: `ApiRecipes.print_urls = ...` and the credentials assigned on
   `ApiRecipes.NAME` move into the block of `ApiRecipes.configure`. Each
   change is shown as a diff and made only after `y`, in files that git has
-  committed as they are now. Away from a terminal, and with `--no-code`, the
+  committed as they are now. For a `rescue` that names no class it offers to
+  put `rescue ApiRecipes::Error` with a `raise` before it, as 2.x behaved, and
+  a `rescue` that already comes after one of `ApiRecipes::Error` is no longer
+  reported. Away from a terminal, and with `--no-code`, the
   command changes nothing.
 - `api_recipes upgrade` ends with `What to do now`: the steps to take, one for
   each kind of finding that there is. What needs an answer comes last: what
