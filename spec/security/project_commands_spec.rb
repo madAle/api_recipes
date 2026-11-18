@@ -75,6 +75,18 @@ describe 'The commands that read the files of a project' do
       expect(out + err).not_to include("\e")
     end
 
+    it 'writes on a terminal only its own colours: the name of a file adds nothing that the terminal obeys' do
+      write("config/apis/\e[2Jbilling\e[5m.yml", api.sub('host:', 'hots:'))
+      write("app/\e]0;title\aclient.rb", "ApiRecipes.print_urls = true\n")
+      terminal = StringIO.new
+      terminal.define_singleton_method(:tty?) { true }
+      ApiRecipes::CLI.run(['upgrade'], out: terminal, err: terminal)
+      own = %w[0 1 2 31 32 33 35 36 1;31 1;32 1;33 1;35].map { |code| "\e[#{code}m" }
+      expect(terminal.string).to include('breaks', 'config', "\e[1;31m")
+      expect(terminal.string.scan(/\e\[[0-9;]*m/).uniq - own).to eq([])
+      expect(terminal.string.gsub(/\e\[[0-9;]*m/, '')).not_to match(/[\e\a]/)
+    end
+
     it 'does not leave the project through a symbolic link' do
       outside = Dir.mktmpdir
       File.write(File.join(outside, 'billing.yml'), api.sub('billing.example.test', "<%= #{touch} %>").sub('host:', 'hots:'))

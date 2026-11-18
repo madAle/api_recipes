@@ -519,15 +519,21 @@ It finds by itself what to check, and says what it checked:
   only what it is sure of: one whole expression, with no `if`, `unless`,
   `rescue`, `and` or `or` after it, on a line that is always run.
 
-```
-app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
-app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
-config/apis/github.yml: [config] github: unknown option 'hots'
+What needs an answer comes last, where the terminal stops: what was checked,
+the changes the command cannot find, the findings, and what to do.
 
+```
 Checked 214 Ruby files, 6 of them use api_recipes
 Checked 2 configuration files: config/apis/billing.yml, config/apis/github.yml
 app/models/shop.rb:4: declares the api 'shopify', and no configuration file found here describes it
 config/apis/billing.yml: 2 values come from ERB and were not checked
+
+What this command cannot find
+(the list of the changes that a search in the text cannot find)
+
+app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
+app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
+config/apis/github.yml: [config] github: unknown option 'hots'
 
 Code to paste
 
@@ -542,10 +548,22 @@ In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure
 
 Then remove the lines that gave these values: config/initializers/github.rb:1
 
-(the list of what the command cannot find)
-
 3 findings
+
+What to do now
+  1. Fix the 1 line marked breaks: that code stops working, and each line says what to use instead
+  2. Correct what is marked config (1): each is a problem in a file that describes an api
+  3. Read the 1 line marked check: the result changes, and only you can tell whether the code still does what it should. A check line is reported at every run
+  4. Go through what this command cannot find: look in the code for the changes that concern the project
+  5. Run this command again: go on when only check lines that you have read are left
+  6. Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once
 ```
+
+The steps at the end are those of what was found: a kind of finding that is
+not there has no step. On a terminal the same results are shown in sections,
+with a colour for each kind of finding and lines that fit the width of the
+window. Away from a terminal, as in a CI or through a pipe, and with
+`NO_COLOR` set, the text is the one above, with no colours.
 
 The line about `api :shopify` is said of a declaration in the code when no file
 found in the project describes that API and the code never assigns
@@ -558,9 +576,9 @@ file.
 
     $ api_recipes upgrade app lib --config config/apis/github.yml
 
-The command then prints the list of changes that a search in the text
-cannot find, which you check by hand (this guide has the details of each), and a
-summary line: `Nothing to change`, `1 finding` or `N findings`. When it found
+The list of the changes that a search in the text cannot find is the same at
+every run: you check them by hand, and this guide has the details of each. The
+summary line is `Nothing to change`, `1 finding` or `N findings`. When it found
 no description of an API it says so instead of `Nothing to change`. The summary
 line is left out when there is no finding and something could not be read.
 

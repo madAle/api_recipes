@@ -1,5 +1,12 @@
 ## Unreleased
 
+- `api_recipes upgrade` ends with `What to do now`: the steps to take, one for
+  each kind of finding that there is. What needs an answer comes last: what
+  was checked and the changes the command cannot find are printed first, then
+  the findings, the code to paste and the summary. On a terminal the results
+  are in sections with a colour for each kind of finding, and the lines fit
+  the width of the window; through a pipe and with `NO_COLOR` the text has no
+  colours.
 - `api_recipes import` and `api_recipes convert` take `--calls`: the recipe
   they write has, in a comment beside each endpoint, how it is called in Ruby
   (`.repos.issues(owner, repo).show(issue_number)`). The comments are made

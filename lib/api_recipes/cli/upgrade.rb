@@ -2,6 +2,7 @@
 
 require 'securerandom'
 require 'api_recipes/cli/upgrade/project'
+require 'api_recipes/cli/upgrade/screen'
 
 module ApiRecipes
   module CLI
@@ -149,30 +150,47 @@ module ApiRecipes
         findings
       end
 
-      # Prints the results on out and the warnings on err. Returns the exit code.
+      # Prints the results on out and the warnings on err. Returns the exit
+      # code. What needs an answer comes last, where a terminal stops: what
+      # was checked, what the command cannot find, the findings, what to do.
       def report(out, err)
         findings = run
-        findings.each do |finding|
-          out.puts format_finding(finding)
-          Code.show(out, finding.hint) if @code && finding.hint
-        end
+        screen = Screen.new(out)
         unless @notes.empty?
-          out.puts unless findings.empty?
-          @notes.each { |note| out.puts note }
+          screen.section('🔎', 'What was checked', plain: false)
+          @notes.each { |note| screen.line(note) }
         end
-        code_to_paste(out) if @code
-        out.puts
-        out.puts 'What this command cannot find'
-        SILENT_CHANGES.each { |change| out.puts "  - #{change}" }
-        out.puts
+        screen.section('🙈', 'What this command cannot find', "#{SILENT_CHANGES.size} changes")
+        SILENT_CHANGES.each { |change| screen.item(change) }
+        unless findings.empty?
+          screen.section('📌', 'Findings', plain: false)
+          findings.each { |finding| screen.finding(finding.kind, where(finding), finding.message, @code ? finding.hint : nil) }
+        end
+        pasted = @code && code_to_paste(screen)
         @warnings.each { |warning| err.puts warning }
-        out.puts summary(findings.size) if findings.any? || @warnings.empty?
+        screen.summary(summary(findings.size), findings.group_by(&:kind).transform_values(&:size)) if findings.any? || @warnings.empty?
+        what_to_do(screen, findings, pasted)
         return 1 if findings.any?
 
         @warnings.empty? ? 0 : 2
       end
 
       private
+
+      # What the person does with the results, in order.
+      def what_to_do(screen, findings, pasted)
+        counts = findings.group_by(&:kind).transform_values(&:size)
+        lines = ->(count) { "#{count} line#{'s' unless count == 1}" }
+        steps = []
+        steps << "Fix the #{lines.call(counts[:breaks])} marked breaks: that code stops working, and each line says what to use instead#{'. The code to paste, above, does it for the values given when the application starts' if pasted}" if counts[:breaks]
+        steps << "Correct what is marked config (#{counts[:config]}): each is a problem in a file that describes an api" if counts[:config]
+        steps << "Read the #{lines.call(counts[:check])} marked check: the result changes, and only you can tell whether the code still does what it should. A check line is reported at every run" if counts[:check]
+        steps << 'Go through what this command cannot find: look in the code for the changes that concern the project'
+        steps << 'Run this command again: go on when only check lines that you have read are left' if counts[:breaks] || counts[:config]
+        steps << 'Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once'
+        screen.section('👉', 'What to do now')
+        steps.each_with_index { |step, index| screen.item(step, "#{index + 1}.") }
+      end
 
       def summary(count)
         case count
@@ -208,10 +226,9 @@ module ApiRecipes
       # obey; a path that was given is shown as it was given.
       def shown_path(file) = @project ? Recipes::Summary.shown(file, 300) : file
 
-      def format_finding(finding)
+      def where(finding)
         file = shown_path(finding.file)
-        where = finding.line ? "#{file}:#{finding.line}" : file
-        "#{where}: [#{finding.kind}] #{finding.message}"
+        finding.line ? "#{file}:#{finding.line}" : file
       end
 
       def scan_path(path)
@@ -335,8 +352,8 @@ module ApiRecipes
 
       # The values given when the application starts, in the block of
       # ApiRecipes.configure: the whole block when one file has it.
-      def code_to_paste(out)
-        return if @startup.empty?
+      def code_to_paste(screen)
+        return false if @startup.empty?
 
         file, text = @configure.size == 1 ? @configure.first : nil
         block = Code::ConfigureBlock.in(text)
@@ -352,20 +369,22 @@ module ApiRecipes
         merged = block && block.line_of(:values)
         added += ["#{config}.values = {", *entries.map { |entry| "  #{entry}" }, '}'] unless entries.empty? || merged
 
-        out.puts '', 'Code to paste', ''
+        screen.section('📋', 'Code to paste')
+        screen.gap
         if block
-          out.puts "In #{shown_path(file)}, replace the block of ApiRecipes.configure (lines #{block.first} to #{block.last}) with:"
-          Code.show(out, block.lines(added, without: inside.map { |item| item[:line] }))
+          screen.line("In #{shown_path(file)}, replace the block of ApiRecipes.configure (lines #{block.first} to #{block.last}) with:")
+          screen.code(block.lines(added, without: inside.map { |item| item[:line] }))
         else
-          out.puts 'Inside the block of ApiRecipes.configure:'
-          Code.show(out, added)
+          screen.line('Inside the block of ApiRecipes.configure:')
+          screen.code(added)
         end
         if merged && !entries.empty?
-          out.puts "and add to the Hash that #{config}.values is given at line #{merged}:"
-          Code.show(out, entries)
+          screen.line("and add to the Hash that #{config}.values is given at line #{merged}:")
+          screen.code(entries)
         end
         outside = (@startup - inside).map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }
-        out.puts "Then remove the lines that gave these values: #{outside.join(', ')}" unless outside.empty?
+        screen.line("Then remove the lines that gave these values: #{outside.join(', ')}") unless outside.empty?
+        true
       end
 
       # Every rule for the paths that were given. In a project, the general
