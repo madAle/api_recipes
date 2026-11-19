@@ -1083,8 +1083,11 @@ It changes your files only when that is safe, and all at once or not at all:
 
 - Lines are added only to a plain file of the project that is in the last
   commit of git. A file is deleted, or lines are taken out of it, only when
-  git has it committed as it is now: its id is compared with the one in the
-  index and in the last commit, and no filter of the repository is run. A symbolic link, and a file that git was told to skip, are never
+  git has it committed as it is now: the command works out the id of the
+  file and compares it with the one in the index and in the last commit, so
+  that no filter of the repository runs. A file that differs only by CR LF
+  at the end of its lines, as git writes it with `core.autocrlf`, counts as
+  committed. A symbolic link, and a file that git was told to skip, are never
   changed. Outside a git repository the project is not changed.
 - Ruby is read as a tree, never matched as lines and never run, and the
   command edits only what it can read whole:

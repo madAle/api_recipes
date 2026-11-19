@@ -70,7 +70,9 @@ module ApiRecipes
         # The variable that stands for the host, named so that it is not one
         # of the variables of the address.
         def host_variable(why)
-          name = @names.value?('host') ? 'api_host' : 'host'
+          taken = @names.values
+          name = %w[host api_host].find { |one| !taken.include?(one) }
+          name ||= (2..).lazy.map { |number| "api_host_#{number}" }.find { |one| !taken.include?(one) }
           @warnings << "#{why}: the host is the variable {#{name}}, to give with config.values"
           "{#{name}}"
         end

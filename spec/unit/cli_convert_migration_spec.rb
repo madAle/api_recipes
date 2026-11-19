@@ -187,6 +187,18 @@ describe 'api_recipes convert, in a project' do
     end
   end
 
+  it 'moves an api in a checkout whose lines end with CR LF, as git writes them with core.autocrlf' do
+    project
+    git('config', 'core.autocrlf', 'true')
+    FileUtils.rm(%w[config/apis/billing.yml.erb config/initializers/api_recipes.rb])
+    git('checkout', '--', '.')
+    expect(File.binread('config/initializers/api_recipes.rb')).to include("\r\n")
+    expect(git('status', '--porcelain')).to eq('')
+    code, _, err = convert('config/apis/billing.yml.erb')
+    expect([code, err]).to eq([0, ''])
+    expect(File.binread('config/initializers/api_recipes.rb')).to include("config.recipes_paths = Dir[File.expand_path('../api_recipes/*.recipe.yml', __dir__)]\r\n")
+  end
+
   describe 'with no file' do
     let(:other) { "other:\n  host: other.example.test\n  endpoints:\n    ping:\n" }
     let(:two) { "first:\n  host: first.example.test\n  endpoints:\n    ping:\n\nsecond:\n  host: second.example.test\n  endpoints:\n    ping:\n" }

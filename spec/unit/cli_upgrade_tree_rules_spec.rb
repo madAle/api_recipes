@@ -164,6 +164,24 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
     expect(found).to eq([])
   end
 
+  it 'follows an api kept with ||= or returned by a method of the class' do
+    found = findings(<<~RUBY)
+      class Client
+        include ApiRecipes
+        api :github
+
+        def connection = self.class.github
+
+        def setup(token)
+          @client ||= ApiRecipes.github
+          @client.authorization = token
+          connection.authorization = token
+        end
+      end
+    RUBY
+    expect(found).to eq(['9: [check] authorization= and basic_auth= no', '10: [check] authorization= and basic_auth= n'])
+  end
+
   it 'reads a file that is not valid Ruby with the rules on lines only' do
     expect(findings("class Client\n  github.authorization = 1\n")).to eq([])
   end

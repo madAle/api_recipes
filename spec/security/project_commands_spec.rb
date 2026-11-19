@@ -308,6 +308,24 @@ SAVED_MEANWHILE = 1
       expect(snapshot).to eq(before)
     end
 
+    it 'does not write over a recipe that appeared while the question waited' do
+      project
+      write('config/apis/billing.yml', api)
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'old')
+      done = false
+      saved = lambda do
+        write('config/api_recipes/billing.recipe.yml', "# written meanwhile\n") unless done
+        done = true
+        nil
+      end
+      out = upgrade("y\nn\n", typed: saved)
+      expect(out).to include('config/api_recipes/billing.recipe.yml changed after this command read it')
+      expect(File.read('config/api_recipes/billing.recipe.yml')).to eq("# written meanwhile\n")
+      expect(File.exist?('config/apis/billing.yml')).to be(true)
+    end
+
     it 'does not move an api to a recipe when its files changed while the question waited' do
       project
       write('config/apis/billing.yml', api)
@@ -561,6 +579,31 @@ SAVED_MEANWHILE = 1
       FileUtils.rm_f(marker)
       run_cli('convert', 'config/apis/billing.yml')
       expect(File.exist?(marker)).to be(false)
+    end
+
+    it 'does not run a filter that git is configured with to compare a file, as status would' do
+      project
+      ran = File.join(@root, 'FILTER_RAN')
+      File.write('.gitattributes', "*.rb filter=spy\n*.yml filter=spy\n")
+      git('config', 'filter.spy.clean', "sh -c 'touch #{ran}; cat'")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'filter')
+      FileUtils.rm_f(ran)
+      FileUtils.touch(%w[config/apis/billing.yml config/initializers/api_recipes.rb], mtime: Time.now + 5)
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(0)
+      expect(File.exist?(ran)).to be(false)
+    end
+
+    it 'takes nothing out of a file with changes that are not committed, also after it added lines to it in the same run' do
+      project
+      write('config/apis/other.yml', "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir['config/apis/*.yml']\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'two')
+      File.write('config/initializers/api_recipes.rb', File.read('config/initializers/api_recipes.rb').sub("end\n", "  config.log_level = :debug # not committed\nend\n"))
+      _, out, = run_cli('convert')
+      expect(out).to include('loads no file now: you can take it out')
+      expect(File.read('config/initializers/api_recipes.rb')).to include("config.apis_files_paths = Dir['config/apis/*.yml']", '# not committed')
     end
 
     it 'puts the project back as it was when a write fails after others were made' do

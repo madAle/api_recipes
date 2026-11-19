@@ -116,7 +116,7 @@ module ApiRecipes
           listed, status = git('ls-files', '-v', '--error-unmatch', '--', file)
           return false unless plain?(file) && status&.success? && listed.start_with?('H ')
 
-          Convert::Migration.as_committed?(file) { |*arguments| git(*arguments) }
+          Convert::Migration.as_committed?(file, full(file)) { |*arguments| git(*arguments) }
         end
 
         # Whether the file is as this command left it, after a change made

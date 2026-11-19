@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'open3'
+require 'digest'
 require 'tmpdir'
 require 'pathname'
 require 'fileutils'
@@ -26,18 +27,27 @@ module ApiRecipes
         # git does not run a program that the repository names.
         GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'].freeze
 
-        # Whether the file is, byte for byte, what git has in its index and in
-        # HEAD. The ids of the three are compared: unlike `git status`, this
-        # runs no filter that the repository is configured with. git is a
-        # block that runs git with the arguments it is given.
-        def self.as_committed?(file, &git)
+        # Whether the file is what git has in its index and in HEAD. The id
+        # of the index and the one of HEAD are compared with the id of the
+        # bytes of the file, worked out here: unlike `git status`, this runs
+        # no filter that the repository is configured with. The bytes with
+        # CR LF read as LF count too, as git writes a file with core.autocrlf.
+        # path: where the file is read; git is a block that runs git, in the
+        # project, with the arguments it is given.
+        def self.as_committed?(file, path, &git)
           staged, listed = git.call('ls-files', '-s', '--', file)
           head, found = git.call('rev-parse', '--verify', '-q', "HEAD:./#{Pathname.new(file).cleanpath}")
-          now, hashed = git.call('hash-object', '--no-filters', '--', file)
-          return false unless [listed, found, hashed].all? { |status| status&.success? }
+          format, known = git.call('rev-parse', '--show-object-format')
+          return false unless [listed, found].all? { |status| status&.success? }
 
           id = staged.lines.size == 1 ? staged.split[1] : nil
-          !id.nil? && id == head.strip && id == now.strip
+          return false unless id && id == head.strip
+
+          digest = known&.success? && format.strip == 'sha256' ? Digest::SHA256 : Digest::SHA1
+          bytes = File.binread(path)
+          [bytes, bytes.gsub("\r\n", "\n")].uniq.any? { |one| digest.hexdigest("blob #{one.bytesize}\0#{one}") == id }
+        rescue SystemCallError
+          false
         end
 
         # written: { file => text } for the files that the same run of the
@@ -81,7 +91,8 @@ module ApiRecipes
           plan_valid
           # What the changes were worked out from: a file changed after this
           # is not written over.
-          @seen = (@planned.keys | [@source]).select { |file| File.file?(full(file)) }.to_h { |file| [file, File.binread(full(file))] }
+          @seen = (@planned.keys | [@source, @lock]).select { |file| File.file?(full(file)) }.to_h { |file| [file, File.binread(full(file))] }
+          @absent = [@target, @lock].reject { |file| File.exist?(full(file)) || File.symlink?(full(file)) }
           @blocking
         end
 
@@ -101,7 +112,8 @@ module ApiRecipes
 
         # Makes the changes that prepare worked out. Returns the exit code.
         def finish
-          changed = @seen.reject { |file, text| File.file?(full(file)) && File.binread(full(file)) == text }.keys
+          changed = @seen.reject { |file, text| File.file?(full(file)) && File.binread(full(file)) == text }.keys +
+                    @absent.select { |file| File.exist?(full(file)) || File.symlink?(full(file)) }
           unless changed.empty?
             @err.puts "the project was not changed: #{changed.map { |file| shown(file) }.join(', ')} changed after this command " \
                       'read it. Nothing was written: run the command again'
@@ -175,7 +187,7 @@ module ApiRecipes
           # As this run left it, after a change made when git had it committed.
           return true if @written.key?(file) && File.read(full(file)) == @written[file]
 
-          Migration.as_committed?(file) { |*arguments| git(*arguments) }
+          Migration.as_committed?(file, full(file)) { |*arguments| git(*arguments) }
         end
 
         def git_reason(file)

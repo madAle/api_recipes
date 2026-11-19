@@ -62,11 +62,24 @@ module ApiRecipes
             names << as.unescaped.to_sym if as.is_a?(Prism::SymbolNode)
           end
           scope = Scope.new(names: names.uniq, holders: [])
-          each(tree) do |node, _|
-            holder = node.is_a?(Prism::LocalVariableWriteNode) || node.is_a?(Prism::InstanceVariableWriteNode)
-            scope.holders << node.name if holder && api?(node.value, scope)
+          # A variable or a method that gives an api can give another one:
+          # twice through the file finds those.
+          2.times do
+            each(tree) do |node, _|
+              scope.holders << node.name if HOLDER.match?(node.class.name) && api?(node.value, scope)
+              scope.names << node.name if node.is_a?(Prism::DefNode) && api?(returned(node), scope)
+            end
           end
           scope
+        end
+
+        # What assigns a variable: =, ||=, &&= and the others.
+        HOLDER = /::(Local|Instance|Class|Global)Variable(Or|And|Operator)?WriteNode\z/
+
+        # What a method returns: the last statement of its body.
+        def self.returned(definition)
+          body = definition.body
+          body.is_a?(Prism::StatementsNode) ? body.body.last : body
         end
 
         # Whether node gives an api, or a part of one: ApiRecipes, a call of

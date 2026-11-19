@@ -119,6 +119,19 @@ describe 'A variable that is used and not declared' do
       expect(klass.svc.ping.url.to_s).to eq('https://acme.example.test/ping')
     end
 
+    it 'checks the variables against the configuration it read once, also when a configure runs meanwhile' do
+      configured = ApiRecipes::Internals::Registry.current
+      configure_test_apis(other: { host: 'other.example.test', endpoints: { ping: nil } })
+      without = ApiRecipes::Internals::Registry.current
+      allow(ApiRecipes::Internals::Registry).to receive(:current).and_return(configured, without)
+      expect do
+        Class.new do
+          include ApiRecipes
+          api :svc, variables: { version: 'v2' }
+        end
+      end.not_to raise_error
+    end
+
     it 'still refuses, when api is called, a value for a name that neither the api nor the options use' do
       expect do
         Class.new do

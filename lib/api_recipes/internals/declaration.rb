@@ -40,13 +40,14 @@ module ApiRecipes
           options = options.except(*Registry::VALUE_KEYS)
           level = Registry.level_from(given, api_name.to_s)
           variables = level.variables
-          global = Registry.current.definitions[api_name]
+          registry = Registry.current
+          global = registry.definitions[api_name]
           auth = global && global.auth
           errors = Compiler.check_options(options, :api, credential_param: auth && auth[:type] == :query ? auth[:name] : nil)
           raise ConfigurationError.new(errors) unless errors.empty?
 
           declaration = new(klass, api_name, Compiler.frozen_copy(options), variables, level.credential)
-          declaration.check_variables if global
+          declaration.check_variables(registry) if global
           declared = klass.instance_variable_get(IVAR)
           klass.instance_variable_set(IVAR, (declared.is_a?(Hash) ? declared : {}).merge(api_name => declaration).freeze)
           klass.define_method(method_name) { declaration.api(self) }
@@ -140,8 +141,9 @@ module ApiRecipes
       # application is configured already; else the first use reports it.
       # The tree is not kept: the first use compiles it from the registry
       # current then.
-      def check_variables
-        registry = Registry.current
+      # registry: the one that `api` read, so that a configure that runs
+      # meanwhile does not change what the values are checked against.
+      def check_variables(registry)
         definition = @options.empty? ? registry.definitions[@name] : Compiler.compile(@name, own_config(registry.configs[@name]))
         problems = Compiler.unknown_variables(@variables, definition, @name.to_s)
         raise ConfigurationError.new(problems) unless problems.empty?

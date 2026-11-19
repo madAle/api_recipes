@@ -380,7 +380,7 @@ module ApiRecipes
       def change(key, title, items, file, text, block, added)
         texts = items.group_by { |item| item[:file] }.to_h { |path, list| [path, [path == file ? text : read_ruby(path), list.map { |item| item[:line] }]] }
         texts[file] ||= [text, []]
-        return nil unless texts.all? { |path, (content, lines)| content && lines.all? { |number| movable?(content, number, path == file ? block : nil) } }
+        return nil unless texts.all? { |path, (content, lines)| content && lines.all? { |number| movable?(content, number, path == file ? block : nil, lines) } }
 
         written = texts.to_h do |path, (content, lines)|
           kept = content.lines.each_with_index.reject { |_, index| lines.include?(index + 1) }
@@ -398,9 +398,11 @@ module ApiRecipes
       # Whether line number of text holds one assignment of a value given
       # when the application starts, and nothing else, whose value the block
       # of configure would give the same: it reads no variable and no method
-      # of the file, and, in the file of the block, no other code comes
-      # between the block and the line, as a require that prepares it.
-      def movable?(text, number, block)
+      # of the file, and no other code that may prepare it
+      # runs before it: in the file of the block, none between the block and
+      # the line; in another file, which runs at another time, none at all.
+      # moved: the lines of the file that the change takes out.
+      def movable?(text, number, block, moved)
         tree = Code.tree(text)
         return false unless tree
 
@@ -408,21 +410,30 @@ module ApiRecipes
         here = statements.select { |node| node.location.start_line == number && node.location.end_line == number }
         return false unless here.size == 1 && text.lines[number - 1].strip == here.first.slice
 
-        node = here.first
-        return false unless node.is_a?(Prism::CallNode) && MOVED.include?(node.name) && node.arguments&.arguments&.size == 1
-        return false unless Code.nodes(node.arguments) { |one| local_value?(one) }.empty?
-        return true unless block && number > block.last
+        value = assigned(here.first)
+        return false unless value && Code.nodes(value) { |one| local_value?(one) }.empty?
 
-        startup = @startup.select { |item| item[:line] > block.last }.map { |item| item[:line] }
-        tree.statements.body.none? do |other|
-          other.location.start_line > block.last && other.location.start_line < number && !startup.include?(other.location.start_line)
+        others = tree.statements.body.reject { |other| moved.include?(other.location.start_line) }
+        return others.empty? unless block
+        return true unless number > block.last
+
+        others.none? { |other| other.location.start_line > block.last && other.location.start_line < number }
+      end
+
+      # The value that node gives to one of the options moved, or nil.
+      def assigned(node)
+        if node.is_a?(Prism::CallNode) && MOVED.include?(node.name) && node.arguments&.arguments&.size == 1
+          node.arguments.arguments.first
+        elsif node.is_a?(Prism::CallOrWriteNode) && MOVED.include?(node.write_name)
+          node.value
         end
       end
 
       # A value that only the place where it is written has.
       def local_value?(node)
         case node
-        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::SelfNode then true
+        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::SelfNode,
+             Prism::SourceFileNode, Prism::SourceLineNode then true
         when Prism::CallNode then node.receiver.nil? && !%i[[] !].include?(node.name)
         else false
         end
@@ -642,7 +653,10 @@ module ApiRecipes
         inside = @startup.select { |item| block && item[:file] == file && item[:line].between?(block.first, block.last) }
         added = @startup.select { |item| item[:api].nil? }.first(1).map { |item| "#{config}.print_urls = #{item[:code]}" }
         added = [] if block&.line_of(:print_urls)
-        entries = entries_of(@startup.select { |item| item[:api] })
+        # config.values takes one credential for an api: given both, which
+        # one the application uses is left to the person.
+        both = @startup.select { |item| item[:api] }.group_by { |item| item[:api] }.select { |_, list| list.map { |item| item[:key] }.uniq.size > 1 }
+        entries = entries_of(@startup.select { |item| item[:api] && !both.key?(item[:api]) })
         merged = block && block.line_of(:values)
         added += ["#{config}.values = {", *entries.map { |entry| "  #{entry}" }, '}'] unless entries.empty? || merged
 
@@ -659,8 +673,13 @@ module ApiRecipes
           screen.line("and add to the Hash that #{config}.values is given at line #{merged}:")
           screen.code(entries)
         end
-        outside = (@startup - inside).map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }
+        outside = (@startup - inside - both.values.flatten).map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }
         screen.line("Then remove the lines that gave these values: #{outside.join(', ')}") unless outside.empty?
+        both.each do |api, list|
+          screen.line("#{Recipes::Summary.shown(api, 100)} is given both authorization and basic_auth " \
+                      "(#{list.map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }.join(', ')}): config.values takes one of them, " \
+                      'add the one the application uses')
+        end
         true
       end
 

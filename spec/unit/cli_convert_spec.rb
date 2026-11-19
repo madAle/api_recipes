@@ -272,6 +272,7 @@ describe 'api_recipes convert' do
           default_headers:
             X-Template: 'a {id} b'
             X-Shape: '{shape}'
+            X-Plain: 'a \\{word} b'
           default_params:
             filter: '{status}'
           endpoints:
@@ -286,9 +287,10 @@ describe 'api_recipes convert' do
       expect(code).to eq(0)
       expect(recipe['base_url']).to eq('v1/\\{draft}')
       expect(recipe['endpoints']['items']['path']).to eq('/items/\\{id}/:item_id')
-      expect(recipe['default_headers']).to eq('X-Template' => '{x_template}', 'X-Shape' => '{x_shape}')
+      expect(recipe['default_headers']).to eq('X-Template' => '{x_template}', 'X-Shape' => '{x_shape}', 'X-Plain' => '{x_plain}')
       expect(recipe['default_params']).to eq('filter' => '{filter}')
       expect(recipe['variables']).to eq('x_template' => { 'default' => 'a {id} b' }, 'x_shape' => { 'default' => '{shape}' },
+                                        'x_plain' => { 'default' => 'a \\{word} b' },
                                         'filter' => { 'default' => '{status}' })
       expect(out).to include('base_url: {draft} was text in 2.x and would be a variable: it is written \\{draft}',
                              'default_headers.X-Template: a word in braces was text in 2.x and would be a variable: ' \
@@ -302,7 +304,20 @@ describe 'api_recipes convert' do
       configure_recipes(File.join(@dir, 'billing.recipe.yml'))
       ApiRecipes.billing.items(7).run
       expect(WebMock).to have_requested(:get, 'https://billing.example.test/v1/%7Bdraft%7D/items/%7Bid%7D/7?filter=%7Bstatus%7D')
-        .with(headers: { 'X-Template' => 'a {id} b', 'X-Shape' => '{shape}' })
+        .with(headers: { 'X-Template' => 'a {id} b', 'X-Shape' => '{shape}', 'X-Plain' => 'a \\{word} b' })
+    end
+
+    it 'never gives a header named like a credential the variable, and the default, of another header with the same text' do
+      [%w[X-Trace X-Api-Key], %w[X-Api-Key X-Trace]].each do |first, second|
+        FileUtils.rm_f('billing.recipe.yml')
+        write('billing.yml', "billing:\n  host: billing.example.test\n  default_headers:\n    #{first}: '{abc}'\n    #{second}: '{abc}'\n  endpoints:\n    items:\n")
+        expect(run('convert', '--to', '.', 'billing.yml').first).to eq(0)
+        key = recipe['default_headers']['X-Api-Key'][/\A\{(\w+)\}\z/, 1]
+        trace = recipe['default_headers']['X-Trace'][/\A\{(\w+)\}\z/, 1]
+        expect(key).not_to eq(trace)
+        expect(recipe['variables'] || {}).not_to include(key)
+        expect(recipe['variables'][trace]).to eq('default' => '{abc}')
+      end
     end
 
     it 'is a variable when the file declares it' do

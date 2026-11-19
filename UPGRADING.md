@@ -626,10 +626,13 @@ Make this change? [y/N]
   nothing. A file whose lines end with CR LF is left to you.
 - A line is taken out only when it is the assignment and nothing else, and
   the value reads nothing that only that place has: a local variable, an
-  instance variable, a method of the file. A value given after other code
-  that may prepare it, as a `require`, two credentials for one API, a block of
-  `configure` that the command cannot read whole or that already assigns the
-  value, are left to you, with the code to paste.
+  instance variable, a method of the file, `__FILE__`. A value given after
+  other code that may prepare it, as a `require` or `Dotenv.load`, is left to
+  you: in the file of the block when that code comes between the block and the
+  line, in another file when that file holds any other code, because it runs
+  at another time. So are two credentials for one API, for which the code to
+  paste gives neither and says to choose, and a block of `configure` that the
+  command cannot read whole or that already assigns the value.
 - A rescue is changed only in a file that names the gem. A change you refuse
   stays among the findings, with its code to paste. A `rescue` that comes
   after one that catches the errors of the gem first (`ApiRecipes::Error`,

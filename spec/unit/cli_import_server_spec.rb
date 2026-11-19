@@ -79,6 +79,12 @@ describe ApiRecipes::CLI::Import::Server do
     expect(result.warnings).to contain_exactly(match(/relative: the host is the variable \{api_host\}/))
   end
 
+  it 'names the variable of the host with a name that the address does not use' do
+    result = read(server('/{host}/{api_host}', 'host' => { 'default' => 'eu' }, 'api_host' => { 'default' => 'x' }))
+    expect(result.options[:host]).to eq('{api_host_2}')
+    expect(result.warnings).to contain_exactly(match(/the host is the variable \{api_host_2\}/))
+  end
+
   it 'makes the host a variable when the description names no server, and says so' do
     result = read(:absent)
     expect(result.options).to eq(host: '{host}')

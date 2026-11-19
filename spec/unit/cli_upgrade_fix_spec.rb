@@ -138,6 +138,13 @@ describe 'api_recipes upgrade, the changes it offers' do
     expect(upgrade("y\n")[1]).not_to include('Make this change?')
   end
 
+  it 'moves a value given with ||= at the start, as it does one given with =' do
+    project(files.merge('config/initializers/billing.rb' => "ApiRecipes.billing.authorization ||= ENV['BILLING_TOKEN']\n"))
+    upgrade("n\ny\n")
+    expect(File.read('config/initializers/api_recipes.rb')).to include("billing: { authorization: ENV['BILLING_TOKEN'] }")
+    expect(File.read('config/initializers/billing.rb')).to eq('')
+  end
+
   describe 'what it leaves to the person, with the code to paste' do
     def offered(startup, initializer_text = initializer)
       project('Gemfile' => "gem 'api_recipes'\n", 'config/initializers/api_recipes.rb' => "#{initializer_text}#{startup}")
@@ -161,9 +168,25 @@ describe 'api_recipes upgrade, the changes it offers' do
       expect(offered("require 'dotenv/load'\nApiRecipes.github.authorization = ENV['GITHUB_TOKEN']\n")).not_to include('Make this change?')
     end
 
-    it 'two credentials for one api, which configure refuses together' do
+    it 'two credentials for one api, which configure refuses together: the code to paste does not give both either' do
       out = offered("ApiRecipes.github.authorization = ENV['A']\nApiRecipes.github.basic_auth = [ENV['U'], ENV['P']]\n")
-      expect(out).not_to include('Give the credentials of the application')
+      expect(out).not_to include('Give the credentials of the application', "basic_auth: [ENV['U'], ENV['P']]")
+      expect(out).to include('github is given both authorization and basic_auth (config/initializers/api_recipes.rb:4, ' \
+                             'config/initializers/api_recipes.rb:5): config.values takes one of them, add the one the application uses')
+    end
+
+    it 'a value given in another file that does more than give it: the block would read it before that file runs' do
+      project('Gemfile' => "gem 'api_recipes'\n", 'config/initializers/api_recipes.rb' => initializer,
+              'config/initializers/zz_billing.rb' => "Dotenv.load('.env.billing')\nApiRecipes.billing.authorization = ENV['BILLING_TOKEN']\n")
+      expect(upgrade("y\ny\n")[1]).not_to include('Make this change?')
+      expect(git('status', '--porcelain')).to eq('')
+    end
+
+    it 'a value that reads where its file is: __FILE__ is another file in the block' do
+      project('Gemfile' => "gem 'api_recipes'\n", 'config/initializers/api_recipes.rb' => initializer,
+              'config/initializers/zz_token.rb' => "ApiRecipes.shop.authorization = File.read(File.join(File.dirname(__FILE__), 'token'))\n")
+      expect(upgrade("y\ny\n")[1]).not_to include('Make this change?')
+      expect(git('status', '--porcelain')).to eq('')
     end
 
     it 'apis_files_paths given with a heredoc, whose lines the change would leave as code' do

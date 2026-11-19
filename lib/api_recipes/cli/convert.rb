@@ -340,7 +340,7 @@ module ApiRecipes
           end
           if secret
             [name, credential(content, here, name)]
-          elsif text_in_braces?(content)
+          elsif text_in_braces?(content, escaped: false)
             [name, braces_kept(content, here, name)]
           else
             [name, with_variables(content, here, name)]
@@ -349,11 +349,14 @@ module ApiRecipes
       end
 
       # A word in braces that the file does not declare as a variable: 2.x
-      # sent it as text, and 3.0 would read it as a variable.
+      # sent it as text, and 3.0 would read it as a variable. In a path and
+      # in the base_url a backslash before the brace already keeps it text;
+      # a header and a parameter have no such escape.
       TEXT_IN_BRACES = /(?<!\\)\{([A-Za-z_]\w*)\}/
 
-      def text_in_braces?(value)
-        value.is_a?(String) && value.scan(TEXT_IN_BRACES).flatten.any? { |name| @origins[name] != :declared }
+      def text_in_braces?(value, escaped: true)
+        pattern = escaped ? TEXT_IN_BRACES : Internals::Template::VARIABLE
+        value.is_a?(String) && value.scan(pattern).flatten.any? { |name| @origins[name] != :declared }
       end
 
       # In a path and in the base_url a brace is kept as text with a backslash.
@@ -376,7 +379,9 @@ module ApiRecipes
           refuse("#{shown(where)}: holds a word in braces, which was text in 2.x, and an ERB tag: a recipe cannot keep both " \
                  'as they were; write the value by hand')
         end
-        variable = declare(variable_name(name), content.inspect, nil, content)
+        # Its own kind of code: a credential with the same text never shares
+        # this variable, nor its default.
+        variable = declare(variable_name(name), [:text, content], nil, content)
         @changes << "#{shown(where)}: a word in braces was text in 2.x and would be a variable: the value is the default of " \
                     "the variable {#{variable}}"
         "{#{variable}}"
