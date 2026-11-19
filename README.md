@@ -1522,7 +1522,7 @@ body, a credential or a query string: the body is on `error.response`.
 | `ApiRecipes::CredentialOriginMismatch` | a request would send a credential to an origin other than the one it was set for |
 | `ApiRecipes::InvalidUrl` | the address that would be contacted is not the one that was validated |
 | `ApiRecipes::ConfigurationError` | the configuration or the options of `with` or `follow` are not valid; has `errors`, the list of problems |
-| `ApiRecipes::RecipeFileError` | a configuration file cannot be read; a kind of `ConfigurationError` that names the file |
+| `ApiRecipes::RecipeFileError` | a recipe file cannot be read; a kind of `ConfigurationError` that names the file |
 | `ApiRecipes::ApiNameClashError` | an API is declared twice in a class hierarchy, or `api :name` names a method the class already has |
 | `ApiRecipes::ApiConfigIsNotAnHash` | the second argument of `api` is not a Hash |
 | `HTTP::TimeoutError`, `HTTP::ConnectionError` | http.rb network errors |
@@ -2001,8 +2001,8 @@ What ApiRecipes does:
   `Marshal.dump` and `YAML.dump`, and its JSON is the one of `to_h`.
 - **`fill`** calls only public writers and skips keys that are not plain
   attribute names.
-- **Configuration files** are read with `YAML.safe_load`, and the options are
-  validated when they are loaded.
+- **The configuration** is validated when it is loaded, whether it comes
+  from a recipe or from `apis_configs`.
 
 What stays with your application:
 

@@ -96,11 +96,9 @@ configuration in place. Four things are worth knowing:
   `'{template}'`. Braces around anything else, such as a JSON value, are sent
   as they are. In a path, if you meant a value that changes at every call,
   write a placeholder, `/items/:id`.
-- A file that is missing, empty, not valid YAML or not valid UTF-8 raises
-  `ApiRecipes::RecipeFileError`, which names the file. Files are read with
-  `YAML.safe_load`: plain values, symbols and aliases are accepted, and nothing
-  else. A file called `something.recipe.yml` is refused: it is a portable
-  recipe, and goes in `recipes_paths`.
+- A recipe that is missing, not valid YAML, not valid UTF-8 or not a recipe
+  raises `ApiRecipes::RecipeFileError`, which names the file. A recipe is
+  plain YAML: anchors, aliases, tags and the merge key are refused.
 
 ### An API is described by a portable recipe
 
@@ -480,7 +478,8 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   `definition` hide the values of `default_headers`.
 - An API, an endpoint, a response and a definition refuse `Marshal.dump` and
   `YAML.dump`; the first three refuse JSON too.
-- Configuration files are read with `YAML.safe_load`.
+- A recipe is read as plain YAML, without anchors, aliases or tags, and is
+  never evaluated with ERB.
 
 What stays with your application:
 
@@ -489,7 +488,9 @@ What stays with your application:
   host). Check it against a list of hosts you know.
 - `response.original_response` is the raw http.rb response and gives access to the
   request that was sent, headers included. Do not log or serialize it.
-- ERB in a configuration file runs code: load only files you trust.
+- The gem evaluates no ERB. `api_recipes upgrade --erb` and
+  `api_recipes routes --erb` do, on the files of a 2.x project that you name:
+  that runs the code in them.
 
 See [Security in the README](README.md#security) for the same list in its place.
 
