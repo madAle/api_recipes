@@ -137,7 +137,7 @@ describe 'api_recipes import' do
   it 'says so when nothing was imported' do
     code, out, err = run_cli('import', small, '--only', 'nothing*')
     expect(code).to eq(0)
-    expect(YAML.safe_load(out)).to eq('github' => { 'host' => 'api.github.com' })
+    expect(YAML.safe_load(out)).to eq('github' => { 'recipe' => { 'name' => 'github', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.github.com' })
     expect(err).to match(/warning: no operation was imported/)
   end
 
@@ -150,7 +150,7 @@ describe 'api_recipes import' do
               "paths:\n  /a: {get: *ok}\n  /b: {get: *ok, post: *ok}\n"
     with_description(aliased) do |path|
       code, _, err = run_cli('import', path)
-      expect([code, err]).to eq([0, "warning: the description names no server: set host in the recipe\n" \
+      expect([code, err]).to eq([0, "warning: the description names no server: the host is the variable {host}, to give with config.values\n" \
                                     "3 operations imported from 2 paths, 1 warning\n"])
     end
   end
@@ -171,6 +171,15 @@ describe 'api_recipes import' do
         expect([code, out]).to eq([0, ''])
         expect(YAML.safe_load(File.read(target)).keys).to eq(['github'])
         expect(err).to match(/7 operations imported/)
+      end
+    end
+
+    it 'refuses a file called as a recipe of another name, which a recipe could not be read from' do
+      Dir.mktmpdir do |dir|
+        target = File.join(dir, 'api.recipe.yml')
+        code, out, err = run_cli('import', small, '--name', 'github', '--output', target)
+        expect([code, out, File.exist?(target)]).to eq([2, '', false])
+        expect(err).to include("--output: a recipe called github is read from a file called github.recipe.yml, not api.recipe.yml\n")
       end
     end
 

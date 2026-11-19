@@ -15,8 +15,6 @@ module ApiRecipes
         WRITER = 'authorization= and basic_auth= now work on an object only: on ApiRecipes.name, on a class and on a module ' \
                  'they raise. Give the credential to config.values, to `api :name, authorization: ...`, or to with(...) for one request'
         NOT_TEXT = 'a credential must be a String: a Symbol or a number raises InvalidCredential, convert it with to_s'
-        SOURCES = 'apis_configs assigned after apis_files_paths no longer discards the files: the two sources add up. ' \
-                  'Take out the files that must not be loaded'
         RUN_VALUE = 'run with a block now returns the Response, not what the block returns: take the value inside the block, or from the response'
         RESPONSE = {
           request: 'request was removed from the response, because the request holds the credentials: read uri, or original_response',
@@ -24,25 +22,76 @@ module ApiRecipes
           respond_to?: 'respond_to? on a response now tells the truth: true for the methods the response forwards, false for the others'
         }.freeze
 
+        # What gives an api in a file: the names an api is called by, and
+        # the variables that hold one.
+        Scope = Data.define(:names, :holders)
+
         # uses_gem: whether the code names ApiRecipes or calls an api. The
-        # rules that also match other code are applied only then.
+        # rules that also match other code are applied only then, and only
+        # to what an api gives.
         # reported: the lines where a rule on lines already found a writer.
-        def self.findings(text, uses_gem:, reported: [])
+        # apis: the names the apis of the project are called by; those that
+        # the file declares with `api :name` are added.
+        def self.findings(text, uses_gem:, reported: [], apis: [])
           tree = Code.tree(text)
           return [] unless tree
 
-          found = sources(text)
-          responses = uses_gem ? responses_of(tree) : []
+          found = []
+          scope = uses_gem ? scope_of(tree, apis) : nil
+          responses = uses_gem ? responses_of(tree, scope) : []
           each(tree) do |node, parents|
             constants(node, found) if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
             next unless uses_gem && node.is_a?(Prism::CallNode)
 
             declaration(node, found)
-            writer(node, found, reported)
-            block_value(node, parents, found)
+            writer(node, found, reported, scope)
+            block_value(node, parents, found, scope)
             response(node, responses, found)
           end
           found.uniq.sort_by(&:line)
+        end
+
+        def self.scope_of(tree, apis)
+          names = apis.map(&:to_sym)
+          each(tree) do |node, _|
+            next unless node.is_a?(Prism::CallNode) && node.name == :api && node.receiver.nil?
+
+            first = node.arguments&.arguments&.first
+            names << first.unescaped.to_sym if first.is_a?(Prism::SymbolNode)
+            as = keywords(node).to_h['as']
+            names << as.unescaped.to_sym if as.is_a?(Prism::SymbolNode)
+          end
+          scope = Scope.new(names: names.uniq, holders: [])
+          # A variable or a method that gives an api can give another one:
+          # twice through the file finds those.
+          2.times do
+            each(tree) do |node, _|
+              scope.holders << node.name if HOLDER.match?(node.class.name) && api?(node.value, scope)
+              scope.names << node.name if node.is_a?(Prism::DefNode) && api?(returned(node), scope)
+            end
+          end
+          scope
+        end
+
+        # What assigns a variable: =, ||=, &&= and the others.
+        HOLDER = /::(Local|Instance|Class|Global)Variable(Or|And|Operator)?WriteNode\z/
+
+        # What a method returns: the last statement of its body.
+        def self.returned(definition)
+          body = definition.body
+          body.is_a?(Prism::StatementsNode) ? body.body.last : body
+        end
+
+        # Whether node gives an api, or a part of one: ApiRecipes, a call of
+        # an api by its name, or a variable that holds one.
+        def self.api?(node, scope)
+          case node
+          when Prism::CallNode
+            scope.names.include?(node.name) || (node.receiver ? api?(node.receiver, scope) : false)
+          when Prism::ConstantReadNode, Prism::ConstantPathNode then node.slice.delete_prefix('::') == 'ApiRecipes'
+          when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode then scope.holders.include?(node.name)
+          else false
+          end
         end
 
         # Every node of the tree with the nodes that contain it, the nearest last.
@@ -55,13 +104,6 @@ module ApiRecipes
         end
 
         def self.at(node) = node.location.start_line
-
-        def self.sources(text)
-          block = Code::ConfigureBlock.in(text)
-          files = block&.line_of(:apis_files_paths)
-          configs = block&.line_of(:apis_configs)
-          files && configs && files < configs ? [Found.new(configs, :check, SOURCES)] : []
-        end
 
         # The keys of the keywords of a call, when they are written as names.
         def self.keywords(call)
@@ -107,7 +149,9 @@ module ApiRecipes
         # A credential assigned with a writer: where a rule on lines did not
         # see it (in the body of a class, through a variable, over two
         # lines, with send), and a value that is not text.
-        def self.writer(call, found, reported)
+        def self.writer(call, found, reported, scope)
+          return unless api?(call.receiver, scope)
+
           if WRITERS.include?(call.name)
             value = call.arguments&.arguments&.first
             found << Found.new(at(call), :breaks, NOT_TEXT) if call.name == :authorization= && value && not_text?(value)
@@ -120,8 +164,8 @@ module ApiRecipes
 
         # run with a block, where what it returns is assigned, returned,
         # passed on or called.
-        def self.block_value(call, parents, found)
-          return unless call.name == :run && call.block.is_a?(Prism::BlockNode)
+        def self.block_value(call, parents, found, scope)
+          return unless call.name == :run && call.block.is_a?(Prism::BlockNode) && api?(call.receiver, scope)
 
           parent = parents.last
           used = parent.class.name.end_with?('WriteNode') || parent.is_a?(Prism::ArgumentsNode) ||
@@ -131,12 +175,12 @@ module ApiRecipes
 
         # The names of the variables that hold a response: what run returned,
         # and what run passes to its block.
-        def self.responses_of(tree)
+        def self.responses_of(tree, scope)
           names = []
           each(tree) do |node, _|
-            if (node.is_a?(Prism::LocalVariableWriteNode) || node.is_a?(Prism::InstanceVariableWriteNode)) && run?(node.value)
+            if (node.is_a?(Prism::LocalVariableWriteNode) || node.is_a?(Prism::InstanceVariableWriteNode)) && run?(node.value, scope)
               names << node.name
-            elsif run?(node) && node.block.is_a?(Prism::BlockNode)
+            elsif run?(node, scope) && node.block.is_a?(Prism::BlockNode)
               inner = node.block.parameters
               first = inner.is_a?(Prism::BlockParametersNode) ? inner.parameters&.requireds&.first : nil
               names << first.name if first.respond_to?(:name)
@@ -145,7 +189,7 @@ module ApiRecipes
           names.uniq
         end
 
-        def self.run?(node) = node.is_a?(Prism::CallNode) && node.name == :run
+        def self.run?(node, scope) = node.is_a?(Prism::CallNode) && node.name == :run && api?(node.receiver, scope)
 
         def self.response(call, responses, found)
           holder = call.receiver

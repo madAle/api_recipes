@@ -1,7 +1,7 @@
 require 'api_recipes'
 require 'yaml'
 
-# Take a look at examples/config/github.yml.erb  for a full list of available options
+# Take a look at examples/config/github.recipe.yml  for a full list of available options
 
 # Setup Auth. This will set/replace the HTTP 'Authorization' header with the
 # provided value
@@ -12,7 +12,7 @@ require 'yaml'
 # e.g.  GITHUB_OAUTH_TOKEN=your_token bundle exec ruby examples/authorization.rb
 # The credential of the whole application is given to configure, once
 ApiRecipes.configure do |config|
-  config.apis_files_paths = ['examples/config/github.yml.erb']
+  config.recipes_paths = ['examples/config/github.recipe.yml']
   config.values = { github: { authorization: "token #{ENV.fetch('GITHUB_OAUTH_TOKEN')}" } }
 end
 

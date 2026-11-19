@@ -53,7 +53,8 @@ describe 'api_recipes upgrade, in a project' do
                            "config/apis/billing.yml: [config] billing: unknown option 'hots'")
     expect(out).not_to include('database.yml')
     expect(out).to include('Checked 2 Ruby files', 'Checked 1 configuration file: config/apis/billing.yml')
-    expect(out).to match(/^3 findings$/)
+    expect(out).to include('config/apis/billing.yml: [breaks] describes an api in a file of the project, which 3.0 no longer loads')
+    expect(out).to match(/^4 findings$/)
   end
 
   it 'leaves out what is not the code of the project' do
@@ -97,11 +98,12 @@ describe 'api_recipes upgrade, in a project' do
     expect(out).not_to match(/^Nothing to change$/)
   end
 
-  it 'says "Nothing to change" when it checked code and configuration and found nothing' do
+  it 'says that a description of the project has to become a recipe, also when nothing else has to change' do
     project('app/a.rb' => "x = 1\n", 'config/apis/billing.yml' => billing)
     code, out, = run('upgrade')
-    expect(code).to eq(0)
-    expect(out).to match(/^Nothing to change$/)
+    expect(code).to eq(1)
+    expect(out).to include('config/apis/billing.yml: [breaks] describes an api in a file of the project', '1. Run `api_recipes convert`')
+    expect(out).to match(/^1 finding$/)
   end
 
   describe 'the checks that also match code that has nothing to do with the gem' do
@@ -217,7 +219,7 @@ describe 'api_recipes upgrade, in a project' do
               'spec/fixtures/broken.yml' => billing.sub('host:', 'hots:'),
               'app/client.rb' => "class Client\n  include ApiRecipes\n  api :github\nend\n")
       code, out, = run('upgrade')
-      expect(code).to eq(0)
+      expect(code).to eq(1)
       expect(out).to include('Checked 1 configuration file: config/apis/flow.yml')
       expect(out).not_to include('[config]', 'declares the api')
     end
@@ -245,7 +247,7 @@ describe 'api_recipes upgrade, in a project' do
               'app/url.rb' => "URL = 'https://github.com/rails/rails'\n" + rescued,
               'app/defaults.rb' => "defaults.merge(a: 1)\n" + rescued)
       code, out, = run('upgrade')
-      expect(code).to eq(0)
+      expect(code).to eq(1)
       expect(out).to include('Checked 3 Ruby files, 0 of them use api_recipes')
     end
 

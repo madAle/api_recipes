@@ -30,10 +30,13 @@ module RecipeHelpers
 
   # Writes text as the recipe called name in dir and returns the path. With
   # lock: true the recipes.lock of dir gets its entry.
-  def write_recipe(dir, name = 'shop', text = recipe_text(name), lock: true, version: '1.0.0')
+  # repository: true for a recipe that the lock ties to a repository, as one
+  # installed from a cookbook: only such a recipe is compared with the lock.
+  def write_recipe(dir, name = 'shop', text = recipe_text(name), lock: true, version: '1.0.0', repository: false)
     path = File.join(dir, "#{name}.recipe.yml")
     File.write(path, text)
-    add_to_lock(dir, name, text, version: version) if lock
+    from = repository ? { source: 'https://example.test/cookbook', commit: 'a' * 40 } : {}
+    add_to_lock(dir, name, text, version: version, **from) if lock
     path
   end
 

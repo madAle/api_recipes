@@ -101,7 +101,7 @@ describe 'The commands that read the files of a project' do
 
   # On a terminal `upgrade` offers to make the changes it is sure of.
   describe 'upgrade, when it offers to change the project' do
-    let(:initializer) { "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n" }
+    let(:initializer) { "ApiRecipes.configure do |config|\n  config.log_level = :info\nend\n" }
 
     def git(*arguments)
       out, status = Open3.capture2e('git', '-c', 'user.name=spec', '-c', 'user.email=spec@example.test', *arguments)
@@ -112,7 +112,6 @@ describe 'The commands that read the files of a project' do
 
     def project(startup = "ApiRecipes.print_urls = true\n")
       write('Gemfile', "gem 'api_recipes'\n")
-      write('config/apis/billing.yml', api)
       write('config/initializers/api_recipes.rb', initializer)
       write('config/initializers/startup.rb', startup)
       git('init', '-q', '.')
@@ -120,13 +119,22 @@ describe 'The commands that read the files of a project' do
       git('commit', '-q', '-m', 'start')
     end
 
-    # The answers are typed on a terminal; nil for an input that is not one.
-    def upgrade(answers, *arguments)
+    # The answers are typed on a terminal, where the results are shown; nil
+    # for an input that is not one. typed: what happens as each answer is
+    # typed.
+    def upgrade(answers, *arguments, typed: nil)
       out = StringIO.new
       input = StringIO.new(answers.to_s)
-      input.define_singleton_method(:tty?) { true } if answers
+      if answers
+        [input, out].each { |io| io.define_singleton_method(:tty?) { true } }
+        input.define_singleton_method(:gets) { typed&.call || super() } if typed
+      end
+      saved = ENV.fetch('NO_COLOR', nil)
+      ENV['NO_COLOR'] = '1'
       ApiRecipes::CLI.run(['upgrade', *arguments], out: out, err: out, input: input)
       out.string
+    ensure
+      saved ? ENV['NO_COLOR'] = saved : ENV.delete('NO_COLOR')
     end
 
     def snapshot = Dir.glob('**/*').to_h { |f| [f, File.file?(f) ? File.read(f) : nil] }
@@ -137,6 +145,12 @@ describe 'The commands that read the files of a project' do
       expect(upgrade(nil)).not_to include('Make this change?')
       out = StringIO.new
       ApiRecipes::CLI.run(['upgrade'], out: out, err: out, input: StringIO.new("y\nyes\n"))
+      expect(out.string).not_to include('Make this change?')
+      # Typed on a terminal, but the results go to a file, where nobody reads the question.
+      typed = StringIO.new("y\nyes\n")
+      typed.define_singleton_method(:tty?) { true }
+      out = StringIO.new
+      ApiRecipes::CLI.run(['upgrade'], out: out, err: out, input: typed)
       expect(out.string).not_to include('Make this change?')
       expect(upgrade("n\n")).to include('Make this change?')
       expect(snapshot).to eq(before)
@@ -150,6 +164,26 @@ describe 'The commands that read the files of a project' do
       out = upgrade("y\n", '--no-code')
       expect(out).not_to include('Make this change?', 'written-secret')
       expect(snapshot).to eq(before)
+    end
+
+    it 'moves an api to a recipe under the same rules: only after a yes on a terminal, and never with --no-code' do
+      project
+      write('config/apis/billing.yml', api)
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'old')
+      before = snapshot
+      [upgrade(nil), upgrade("y\n", '--no-code')].each { |out| expect(out).not_to include('Make this change?') }
+      out = StringIO.new
+      ApiRecipes::CLI.run(['upgrade'], out: out, err: out, input: StringIO.new("y\ny\ny\n"))
+      expect(out.string).not_to include('Make this change?')
+      expect(upgrade("n\nn\n")).to include('Move the api billing to a portable recipe', 'Make this change?',
+                                           'config/api_recipes/billing.recipe.yml (new file)', 'config/api_recipes/recipes.lock (new file)',
+                                           'config/apis/billing.yml (deleted)')
+      expect(snapshot).to eq(before)
+      upgrade("y\nn\n")
+      expect(File.exist?('config/api_recipes/billing.recipe.yml')).to be(true)
+      expect(File.exist?('config/apis/billing.yml')).to be(false)
     end
 
     it 'changes only a file that git has committed as it is now: not one with changes, one git does not know, or outside git' do
@@ -205,6 +239,19 @@ describe 'The commands that read the files of a project' do
       expect(File.exist?(marker)).to be(false)
     end
 
+    it 'does not run a filter that git is configured with to compare a file, as status would' do
+      project
+      File.write('.gitattributes', "*.rb filter=spy\n")
+      git('config', 'filter.spy.clean', "sh -c 'touch #{marker}; cat'")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'filter')
+      FileUtils.rm_f(marker)
+      FileUtils.touch('config/initializers/startup.rb', mtime: Time.now + 5)
+      upgrade("y\n")
+      expect(File.read('config/initializers/api_recipes.rb')).to include('config.print_urls = true')
+      expect(File.exist?(marker)).to be(false)
+    end
+
     it 'shows in the diff nothing that the terminal obeys, though the file holds it' do
       project("# \e[2J\e]0;title\a a note\nApiRecipes.print_urls = true\n")
       out = upgrade("n\n")
@@ -216,12 +263,84 @@ describe 'The commands that read the files of a project' do
       project
       before = snapshot
       real = File.method(:write)
+      # The disk fills up after the file was opened, and emptied.
       allow(File).to receive(:write) do |path, *rest|
-        raise Errno::ENOSPC if path.end_with?('api_recipes.rb') && rest.first.include?('print_urls')
+        if path.end_with?('api_recipes.rb') && rest.first.include?('print_urls')
+          real.call(path, '')
+          raise Errno::ENOSPC
+        end
 
         real.call(path, *rest)
       end
       expect(upgrade("y\n")).to include('could not be written (ENOSPC): every file was put back as it was')
+      expect(snapshot).to eq(before)
+    end
+
+    it 'writes no recipe outside the project, through a folder above the recipes that is a symbolic link' do
+      outside = Dir.mktmpdir
+      write('Gemfile', "gem 'api_recipes'\n")
+      write('apis/billing.yml', api)
+      write('lib/setup.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir[File.expand_path('../apis/*.yml', __dir__)]\nend\n")
+      File.symlink(outside, 'config')
+      git('init', '-q', '.')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'start')
+      code, _, err = run_cli('convert')
+      expect(code).to eq(1)
+      expect(err).to include('config/api_recipes is a symbolic link, or is below one')
+      expect(Dir.children(outside)).to eq([])
+      expect(git('status', '--porcelain')).to eq('')
+    ensure
+      FileUtils.remove_entry(outside) if outside
+    end
+
+    it 'writes nothing when a file changed while the question waited: what was saved meanwhile stays' do
+      project
+      saved = lambda do
+        File.write('config/initializers/startup.rb', "ApiRecipes.print_urls = true
+SAVED_MEANWHILE = 1
+")
+        "y\n"
+      end
+      before = snapshot.merge('config/initializers/startup.rb' => "ApiRecipes.print_urls = true\nSAVED_MEANWHILE = 1\n")
+      out = upgrade("y\n", typed: saved)
+      expect(out).to include('config/initializers/startup.rb changed while the question waited: nothing was written')
+      expect(snapshot).to eq(before)
+    end
+
+    it 'does not write over a recipe that appeared while the question waited' do
+      project
+      write('config/apis/billing.yml', api)
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'old')
+      done = false
+      saved = lambda do
+        write('config/api_recipes/billing.recipe.yml', "# written meanwhile\n") unless done
+        done = true
+        nil
+      end
+      out = upgrade("y\nn\n", typed: saved)
+      expect(out).to include('config/api_recipes/billing.recipe.yml changed after this command read it')
+      expect(File.read('config/api_recipes/billing.recipe.yml')).to eq("# written meanwhile\n")
+      expect(File.exist?('config/apis/billing.yml')).to be(true)
+    end
+
+    it 'does not move an api to a recipe when its files changed while the question waited' do
+      project
+      write('config/apis/billing.yml', api)
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['config/apis/billing.yml']\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'old')
+      done = false
+      saved = lambda do
+        File.write('config/apis/billing.yml', "#{api}    reports:\n") unless done
+        done = true
+        nil
+      end
+      before = snapshot.merge('config/apis/billing.yml' => "#{api}    reports:\n")
+      out = upgrade("y\nn\n", typed: saved)
+      expect(out).to include('config/apis/billing.yml changed after this command read it')
       expect(snapshot).to eq(before)
     end
 
@@ -460,6 +579,31 @@ describe 'The commands that read the files of a project' do
       FileUtils.rm_f(marker)
       run_cli('convert', 'config/apis/billing.yml')
       expect(File.exist?(marker)).to be(false)
+    end
+
+    it 'does not run a filter that git is configured with to compare a file, as status would' do
+      project
+      ran = File.join(@root, 'FILTER_RAN')
+      File.write('.gitattributes', "*.rb filter=spy\n*.yml filter=spy\n")
+      git('config', 'filter.spy.clean', "sh -c 'touch #{ran}; cat'")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'filter')
+      FileUtils.rm_f(ran)
+      FileUtils.touch(%w[config/apis/billing.yml config/initializers/api_recipes.rb], mtime: Time.now + 5)
+      expect(run_cli('convert', 'config/apis/billing.yml').first).to eq(0)
+      expect(File.exist?(ran)).to be(false)
+    end
+
+    it 'takes nothing out of a file with changes that are not committed, also after it added lines to it in the same run' do
+      project
+      write('config/apis/other.yml', "other:\n  host: other.example.test\n  endpoints:\n    ping:\n")
+      write('config/initializers/api_recipes.rb', "ApiRecipes.configure do |config|\n  config.apis_files_paths = Dir['config/apis/*.yml']\nend\n")
+      git('add', '-A')
+      git('commit', '-q', '-m', 'two')
+      File.write('config/initializers/api_recipes.rb', File.read('config/initializers/api_recipes.rb').sub("end\n", "  config.log_level = :debug # not committed\nend\n"))
+      _, out, = run_cli('convert')
+      expect(out).to include('loads no file now: you can take it out')
+      expect(File.read('config/initializers/api_recipes.rb')).to include("config.apis_files_paths = Dir['config/apis/*.yml']", '# not committed')
     end
 
     it 'puts the project back as it was when a write fails after others were made' do

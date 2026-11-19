@@ -100,22 +100,25 @@ RSpec.describe 'api_recipes check' do
       expect(run_cli('check', '--dir', missing)).to eq([2, '', "#{missing}: no such folder\n"])
     end
 
-    it 'reports a recipe that is not in the lock' do
+    it 'checks a recipe of the project, which the lock ties to no repository, as the file it is' do
       path = write_recipe(@dir, lock: false)
       code, out, err = run_cli('check', '--dir', @dir)
-      expect(code).to eq(1)
-      expect(out).to eq('')
-      expect(err).to eq("#{path}: is not in recipes.lock (there is no recipes.lock in its folder): a recipe is loaded only " \
-                        "after it was installed. Install it with `api_recipes install #{path}`\n")
+      expect([code, err]).to eq([0, ''])
+      expect(out).to start_with("#{path}: shop 1.0.0")
+      File.write(path, recipe_text('shop', 'host' => 'changed.example.test').sub('1.0.0', '1.1.0'))
+      add_to_lock(@dir, 'shop', 'an older text')
+      expect(run_cli('check', '--dir', @dir)).to match([0, start_with("#{path}: shop 1.1.0"), ''])
+      File.write(path, "shop: [broken\n")
+      expect(run_cli('check', '--dir', @dir).first).to eq(1)
     end
 
-    it 'reports a recipe changed after it was installed, without parsing it' do
-      path = write_recipe(@dir)
+    it 'reports a recipe changed after it was installed from a repository, without parsing it' do
+      path = write_recipe(@dir, repository: true)
       File.write(path, "shop: [broken\n")
       code, _out, err = run_cli('check', '--dir', @dir)
       expect(code).to eq(1)
-      expect(err).to eq("#{path}: was changed after it was installed: its checksum is not the one in recipes.lock. " \
-                        "To accept the file as it is now, run `api_recipes install #{path}`\n")
+      expect(err).to eq("#{path}: was changed after it was installed from its repository: its checksum is not the one in recipes.lock. " \
+                        "To keep the file as it is now, as a recipe of the project, run `api_recipes install #{path}`\n")
     end
 
     it 'reports an entry of the lock whose file is missing' do
@@ -127,8 +130,8 @@ RSpec.describe 'api_recipes check' do
       expect(err).to eq("#{File.join(@dir, 'recipes.lock')}: bank is in the lock, but #{File.join(@dir, 'bank.recipe.yml')} is missing\n")
     end
 
-    it 'reports a version in the lock that is not the one of the file' do
-      write_recipe(@dir, version: '9.9.9')
+    it 'reports a version in the lock that is not the one of the file, for a recipe installed from a repository' do
+      write_recipe(@dir, version: '9.9.9', repository: true)
       code, _out, err = run_cli('check', '--dir', @dir)
       expect(code).to eq(1)
       expect(err).to eq("#{File.join(@dir, 'recipes.lock')}: shop is version 9.9.9 in the lock, but the file says 1.0.0\n")

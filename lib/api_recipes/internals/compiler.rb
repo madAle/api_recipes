@@ -22,6 +22,9 @@ module ApiRecipes
       TOKEN = /\A[A-Za-z0-9!#$%&'*+.^_|~-]+\z/
       METHOD_NAME = /\A[A-Za-z_]\w*[?!]?\z/
       VARIABLE_NAME = /\A[A-Za-z_]\w*\z/
+      # What a variable that is used and not declared has: no default, so a
+      # value must be given, and no description.
+      UNDECLARED = { default: nil, description: nil }.freeze
       HOST_FIXED = /\A[A-Za-z0-9._-]*\z/
       VARIABLE_TOKEN = /(\{[A-Za-z_]\w*\})/
       CONTROL = /[\x00-\x1F\x7F]/
@@ -37,19 +40,13 @@ module ApiRecipes
         delete: { path: '/:id', verb: :delete }.freeze
       }.freeze
 
-      # What the endpoints of one api are checked against. variables: the
-      # names a path, a header or a parameter may use, nil when they are not
-      # known. credential_param: the query parameter that carries the
-      # credential, which default_params cannot set.
-      Names = Data.define(:variables, :credential_param)
-
       class << self
         def compile(name, config)
           compile_all({ name => config }).values.first
         end
 
         # given: the variable values of configure ({ api_name => { name => value } });
-        # a name that its api does not declare is reported with the other problems.
+        # a name that is not a variable of its api is reported with the other problems.
         def compile_all(configs, given = nil)
           compiler = new
           apis = compiler.compile_all(configs)
@@ -59,13 +56,13 @@ module ApiRecipes
         end
 
         # The problems of the names in values (Symbol keys, as the compiler
-        # resolves them) that definition does not declare. where is the
-        # location of the api, or empty.
+        # resolves them) that are not variables of definition: it neither
+        # declares nor uses them. where is the location of the api, or empty.
         def unknown_variables(values, definition, where = '')
           return [] if values.nil? || values.empty?
 
-          declared = definition.variables.keys.sort
-          shown = declared.empty? ? 'none declared' : "declared: #{declared.join(', ')}"
+          names = definition.variables.keys.sort
+          shown = names.empty? ? 'the api has no variables' : "variables of the api: #{names.join(', ')}"
           prefix = where.empty? ? 'variables' : "#{where}.variables"
           values.keys.reject { |name| definition.variables.key?(name) }.map do |name|
             "#{prefix}: unknown variable '#{name}' (#{shown})"
@@ -73,16 +70,14 @@ module ApiRecipes
         end
 
         # scope: :api, :with_api or :with_endpoint. Returns the problems, never raises.
-        # variables, for :api only: the names that the options may use beside
-        # those they declare; :any when they are not known yet.
         # credential_param, for :api only: the query parameter that carries
         # the credential of the api the options are merged with, which they
         # cannot set unless they give an auth of their own.
-        def check_options(options, scope, variables: [], credential_param: nil)
+        def check_options(options, scope, credential_param: nil)
           raise ArgumentError, "unknown scope '#{scope}'" unless %i[api with_api with_endpoint].include?(scope)
 
           compiler = new
-          compiler.check(options, scope, variables, credential_param)
+          compiler.check(options, scope, credential_param)
           compiler.errors
         end
 
@@ -173,13 +168,13 @@ module ApiRecipes
         end.freeze
       end
 
-      def check(options, scope, variables = [], credential_param = nil)
+      def check(options, scope, credential_param = nil)
         unless options.is_a?(Hash)
           add('', 'options must be a Hash')
           return
         end
         options = normalize(options, '')
-        scope == :api ? api_attrs(nil, options, '', variables, credential_param) : validate_with(options, scope)
+        scope == :api ? api_attrs(nil, options, '', credential_param) : validate_with(options, scope)
       end
 
       def resolve(options, scope)
@@ -334,34 +329,46 @@ module ApiRecipes
 
       # ---- api ----
 
-      # known: names of variables declared elsewhere, or :any to accept every name.
       # credential_param: the one of the api these options are merged with,
       # used when they give no auth.
-      def api_attrs(_name, config, location, known = [], credential_param = nil)
+      #
+      # A {name} that the options use and nothing declares is a variable of
+      # the api all the same, with no default: the declaration is where a
+      # default and a description are written, not what makes a variable.
+      def api_attrs(_name, config, location, credential_param = nil)
         check_keys(config, API_KEYS, location)
         @option_uses = nil
-        variables = config[:variables].is_a?(Hash) ? config[:variables] : {}
-        declared = known == :any ? nil : variables.keys + known
+        @used_variables = []
         attrs = {}
-        attrs[:protocol] = option(:protocol, config, location, :api, declared)
-        host = option(:host, config, location, :api, declared)
+        attrs[:protocol] = option(:protocol, config, location, :api)
+        host = option(:host, config, location, :api)
         attrs[:host] = host
-        attrs[:port] = option(:port, config, location, :api, declared)
-        attrs[:base_url] = option(:base_url, config, location, :api, declared)
-        attrs[:timeout] = option(:timeout, config, location, :api, declared)
-        attrs[:on_bad_code] = option(:on_bad_code, config, location, :api, declared)
-        attrs[:mime_type] = option(:mime_type, config, location, :api, declared)
-        attrs[:verify_with] = option(:verify_with, config, location, :api, declared)
-        attrs[:default_headers] = option(:default_headers, config, location, :api, declared)
-        attrs[:auth] = option(:auth, config, location, :api, declared)
+        attrs[:port] = option(:port, config, location, :api)
+        attrs[:base_url] = option(:base_url, config, location, :api)
+        attrs[:timeout] = option(:timeout, config, location, :api)
+        attrs[:on_bad_code] = option(:on_bad_code, config, location, :api)
+        attrs[:mime_type] = option(:mime_type, config, location, :api)
+        attrs[:verify_with] = option(:verify_with, config, location, :api)
+        attrs[:default_headers] = option(:default_headers, config, location, :api)
+        attrs[:auth] = option(:auth, config, location, :api)
         credential_param = credential_param(attrs[:auth]) unless config[:auth].nil?
-        names = Names.new(variables: declared, credential_param: credential_param)
-        attrs[:default_params] = option(:default_params, config, location, :api, names)
-        attrs[:variables] = option(:variables, config, location, :api, declared)
-        attrs[:recipe] = option(:recipe, config, location, :api, declared)
-        attrs[:endpoints] = endpoints_attrs(config[:endpoints], join(location, :endpoints), names)
+        attrs[:default_params] = option(:default_params, config, location, :api, credential_param)
+        attrs[:variables] = option(:variables, config, location, :api)
+        attrs[:recipe] = option(:recipe, config, location, :api)
+        attrs[:endpoints] = endpoints_attrs(config[:endpoints], join(location, :endpoints), credential_param)
         check_option_defaults(attrs[:variables], location)
+        attrs[:variables] = with_used_variables(attrs[:variables])
         attrs
+      end
+
+      # The declared variables, then those that are only used, in the order
+      # they are first written.
+      def with_used_variables(variables)
+        used = @used_variables.uniq - (variables || {}).keys
+        @used_variables = nil
+        return variables if used.empty?
+
+        (variables || {}).merge(used.to_h { |name| [name, UNDECLARED] }).freeze
       end
 
       def credential_param(auth)
@@ -374,14 +381,14 @@ module ApiRecipes
         options.each_with_object({}) do |(key, value), out|
           next unless allowed.include?(key)
 
-          resolved = %i[authorization basic_auth].include?(key) ? deep_freeze(value) : option(key, options, '', scope, nil)
+          resolved = %i[authorization basic_auth].include?(key) ? deep_freeze(value) : option(key, options, '', scope)
           out[key] = resolved unless resolved.nil?
         end.freeze
       end
 
       # ---- endpoints ----
 
-      def endpoints_attrs(value, location, names)
+      def endpoints_attrs(value, location, credential_param)
         return {} if value.nil?
 
         unless value.is_a?(Hash)
@@ -398,26 +405,23 @@ module ApiRecipes
             add(node_location, 'must be a Hash or empty')
             next
           end
-          out[name.to_sym] = endpoint_attrs(name.to_sym, options, node_location, names)
+          out[name.to_sym] = endpoint_attrs(name.to_sym, options, node_location, credential_param)
         end
       end
 
-      def endpoint_attrs(name, options, location, names)
+      def endpoint_attrs(name, options, location, credential_param)
         check_keys(options, ENDPOINT_KEYS, location)
-        declared = names.variables
         own = {}
         (ENDPOINT_KEYS - %i[endpoints resource]).each do |key|
-          value = option(key, options, location, :endpoint, key == :default_params ? names : declared)
+          value = option(key, options, location, :endpoint, credential_param)
           own[key] = value unless value.nil?
         end
         children = with_resource(options[:resource], options[:endpoints], join(location, :resource))
         path = own[:path] || name.to_s
         template = parse_path(path, join(location, :path), options.key?(:path) && !options[:path].nil?)
-        unless declared.nil?
-          (template.variable_names - declared).each { |variable| add(join(location, :path), "unknown variable #{shown(variable)}") }
-        end
+        use_variables(template.variable_names)
         { own: own, template: template,
-          children: endpoints_attrs(children, join(location, :endpoints), names) }
+          children: endpoints_attrs(children, join(location, :endpoints), credential_param) }
       end
 
       # The endpoints written under an endpoint, with those its `resource`
@@ -452,24 +456,25 @@ module ApiRecipes
       # ---- options ----
 
       # Validates options[key] and returns its normalized value (nil when absent or invalid).
-      def option(key, options, location, scope, declared)
+      # credential_param: what default_params cannot set, the only option that needs it.
+      def option(key, options, location, scope, credential_param = nil)
         value = options[key]
         return nil if value.nil?
 
         where = join(location, key)
-        return option_with_variables(key, value, where, declared) if OptionValue.variable?(key, value)
+        return option_with_variables(key, value) if OptionValue.variable?(key, value)
 
         case key
         when :protocol then one_of(value, PROTOCOLS, where)
-        when :host then host(value, where, declared)
+        when :host then host(value, where)
         when :port then positive_integer(value, where)
-        when :base_url then base_url(value, where, declared)
+        when :base_url then base_url(value, where)
         when :timeout then positive_number(value, where)
         when :on_bad_code then one_of(value, ON_BAD_CODE, where)
         when :mime_type then mime_type(value, where)
         when :verify_with then method_name(value, where)
-        when :default_headers then headers(value, where, declared)
-        when :default_params then params(value, where, declared)
+        when :default_headers then headers(value, where)
+        when :default_params then params(value, where, credential_param)
         when :auth then auth(value, where)
         when :variables then scope == :with_api ? variable_values(value, where) : variable_declarations(value, where)
         when :recipe then recipe(value, where)
@@ -482,8 +487,8 @@ module ApiRecipes
 
       # An option of a request written with {variables}: kept as it is
       # written, and made when the request is built.
-      def option_with_variables(key, value, where, declared)
-        check_variables(value, where, declared)
+      def option_with_variables(key, value)
+        use_variables(variables_of(value))
         (@option_uses ||= []) << [key, value]
         value.dup.freeze
       end
@@ -547,14 +552,18 @@ module ApiRecipes
         nil
       end
 
-      def check_variables(string, where, declared)
-        return if declared.nil?
-
-        names = string.scan(Template::VARIABLE).flatten.map(&:to_sym).uniq
-        names.each { |name| add(where, "unknown variable #{shown(name)}") unless declared.include?(name) }
+      # The names written as {name} in the options of an api are its
+      # variables. In a `with` there is no api being compiled: the names are
+      # looked for when the request is built.
+      def use_variables(names)
+        @used_variables&.concat(names)
       end
 
-      def host(value, where, declared)
+      def variables_of(string)
+        string.scan(Template::VARIABLE).flatten.map(&:to_sym)
+      end
+
+      def host(value, where)
         unless value.is_a?(String) || value.is_a?(Symbol)
           add(where, 'must be a string')
           return nil
@@ -574,11 +583,11 @@ module ApiRecipes
           return nil
         end
 
-        check_variables(string, where, declared)
+        use_variables(variables_of(string))
         string.dup.freeze
       end
 
-      def base_url(value, where, declared)
+      def base_url(value, where)
         unless value.is_a?(String) || value.is_a?(Symbol)
           add(where, 'must be a string')
           return nil
@@ -594,13 +603,11 @@ module ApiRecipes
           add(where, 'path placeholders are not allowed here; declare a variable and write {name}')
           return nil
         end
-        unless declared.nil?
-          (template.variable_names - declared).each { |name| add(where, "unknown variable #{shown(name)}") }
-        end
+        use_variables(template.variable_names)
         template.to_s.freeze
       end
 
-      def headers(value, where, declared)
+      def headers(value, where)
         unless value.is_a?(Hash)
           add(where, 'must be a Hash')
           return nil
@@ -621,14 +628,14 @@ module ApiRecipes
           end
           text = header.to_s
           add(header_where, 'must not contain control characters') if CONTROL.match?(text.gsub(Template::VARIABLE, ''))
-          check_variables(text, header_where, declared)
+          use_variables(variables_of(text))
           out[name.dup.freeze] = text.dup.freeze
         end.freeze
       end
 
       # The query parameters sent with every request, as { name => text }.
-      # names: a Names, or nil in a with, where nothing is known.
-      def params(value, where, names)
+      # credential_param: the parameter of the credential, nil in a with.
+      def params(value, where, credential_param)
         unless value.is_a?(Hash)
           add(where, 'must be a Hash')
           return nil
@@ -641,7 +648,7 @@ module ApiRecipes
           end
           param_where = join(where, name)
           add(param_where, 'the name must not contain control characters') if CONTROL.match?(name)
-          if names && name == names.credential_param
+          if credential_param && name == credential_param
             add(param_where, 'is the parameter of the credential (auth.name): it cannot be set here')
           end
           unless param.is_a?(String) || param.is_a?(Symbol) || param.is_a?(Numeric) || param == true || param == false
@@ -649,7 +656,7 @@ module ApiRecipes
             next
           end
           text = param.to_s
-          check_variables(text, param_where, names&.variables)
+          use_variables(variables_of(text))
           out[name.dup.freeze] = text.dup.freeze
         end.freeze
       end

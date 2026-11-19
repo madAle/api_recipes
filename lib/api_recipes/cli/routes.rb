@@ -47,16 +47,20 @@ module ApiRecipes
         apis = if file.end_with?(Internals::Recipe::SUFFIX)
                  Internals::Recipe.read(file, compile: false).apis
                else
-                 Configuration.new.read_recipe_file(file, erb: @erb) do |text|
+                 Description.read(file, erb: @erb) do |text|
                    tags = true
                    Tags.replaced(text, @mark) || raise(RecipeFileError.new(file, STRUCTURE))
                  end
                end
-        apis = with_tags_shown(file, apis) if tags
+        shown_as = []
+        apis = with_tags_shown(file, apis, shown_as) if tags
         Internals::Compiler.compile_all(apis).each_value do |api|
           api.routes.each { |route| rows << [route.call, Internals::OptionValue.shown_verb(route.verb), route.url] }
         end
-        err.puts "#{shown(file)}: what an ERB tag gives is shown as {erb}; --erb evaluates the file, which runs the code in it" if tags
+        if tags
+          err.puts "#{shown(file)}: what an ERB tag gives is shown as #{(shown_as.empty? ? ['erb'] : shown_as.uniq).map { |name| "{#{name}}" }.join(' and ')}; " \
+                   '--erb evaluates the file, which runs the code in it'
+        end
         0
       rescue RecipeFileError => e
         e.errors.each { |problem| err.puts(@project ? "#{shown(file)}: #{problem.delete_prefix("#{file}: ")}" : problem) }
@@ -71,13 +75,16 @@ module ApiRecipes
 
       # The apis with what each ERB tag gives written as a variable, which
       # every api declares for it: the calls are listed, the tags are not run.
-      def with_tags_shown(file, apis)
+      # The name of the variable is added to shown_as.
+      def with_tags_shown(file, apis, shown_as)
         apis.to_h do |name, options|
           raise RecipeFileError.new(file, 'an ERB tag gives a name: run again with --erb to evaluate it (this executes the code in the file)') if names_a_key?(name => options)
           next [name, options] unless options.is_a?(Hash) && options.to_s.include?(@mark)
 
           declared = options[:variables].is_a?(Hash) ? options[:variables] : {}
-          variable = declared.key?(:erb) ? 'erb_tag' : 'erb'
+          # A variable called erb that the api declares or uses is another one.
+          variable = declared.key?(:erb) || options.to_s.include?('{erb}') ? 'erb_tag' : 'erb'
+          shown_as << variable
           [name, shown_as(options, "{#{variable}}").merge(variables: declared.merge(variable.to_sym => nil))]
         end
       end

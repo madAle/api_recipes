@@ -70,12 +70,6 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
                          '6: [check] this class gives the api its own'])
   end
 
-  it 'finds apis_configs assigned after the files' do
-    ruby = "ApiRecipes.configure do |config|\n  config.apis_files_paths = ['a.yml']\n  config.apis_configs = { b: {} }\nend\n"
-    expect(findings(ruby)).to eq(['3: [check] apis_configs assigned after apis_'])
-    expect(findings(ruby.sub("  config.apis_files_paths = ['a.yml']\n", ''))).to eq([])
-  end
-
   it 'finds a block passed to run whose value is used, and not one whose value is dropped' do
     found = findings(<<~RUBY)
       names = ApiRecipes.github.users.run { |response| response.data.map(&:name) }
@@ -149,6 +143,45 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
     expect(out.string).to include('Nothing to change')
   end
 
+  it 'looks only at what an api gives, in a file that uses the gem: not at an object of the application with the same methods' do
+    found = findings(<<~RUBY)
+      class Payment
+        include ApiRecipes
+        api :github
+
+        def pay
+          payment.authorization = 12
+          self.authorization = 1
+          worker = Thread.new { 1 }.run
+          worker.to_s
+          result = runner.run
+          result.to_s
+          job.run { |step| step.name }.size
+          github.users.run.to_s
+        end
+      end
+    RUBY
+    expect(found).to eq([])
+  end
+
+  it 'follows an api kept with ||= or returned by a method of the class' do
+    found = findings(<<~RUBY)
+      class Client
+        include ApiRecipes
+        api :github
+
+        def connection = self.class.github
+
+        def setup(token)
+          @client ||= ApiRecipes.github
+          @client.authorization = token
+          connection.authorization = token
+        end
+      end
+    RUBY
+    expect(found).to eq(['9: [check] authorization= and basic_auth= no', '10: [check] authorization= and basic_auth= n'])
+  end
+
   it 'reads a file that is not valid Ruby with the rules on lines only' do
     expect(findings("class Client\n  github.authorization = 1\n")).to eq([])
   end
@@ -191,7 +224,8 @@ describe 'api_recipes upgrade, what it finds by reading the code' do
       found = config_findings(yaml)
       expect(found).to include(match(/\A\[check\] billing\.endpoints\.with: an endpoint with this name has no method of its own.*reach it with \[:with\]/),
                                match(/\A\[check\] billing\.endpoints\.users\.endpoints\.url: .*reach it with \[:url\]/))
-      expect(found.size).to eq(4)
+      expect(found).to include(match(/\A\[breaks\] describes an api in a file of the project, which 3\.0 no longer loads/))
+      expect(found.size).to eq(5)
     end
 
     it 'says nothing of a portable recipe, which is written for 3.0' do

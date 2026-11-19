@@ -1,14 +1,14 @@
 require 'spec_helper'
 require 'stringio'
 
-describe 'Variables that the api does not declare' do
+describe 'Values for a name that is not a variable of the api' do
   let(:json) { { 'Content-Type' => 'application/json' } }
   let(:shopify) do
     { host: '{shop}.example.test', base_url: 'admin/api/{api_version}',
       variables: { shop: {}, api_version: { default: '2026-10' } }, endpoints: { orders: nil } }
   end
   let(:plain) { { host: 'plain.example.test', endpoints: { orders: nil } } }
-  let(:unknown_shpo) { "unknown variable 'shpo' (declared: api_version, shop)" }
+  let(:unknown_shpo) { "unknown variable 'shpo' (variables of the api: api_version, shop)" }
 
   before { stub_request(:any, /example\.test/).to_return(status: 200, body: '{}', headers: json) }
 
@@ -17,7 +17,7 @@ describe 'Variables that the api does not declare' do
   describe 'with' do
     before { configure_test_apis(shopify: shopify, plain: plain) }
 
-    it 'raises at the with call with the declared names sorted' do
+    it 'raises at the with call with the variables of the api sorted' do
       expect { ApiRecipes.shopify.with(variables: { shpo: 'acme' }) }
         .to raise_error(ApiRecipes::ConfigurationError) { |e| expect(problems(e)).to eq(["variables: #{unknown_shpo}"]) }
     end
@@ -25,19 +25,19 @@ describe 'Variables that the api does not declare' do
     it 'accepts String keys and reports every unknown name' do
       expect { ApiRecipes.shopify.with(variables: { 'shop' => 'a', 'one' => 1, two: 2 }) }
         .to raise_error(ApiRecipes::ConfigurationError) { |e|
-          expect(problems(e)).to eq(["variables: unknown variable 'one' (declared: api_version, shop)",
-                                     "variables: unknown variable 'two' (declared: api_version, shop)"])
+          expect(problems(e)).to eq(["variables: unknown variable 'one' (variables of the api: api_version, shop)",
+                                     "variables: unknown variable 'two' (variables of the api: api_version, shop)"])
         }
     end
 
-    it 'says that none is declared' do
+    it 'says that the api has no variables' do
       expect { ApiRecipes.plain.with(variables: { shop: 'a' }) }
         .to raise_error(ApiRecipes::ConfigurationError) { |e|
-          expect(problems(e)).to eq(["variables: unknown variable 'shop' (none declared)"])
+          expect(problems(e)).to eq(["variables: unknown variable 'shop' (the api has no variables)"])
         }
     end
 
-    it 'keeps working for declared names, nil included' do
+    it 'keeps working for the variables of the api, nil included' do
       api = ApiRecipes.shopify.with(variables: { 'shop' => 'acme', 'api_version' => '2027-01' })
       expect(api.orders.url.to_s).to eq('https://acme.example.test/admin/api/2027-01/orders')
       nil_api = ApiRecipes.shopify.with(variables: { shop: 'acme', api_version: nil })
@@ -74,16 +74,16 @@ describe 'Variables that the api does not declare' do
       expect(object.shopify.variables).to eq(shop: 'object')
     end
 
-    it 'still clears the level with nil and sets declared names' do
+    it 'still clears the level with nil and sets the variables of the api' do
       global_values(shopify: { variables: { 'shop' => 'acme' } })
       expect(ApiRecipes.shopify.variables).to eq(shop: 'acme')
       global_values(shopify: { variables: nil })
       expect(ApiRecipes.shopify.variables).to eq({})
     end
 
-    it 'says that none is declared' do
+    it 'says that the api has no variables' do
       expect { global_values(plain: { variables: { shop: 'a' } }) }
-        .to raise_error(ApiRecipes::ConfigurationError, /unknown variable 'shop' \(none declared\)/)
+        .to raise_error(ApiRecipes::ConfigurationError, /unknown variable 'shop' \(the api has no variables\)/)
     end
   end
 
@@ -126,27 +126,21 @@ describe 'Variables that the api does not declare' do
         .with(headers: { 'X-Shop' => 'acme' })
     end
 
-    it 'raises when the declaration is made for an unknown variable in the options, if the global api is configured' do
+    it 'makes a variable of the tree of the class of a name its options use, at the declaration and at the first use' do
       configure_test_apis(shopify: shopify)
-      expect do
-        Class.new do
-          include ApiRecipes
-          api :shopify, host: '{shpo}.staging.example.test'
-        end
-      end.to raise_error(ApiRecipes::ConfigurationError) { |e|
-        expect(problems(e)).to eq(["host: unknown variable 'shpo'"])
-      }
-    end
-
-    it 'raises at the first use for an unknown variable in the options, if the api is not known at declaration' do
-      klass = Class.new do
+      declared = Class.new do
         include ApiRecipes
-        api :shopify, host: '{shpo}.staging.example.test'
+        api :shopify, host: '{tenant}.staging.example.test', variables: { tenant: 'acme' }
+      end
+      expect(declared.shopify.orders.url.to_s).to eq('https://acme.staging.example.test/admin/api/2026-10/orders')
+      ApiRecipes.reset!
+      later = Class.new do
+        include ApiRecipes
+        api :shopify, host: '{tenant}.staging.example.test'
       end
       configure_test_apis(shopify: shopify)
-      expect { klass.shopify }.to raise_error(ApiRecipes::ConfigurationError) { |e|
-        expect(problems(e)).to eq(["shopify.host: unknown variable 'shpo'"])
-      }
+      expect { later.shopify.orders.run }.to raise_error(ApiRecipes::MissingVariable, /'tenant'/)
+      expect(later.shopify.with(variables: { tenant: 'one' }).orders.url.to_s).to eq('https://one.staging.example.test/admin/api/2026-10/orders')
     end
 
     describe 'for an api declared by the class alone' do
@@ -171,25 +165,23 @@ describe 'Variables that the api does not declare' do
 
       it 'still refuses a name that is not among them' do
         expect { klass.new.local.variables = { shpo: 'x' } }
-          .to raise_error(ApiRecipes::ConfigurationError, /unknown variable 'shpo' \(declared: shop\)/)
+          .to raise_error(ApiRecipes::ConfigurationError, /unknown variable 'shpo' \(variables of the api: shop\)/)
       end
 
-      it 'raises at the first use for a variable that the options use and variables: does not name' do
+      it 'asks at the request for a variable that the options use and variables: does not name' do
         other = Class.new do
           include ApiRecipes
-          api :local, host: '{shop}.example.test'
+          api :local, host: '{shop}.example.test', endpoints: { orders: nil }
         end
-        expect { other.local }.to raise_error(ApiRecipes::ConfigurationError) { |e|
-          expect(problems(e)).to eq(["local.host: unknown variable 'shop'"])
-        }
+        expect(other.local.definition.variables.keys).to eq([:shop])
+        expect { other.local.orders.run }.to raise_error(ApiRecipes::MissingVariable, /'shop'/)
       end
 
-      it 'uses the declaration of the global api as soon as there is one' do
+      it 'follows the global api as soon as there is one, keeping the variables its options use' do
         klass.local
         configure_test_apis(local: { host: 'global.example.test', endpoints: { orders: nil } })
-        expect { klass.local }.to raise_error(ApiRecipes::ConfigurationError) { |e|
-          expect(problems(e)).to eq(["local.host: unknown variable 'shop'"])
-        }
+        expect(klass.local.orders.url.to_s).to eq('https://acme.example.test/orders')
+        expect(ApiRecipes.local.orders.url.to_s).to eq('https://global.example.test/orders')
       end
     end
 
@@ -243,7 +235,7 @@ describe 'Variables that the api does not declare' do
         }
     end
 
-    it 'accepts declared names' do
+    it 'accepts the variables of the api' do
       configure_with({ 'shopify' => { 'shop' => 'acme', api_version: '2027-01' } })
       expect(ApiRecipes.shopify.orders.url.to_s).to eq('https://acme.example.test/admin/api/2027-01/orders')
     end

@@ -142,7 +142,10 @@ describe 'api_recipes convert' do
       expect(recipe['base_url']).to eq('api/{base_url}')
       expect(recipe['default_headers']).to eq('Accept' => 'application/json', 'X-Tenant' => '{tenant}')
       expect(recipe['endpoints']['invoices']['path']).to eq('/{tenant}/invoices')
-      expect(recipe['variables']).to include('billing_host' => { 'default' => 'billing.example.test' }, 'base_url' => {}, 'tenant' => {})
+      # A variable without a default needs no declaration: it is a variable
+      # because the recipe uses it.
+      expect(recipe['variables']).to eq('billing_host' => { 'default' => 'billing.example.test' }, 'billing_protocol' => { 'default' => 'http' },
+                                        'billing_timeout' => { 'default' => '7' })
       expect(out).to include('host: the ERB tag is now the variable {billing_host}, with the default written in the tag',
                              'base_url: the ERB tag is now the variable {base_url}',
                              'default_headers.X-Tenant: the ERB tag is now the variable {tenant}')
@@ -152,8 +155,8 @@ describe 'api_recipes convert' do
       write('billing.yml.erb', with_erb)
       _, out, = run('convert', '--to', '.', 'billing.yml.erb')
       expect(recipe.values_at('protocol', 'port', 'timeout')).to eq(['{billing_protocol}', '{billing_port}', '{billing_timeout}'])
-      expect(recipe['variables']).to include('billing_protocol' => { 'default' => 'http' }, 'billing_port' => {},
-                                             'billing_timeout' => { 'default' => '7' })
+      expect(recipe['variables']).to include('billing_protocol' => { 'default' => 'http' }, 'billing_timeout' => { 'default' => '7' })
+      expect(recipe['variables']).not_to include('billing_port')
       expect(out).to include('protocol: the ERB tag is now the variable {billing_protocol}, with the default written in the tag',
                              'port: the ERB tag is now the variable {billing_port}')
     end
@@ -255,8 +258,79 @@ describe 'api_recipes convert' do
       expect(recipe['default_headers']).to eq('Accept' => 'application/json', 'Api-Key-Client' => '{client}',
                                               'Api-Key-Secret' => '{api_key_secret}', 'Authorization' => '{authorization}')
       expect(recipe['default_params']).to eq('api_token' => '{api_token}', 'page' => 1)
-      expect(recipe['variables']).to eq('api_token' => {}, 'client' => {}, 'api_key_secret' => {}, 'authorization' => {})
+      expect(recipe).not_to include('variables')
       expect(out).to include('default_headers.Api-Key-Secret: looks like a credential: its value is not copied, it is now the variable {api_key_secret}')
+    end
+  end
+
+  describe 'a word in braces, which 2.x sent as text' do
+    let(:braces) do
+      <<~YAML
+        billing:
+          host: billing.example.test
+          base_url: v1/{draft}
+          default_headers:
+            X-Template: 'a {id} b'
+            X-Shape: '{shape}'
+            X-Plain: 'a \\{word} b'
+          default_params:
+            filter: '{status}'
+          endpoints:
+            items:
+              path: /items/{id}/:item_id
+      YAML
+    end
+
+    it 'stays text: written with a backslash in a path and in the base_url, given by a variable whose default is the text elsewhere' do
+      write('billing.yml', braces)
+      code, out, = run('convert', 'billing.yml')
+      expect(code).to eq(0)
+      expect(recipe['base_url']).to eq('v1/\\{draft}')
+      expect(recipe['endpoints']['items']['path']).to eq('/items/\\{id}/:item_id')
+      expect(recipe['default_headers']).to eq('X-Template' => '{x_template}', 'X-Shape' => '{x_shape}', 'X-Plain' => '{x_plain}')
+      expect(recipe['default_params']).to eq('filter' => '{filter}')
+      expect(recipe['variables']).to eq('x_template' => { 'default' => 'a {id} b' }, 'x_shape' => { 'default' => '{shape}' },
+                                        'x_plain' => { 'default' => 'a \\{word} b' },
+                                        'filter' => { 'default' => '{status}' })
+      expect(out).to include('base_url: {draft} was text in 2.x and would be a variable: it is written \\{draft}',
+                             'default_headers.X-Template: a word in braces was text in 2.x and would be a variable: ' \
+                             'the value is the default of the variable {x_template}')
+    end
+
+    it 'gives the requests the same text as 2.x' do
+      stub_request(:any, /billing\.example\.test/).to_return(status: 200, body: '{}')
+      write('billing.yml', braces)
+      run('convert', 'billing.yml')
+      configure_recipes(File.join(@dir, 'billing.recipe.yml'))
+      ApiRecipes.billing.items(7).run
+      expect(WebMock).to have_requested(:get, 'https://billing.example.test/v1/%7Bdraft%7D/items/%7Bid%7D/7?filter=%7Bstatus%7D')
+        .with(headers: { 'X-Template' => 'a {id} b', 'X-Shape' => '{shape}', 'X-Plain' => 'a \\{word} b' })
+    end
+
+    it 'never gives a header named like a credential the variable, and the default, of another header with the same text' do
+      [%w[X-Trace X-Api-Key], %w[X-Api-Key X-Trace]].each do |first, second|
+        FileUtils.rm_f('billing.recipe.yml')
+        write('billing.yml', "billing:\n  host: billing.example.test\n  default_headers:\n    #{first}: '{abc}'\n    #{second}: '{abc}'\n  endpoints:\n    items:\n")
+        expect(run('convert', '--to', '.', 'billing.yml').first).to eq(0)
+        key = recipe['default_headers']['X-Api-Key'][/\A\{(\w+)\}\z/, 1]
+        trace = recipe['default_headers']['X-Trace'][/\A\{(\w+)\}\z/, 1]
+        expect(key).not_to eq(trace)
+        expect(recipe['variables'] || {}).not_to include(key)
+        expect(recipe['variables'][trace]).to eq('default' => '{abc}')
+      end
+    end
+
+    it 'is a variable when the file declares it' do
+      write('billing.yml', braces.sub("  host: billing.example.test\n", "  host: billing.example.test\n  variables:\n    draft: { default: d1 }\n"))
+      run('convert', 'billing.yml')
+      expect(recipe['base_url']).to eq('v1/{draft}')
+    end
+
+    it 'is refused where an ERB tag gives a part of the same value, since the variable cannot hold both' do
+      write('billing.yml', braces.sub("'a {id} b'", "\"a {id} <%= ENV['B'] %>\""))
+      code, _, err = run('convert', 'billing.yml')
+      expect(code).to eq(1)
+      expect(err).to include('default_headers.X-Template: holds a word in braces, which was text in 2.x, and an ERB tag')
     end
   end
 
@@ -357,6 +431,6 @@ describe 'api_recipes convert' do
   end
 
   it 'is listed in the help' do
-    expect(run('--help')[1]).to include('convert [--name NAME] [--version VERSION] [--calls] [--to DIR] FILE')
+    expect(run('--help')[1]).to include('convert [--name NAME] [--version VERSION] [--calls] [--to DIR] [FILE]')
   end
 end

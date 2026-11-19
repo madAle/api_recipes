@@ -70,15 +70,13 @@ end
     it 'keeps the previous configuration, unchanged, when a new one fails' do
       ApiRecipes.configure do |config|
         config.logger = Logger.new(IO::NULL)
-        config.apis_configs = { svc: { host: 'hash.example.test', endpoints: { users: nil } } }
-        config.apis_files_paths = [File.expand_path('../fixtures/svc_override.yml', __dir__)]
+        config.apis_configs = { svc: { host: 'other.example.test', endpoints: { ping: nil } } }
       end
       before = ApiRecipes.configuration
       logger = before.logger
       other_logger = Logger.new(IO::NULL)
-      # The last one would also reorder the sources of the previous configuration if they were shared.
       failures = [
-        ->(config) { config.apis_files_paths = [File.expand_path('../fixtures/missing.yml', __dir__)] },
+        ->(config) { config.recipes_paths = [File.expand_path('../fixtures/missing.recipe.yml', __dir__)] },
         ->(config) { config.values = { svc: { variables: { nope: 'x' } } } },
         ->(config) { config.apis_configs = { svc: { bogus: 1 } } }
       ]
@@ -101,10 +99,8 @@ end
 
     it 'keeps the previous configuration when a failed configure changed what it holds in place' do
       logger = Logger.new(IO::NULL)
-      path = File.expand_path('../fixtures/two_apis.yml', __dir__)
       ApiRecipes.configure do |config|
         config.logger = logger
-        config.apis_files_paths = [path.dup]
         config.apis_configs = { svc: { host: 'api.example.test', variables: { region: {} },
                                        endpoints: { users: { path: '/people' } } } }
         config.values = { svc: { variables: { region: 'eu' } } }
@@ -119,22 +115,20 @@ end
         lambda do |config|
           config.values = { svc: { variables: { region: 'us' } } }
           config.apis_configs[:svc][:host] = 1
-        end,
-        ->(config) { config.apis_files_paths.first.replace('missing.yml') }
+        end
       ]
       failures.each do |change|
         expect { ApiRecipes.configure { |config| change.call(config) } }.to raise_error(ApiRecipes::ConfigurationError)
       end
       expect(before.apis_configs).to eq(svc: { host: 'api.example.test', variables: { region: {} },
                                                endpoints: { users: { path: '/people' } } })
-      expect(before.apis_files_paths).to eq([path])
       expect(ApiRecipes::Internals::Registry.current.levels.transform_values(&:variables)).to eq(svc: { region: 'eu' })
       shared = nil
       ApiRecipes.configure { |config| shared = config.logger }
       expect(shared).to equal(logger)
       expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/people')
       expect(ApiRecipes.svc.variables).to eq(region: 'eu')
-      expect(ApiRecipes.apis).to contain_exactly(:svc, :billing)
+      expect(ApiRecipes.apis).to contain_exactly(:svc)
     end
   end
 

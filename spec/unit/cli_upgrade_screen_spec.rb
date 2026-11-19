@@ -46,7 +46,7 @@ describe 'api_recipes upgrade, what it shows' do
     code, out = run
     expect(code).to eq(1)
     places = ['Checked 2 Ruby files', 'What this command cannot find', 'app/models/device.rb:6: [check]', 'Code to paste',
-              "\n3 findings\n", 'What to do now'].map { |text| out.index(text) }
+              "\n5 findings\n", 'What to do now'].map { |text| out.index(text) }
     expect(places).to eq(places.compact.sort)
     expect(out).not_to match(/\e|\n\n\n/)
   end
@@ -54,26 +54,25 @@ describe 'api_recipes upgrade, what it shows' do
   it 'ends with what to do, a step for each kind of finding that there is' do
     project(files)
     steps = run[1][/What to do now\n(.*)\z/m, 1].lines.map(&:strip)
-    expect(steps).to match([/\A1\. Fix the 1 line marked breaks: .*The code to paste, above/, /\A2\. Correct what is marked config \(1\)/,
-                            /\A3\. Read the 1 line marked check: .*reported at every run/, /\A4\. Go through what this command cannot find/,
-                            /\A5\. Run this command again/, /\A6\. Start the application and run its tests: ApiRecipes\.configure checks/,
-                            /\A7\. Then, if you want, move an api to a portable recipe: run `api_recipes convert FILE` for config\/apis\/billing\.yml\./])
+    expect(steps).to match([/\A1\. Run `api_recipes convert`: it moves the description of the project to portable recipes/,
+                            /\A2\. Fix the 1 line marked breaks that convert does not take care of: .*The code to paste, above/,
+                            /\A3\. Correct what is marked config \(1\)/, /\A4\. Read the 1 line marked check: .*reported at every run/,
+                            /\A5\. Go through what this command cannot find/, /\A6\. Run this command again/,
+                            /\A7\. Start the application and run its tests: ApiRecipes\.configure checks/])
   end
 
   it 'asks to run it again only when something has to change, and never to fix what is not there' do
-    project(files.merge('config/initializers/api_recipes.rb' => files['config/initializers/api_recipes.rb'].lines.first(3).join,
-                        'config/apis/billing.yml' => files['config/apis/billing.yml'].sub("  hots: x\n", '')))
+    project(files.slice('Gemfile', 'app/models/device.rb'))
     code, out = run
     steps = out[/What to do now\n(.*)\z/m, 1].lines.map(&:strip)
     expect(code).to eq(1)
-    expect(steps).to match([/\A1\. Read the 1 line marked check/, /\A2\. Go through what this command cannot find/, /\A3\. Start the application/,
-                            /\A4\. Then, if you want, move an api to a portable recipe/])
+    expect(steps).to match([/\A1\. Read the 1 line marked check/, /\A2\. Go through what this command cannot find/, /\A3\. Start the application/])
 
     File.write('app/models/device.rb', "class Device\n  include ApiRecipes\n  api :billing\nend\n")
     code, out = run
     expect(code).to eq(0)
-    expect(out).to match(/^Nothing to change$/)
-    expect(out[/What to do now\n(.*)\z/m, 1].lines.map(&:strip)).to match([/\A1\. Go through what/, /\A2\. Start the application/, /\A3\. Then, if you want/])
+    expect(out).to include('Nothing to change')
+    expect(out[/What to do now\n(.*)\z/m, 1].lines.map(&:strip)).to match([/\A1\. Go through what/, /\A2\. Start the application/])
   end
 
   describe 'on a terminal' do
@@ -86,8 +85,8 @@ describe 'api_recipes upgrade, what it shows' do
                              "   👀 \e[1;33mcheck \e[0m  \e[1mapp/models/device.rb:6\e[0m\n      a bare rescue now catches ApiRecipes errors too\n",
                              "   💥 \e[1;31mbreaks\e[0m  \e[1mconfig/initializers/api_recipes.rb:4\e[0m\n",
                              "   🧩 \e[1;35mconfig\e[0m  \e[1mconfig/apis/billing.yml\e[0m\n      billing: unknown option 'hots'\n",
-                             "💥 \e[1;31m3 findings\e[0m  \e[31m1 breaks\e[0m\e[2m · \e[0m\e[35m1 config\e[0m\e[2m · \e[0m\e[33m1 check\e[0m\n")
-      expect(plain(out)).to include("      config.print_urls = true\n", "   1. Fix the 1 line marked breaks: that code stops working")
+                             "💥 \e[1;31m5 findings\e[0m  \e[31m3 breaks\e[0m\e[2m · \e[0m\e[35m1 config\e[0m\e[2m · \e[0m\e[33m1 check\e[0m\n")
+      expect(plain(out)).to include("      config.print_urls = true\n", "   1. Run `api_recipes convert`: it moves the description of the project")
       expect(plain(out)).to include("   • #{ApiRecipes::CLI::Upgrade::SILENT_CHANGES[2]}\n", '🙈 What this command cannot find  12 changes')
     end
 

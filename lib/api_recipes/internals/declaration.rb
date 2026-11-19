@@ -40,16 +40,14 @@ module ApiRecipes
           options = options.except(*Registry::VALUE_KEYS)
           level = Registry.level_from(given, api_name.to_s)
           variables = level.variables
-          global = Registry.current.definitions[api_name]
-          check_variables(api_name, variables, global)
-          # The variables that the options use are those of the global api.
-          # Without one yet, the tree compiled at the first use checks them.
+          registry = Registry.current
+          global = registry.definitions[api_name]
           auth = global && global.auth
-          errors = Compiler.check_options(options, :api, variables: global ? global.variables.keys : :any,
-                                                         credential_param: auth && auth[:type] == :query ? auth[:name] : nil)
+          errors = Compiler.check_options(options, :api, credential_param: auth && auth[:type] == :query ? auth[:name] : nil)
           raise ConfigurationError.new(errors) unless errors.empty?
 
           declaration = new(klass, api_name, Compiler.frozen_copy(options), variables, level.credential)
+          declaration.check_variables(registry) if global
           declared = klass.instance_variable_get(IVAR)
           klass.instance_variable_set(IVAR, (declared.is_a?(Hash) ? declared : {}).merge(api_name => declaration).freeze)
           klass.define_method(method_name) { declaration.api(self) }
@@ -58,15 +56,6 @@ module ApiRecipes
         end
 
         private
-
-        # The names of variables against the global api, when it is configured
-        # already; else refresh checks them at the first use.
-        def check_variables(api_name, variables, definition)
-          return unless definition
-
-          problems = Compiler.unknown_variables(variables, definition, api_name.to_s)
-          raise ConfigurationError.new(problems) unless problems.empty?
-        end
 
         def method_for(as, name)
           return name.to_sym if as.nil?
@@ -146,6 +135,19 @@ module ApiRecipes
       def to_s = inspect
 
       def pretty_print(queue) = queue.text(inspect)
+
+      # A value given to `api` for a name that is not a variable of the tree
+      # of the class, reported where `api` is called when the api of the
+      # application is configured already; else the first use reports it.
+      # The tree is not kept: the first use compiles it from the registry
+      # current then.
+      # registry: the one that `api` read, so that a configure that runs
+      # meanwhile does not change what the values are checked against.
+      def check_variables(registry)
+        definition = @options.empty? ? registry.definitions[@name] : Compiler.compile(@name, own_config(registry.configs[@name]))
+        problems = Compiler.unknown_variables(@variables, definition, @name.to_s)
+        raise ConfigurationError.new(problems) unless problems.empty?
+      end
 
       private
 

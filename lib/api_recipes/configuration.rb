@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'yaml'
-require 'erb'
 require 'logger'
 require 'pathname'
 
@@ -17,9 +16,7 @@ module ApiRecipes
     attr_reader :value_levels
 
     def initialize
-      @sources = []
       @apis_configs = {}
-      @apis_files_paths = []
       @recipes_paths = []
       @value_levels = nil
       @draft = false
@@ -28,16 +25,14 @@ module ApiRecipes
     end
 
     # configure works on a copy: what a setter or the caller can change in
-    # place (the list of sources, and the Hashes, Arrays and Strings of
-    # apis_configs and apis_files_paths at every depth) is copied, so the
+    # place (the Hashes, Arrays and Strings of apis_configs and of
+    # recipes_paths at every depth) is copied, so the
     # original stays as it was. The logger of the application is shared. The
     # copy is the draft that configure yields, the only one that takes values.
     def initialize_copy(source)
       super
       @default_logger = nil
-      @sources = @sources.dup
       @apis_configs = deep_copy(@apis_configs)
-      @apis_files_paths = deep_copy(@apis_files_paths)
       @recipes_paths = deep_copy(@recipes_paths)
       @value_levels = nil
       @draft = true
@@ -54,7 +49,7 @@ module ApiRecipes
     # values, tenant names): only the names of the apis are shown.
     def inspect
       "#<#{self.class.name} apis_configs: #{@apis_configs.keys.inspect} " \
-        "apis_files_paths: #{@apis_files_paths.size} recipes_paths: #{@recipes_paths.size} " \
+        "recipes_paths: #{@recipes_paths.size} " \
         "print_urls: #{@print_urls.inspect}>"
     end
 
@@ -66,17 +61,21 @@ module ApiRecipes
       raise ArgumentError, 'apis_configs must be an Hash' unless configs.is_a? Hash
 
       @apis_configs = Internals::Compiler.normalize(configs, :options_map)
-      record_source(:hash)
     end
 
-    attr_reader :apis_configs, :apis_files_paths, :recipes_paths
+    attr_reader :apis_configs, :recipes_paths
 
-    def apis_files_paths=(paths = [])
-      raise ArgumentError, 'apis_files_paths must be an Array' unless paths.is_a? Array
+    # 2.x loaded files of the project, YAML with ERB, through this option.
+    # An api is now described by a portable recipe, or by apis_configs.
+    REMOVED_FILES = 'apis_files_paths was removed in 3.0: an api is described by a portable recipe, loaded with recipes_paths. ' \
+                    'Run `api_recipes convert` in the root of the project: it moves every description to a recipe and ' \
+                    'changes this configuration'
 
-      @apis_files_paths = paths
-      record_source(:files)
+    def apis_files_paths=(*)
+      raise Error, REMOVED_FILES
     end
+
+    def apis_files_paths = raise(Error, REMOVED_FILES)
 
     # Portable recipes: files written by someone else, installed with the
     # api_recipes command. They are read as data only, never with ERB, and each
@@ -102,30 +101,12 @@ module ApiRecipes
       @value_levels = Internals::Registry.value_levels(values)
     end
 
-    # Applies the sources in the order they were assigned and returns the
-    # apis as { name => description }. A later source replaces whole apis. The
-    # recipes of recipes_paths come last and replace nothing: a name that
-    # another source defines is an error.
+    # Returns the apis as { name => description }: those of apis_configs,
+    # then the recipes of recipes_paths, which replace nothing: a name that
+    # apis_configs defines is an error.
     def load
-      apis = {}
-      @sources.each do |kind|
-        if kind == :hash
-          apis.merge!(@apis_configs)
-        else
-          recipes = @recipes_paths.map { |path| expanded(path) }
-          # A recipe that recipes_paths loads is left to it: a pattern such as
-          # config/apis/*.yml* can match both kinds of file in one folder.
-          @apis_files_paths.each { |path| merge_file(apis, path) unless recipes.include?(expanded(path)) }
-        end
-      end
+      apis = {}.merge(@apis_configs)
       apis.merge(Internals::Recipe.load_all(@recipes_paths, taken: apis.keys))
-    end
-
-    # Reads one file with the rules of apis_files_paths and returns the apis as
-    # { name => description }. ERB is evaluated only with erb: true; without it a
-    # file that contains ERB is refused and nothing in it is run.
-    def read_recipe_file(path, erb: true, &without_erb)
-      read_file(path, erb: erb, &without_erb)
     end
 
     def logger=(logger)
@@ -156,78 +137,6 @@ module ApiRecipes
     end
 
     private
-
-    # @private
-    def record_source(kind)
-      @sources.delete(kind)
-      @sources << kind
-    end
-
-    # @private
-    def merge_file(apis, path)
-      read_file(path).each do |api, params|
-        logger.debug "File at #{path} overrides config for '#{api}' API" if apis.key?(api)
-        apis[api] = params
-      end
-    end
-
-    # @private
-    def read_file(path, erb: true)
-      unless (path.is_a?(String) || path.is_a?(Pathname)) && !path.to_s.include?("\0")
-        raise ConfigurationError.new(['apis_files_paths: every path must be a String or a Pathname, without null bytes'])
-      end
-
-      full_path = File.expand_path(path)
-      if shared_recipe?(full_path)
-        raise RecipeFileError.new(path, 'is a portable recipe (.recipe.yml): give it to recipes_paths, which reads it as data only')
-      end
-
-      text = read_text(path, full_path)
-      if erb
-        text = ERB.new(text).result
-      elsif text.include?('<%')
-        unless block_given?
-          raise RecipeFileError.new(path, 'contains ERB: run again with --erb to evaluate it ' \
-                                          '(this executes the code in the file)')
-        end
-        text = yield(text)
-      end
-      data = begin
-               YAML.safe_load(text, permitted_classes: [Symbol], aliases: true)
-             rescue Psych::Exception => e
-               raise RecipeFileError.new(path, "invalid YAML: #{e.message}")
-             end
-      raise RecipeFileError.new(path, 'file is empty') if data.nil?
-      raise RecipeFileError.new(path, 'must contain a mapping of api names') unless data.is_a?(Hash)
-
-      Internals::Compiler.normalize(data, :options_map)
-    end
-
-    # @private
-    def read_text(path, full_path)
-      text = File.read(full_path, encoding: 'UTF-8')
-      raise RecipeFileError.new(path, 'file is not valid UTF-8') unless text.valid_encoding?
-
-      text
-    rescue Errno::ENOENT
-      raise RecipeFileError.new(path, 'file not found')
-    rescue SystemCallError => e
-      raise RecipeFileError.new(path, "cannot read file (#{e.class.name.split('::').last})")
-    end
-
-    # @private
-    def expanded(path)
-      path.is_a?(String) || path.is_a?(Pathname) ? File.expand_path(path) : nil
-    rescue ArgumentError
-      nil
-    end
-
-    # @private
-    def shared_recipe?(full_path)
-      names = [full_path]
-      names << File.realpath(full_path) if File.exist?(full_path)
-      names.any? { |name| name.downcase.end_with?('.recipe.yml') }
-    end
 
     # @private
     # A copy of value whose Hashes, Arrays and unfrozen Strings are new

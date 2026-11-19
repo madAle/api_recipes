@@ -87,7 +87,10 @@ module ApiRecipes
 
         body = api_options(options)
         body = { 'recipe' => { 'name' => name, 'version' => @version, 'format' => Internals::Recipe::FORMAT } }.merge(body)
-        body['variables'] = (body['variables'] || {}).merge(@variables) unless @variables.empty?
+        # A variable that has no default needs no declaration: the recipe
+        # uses it, and that makes it a variable that a value must be given to.
+        written = @variables.reject { |_, spec| spec.empty? }
+        body['variables'] = (body['variables'] || {}).merge(written) unless written.empty?
         options = ordered(body, API_ORDER)
         text = Text.new(name, options).to_yaml
         definition = checked(name, text)
@@ -95,7 +98,8 @@ module ApiRecipes
         # back when it is written: the comments leave the data as it is.
         text = Text.new(name, options, Calls.of(definition)).to_yaml if @calls
         Result.new(name: name, version: @version, text: text, calls: definition.routes.size, changes: @changes,
-                   variables: env_of(false).merge(@given), defaults: env_of(true), expressions: @expressions, verify_with: @verify_with,
+                   variables: env_of(false).merge(@given), defaults: env_of(true).slice(*@expressions.keys), expressions: @expressions,
+                   verify_with: @verify_with,
                    refs: @refs.to_h { |variable, ref| [variable, ref.merge(credential: ref[:credential] || @secret.include?(variable))] })
       end
 
@@ -262,7 +266,8 @@ module ApiRecipes
           case key
           when 'verify_with' then left_out(key, value)
           when 'variables' then out[key] = declared_variables(value)
-          when 'host', 'base_url' then out[key] = with_variables(value, key, key)
+          when 'host' then out[key] = with_variables(value, key, key)
+          when 'base_url' then out[key] = with_variables(as_text(value, key), key, key)
           when *OPTION_KEYS then out[key] = option(value, key, key)
           when *SENT then out[key] = sent(value, key)
           when 'endpoints' then out[key] = endpoints(value, key)
@@ -303,7 +308,7 @@ module ApiRecipes
           here = "#{where}.#{key}"
           case key
           when 'verify_with' then left_out(here, value)
-          when 'path' then out[key] = with_variables(value, here, "#{name}_path")
+          when 'path' then out[key] = with_variables(as_text(value, here), here, "#{name}_path")
           when *OPTION_KEYS then out[key] = option(value, here, "#{name}_#{key}")
           when *SENT then out[key] = sent(value, here)
           when 'endpoints' then out[key] = endpoints(value, here)
@@ -335,10 +340,51 @@ module ApiRecipes
           end
           if secret
             [name, credential(content, here, name)]
+          elsif text_in_braces?(content, escaped: false)
+            [name, braces_kept(content, here, name)]
           else
             [name, with_variables(content, here, name)]
           end
         end
+      end
+
+      # A word in braces that the file does not declare as a variable: 2.x
+      # sent it as text, and 3.0 would read it as a variable. In a path and
+      # in the base_url a backslash before the brace already keeps it text;
+      # a header and a parameter have no such escape.
+      TEXT_IN_BRACES = /(?<!\\)\{([A-Za-z_]\w*)\}/
+
+      def text_in_braces?(value, escaped: true)
+        pattern = escaped ? TEXT_IN_BRACES : Internals::Template::VARIABLE
+        value.is_a?(String) && value.scan(pattern).flatten.any? { |name| @origins[name] != :declared }
+      end
+
+      # In a path and in the base_url a brace is kept as text with a backslash.
+      def as_text(value, where)
+        return value unless text_in_braces?(value)
+
+        value.gsub(TEXT_IN_BRACES) do
+          name = Regexp.last_match(1)
+          next Regexp.last_match(0) if @origins[name] == :declared
+
+          @changes << "#{shown(where)}: {#{shown(name)}} was text in 2.x and would be a variable: it is written \\{#{shown(name)}}"
+          "\\{#{name}}"
+        end
+      end
+
+      # A header or a parameter has no way to write a brace as text: the value
+      # becomes the default of a variable, which is sent as it is.
+      def braces_kept(content, where, name)
+        if @token.match?(content)
+          refuse("#{shown(where)}: holds a word in braces, which was text in 2.x, and an ERB tag: a recipe cannot keep both " \
+                 'as they were; write the value by hand')
+        end
+        # Its own kind of code: a credential with the same text never shares
+        # this variable, nor its default.
+        variable = declare(variable_name(name), [:text, content], nil, content)
+        @changes << "#{shown(where)}: a word in braces was text in 2.x and would be a variable: the value is the default of " \
+                    "the variable {#{variable}}"
+        "{#{variable}}"
       end
 
       # A value that is already made of variables only, or of text and

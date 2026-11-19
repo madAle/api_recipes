@@ -1,5 +1,25 @@
 ## Unreleased
 
+- A `{name}` that a description uses is a variable of the API, declared or
+  not. `variables` declares one only to give it a `default` or a
+  `description`; one with neither has no default, and a request that needs it
+  raises `ApiRecipes::MissingVariable` until a value is given. A value for a
+  name that the API neither declares nor uses still raises
+  `ApiRecipes::ConfigurationError`. `convert` and `import` no longer write a
+  declaration with nothing in it. **A word in braces in a header, a parameter,
+  the `base_url` or a path, which was text in 2.x, is now a variable that a
+  request asks for, not a configuration error: `convert` keeps it text.**
+- An API is described by a portable recipe, and by nothing else in a file:
+  `apis_files_paths` was removed, and the gem no longer evaluates ERB.
+  Assigning it raises `ApiRecipes::Error` with the command to run.
+  `apis_configs` stays. `api_recipes convert` with no file moves every API
+  that a file of the project describes to a recipe, in one run, and takes
+  `apis_files_paths` out with the last description. `api_recipes upgrade`
+  reports the option and each of those files, and on a terminal offers to
+  move each API, showing the files it creates, edits and deletes.
+- `api_recipes import` writes a complete portable recipe, with its `recipe`
+  key and `--version`. A description that names no server gives the host as
+  the variable `{host}`.
 - `api_recipes upgrade` finds most of what it used to list as impossible to
   find. It reads each Ruby file as a tree: a credential assigned in the body
   of a class, through a variable, over two lines or with `send`; a credential
@@ -17,9 +37,11 @@
   change is shown as a diff and made only after `y`, in files that git has
   committed as they are now. For a `rescue` that names no class it offers to
   put `rescue ApiRecipes::Error` with a `raise` before it, as 2.x behaved, and
-  a `rescue` that already comes after one of `ApiRecipes::Error` is no longer
-  reported. Away from a terminal, and with `--no-code`, the
-  command changes nothing.
+  a `rescue` that already comes after one that catches the errors of the gem
+  is no longer reported. It asks only when the answers come from a terminal
+  and the results go to one; away from a terminal, and with `--no-code`, the
+  command changes nothing. A file saved while the question waits is not
+  written over.
 - `api_recipes upgrade` ends with `What to do now`: the steps to take, one for
   each kind of finding that there is. What needs an answer comes last: what
   was checked and the changes the command cannot find are printed first, then

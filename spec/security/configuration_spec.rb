@@ -1,7 +1,11 @@
 require 'spec_helper'
+require 'api_recipes/cli'
 require 'tmpdir'
 
 describe 'Configuration files and secrets' do
+  # A file of a 2.x project is read by the commands only, with this reader.
+  def read(path, **options) = ApiRecipes::CLI::Description.read(path, **options)
+
   def file(name, content)
     Dir.mktmpdir do |dir|
       path = File.join(dir, name)
@@ -12,46 +16,40 @@ describe 'Configuration files and secrets' do
 
   it 'does not build Ruby objects from YAML' do
     file('x.yml', "svc: !ruby/object:Gem::Installer\n  i: x\n") do |path|
-      expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }.to raise_error(ApiRecipes::RecipeFileError)
+      expect { read(path) }.to raise_error(ApiRecipes::RecipeFileError)
     end
   end
 
-  it 'evaluates ERB in the files of apis_files_paths and nowhere else' do
-    file('x.yml', "svc:\n  host: <%= 'erb' %>.example.test\n") do |path|
-      ApiRecipes.configure do |c|
-        c.logger = Logger.new(IO::NULL)
-        c.apis_files_paths = [path]
-      end
-      expect(ApiRecipes.svc.definition.host).to eq('erb.example.test')
+  it 'evaluates ERB nowhere when the application runs: a file with ERB is read by a command only, and run only when asked' do
+    file('x.yml', "svc:\n  host: <%= raise 'evaluated' %>.example.test\n") do |path|
+      expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }.to raise_error(ApiRecipes::Error, /apis_files_paths was removed/)
+      expect { read(path) }.to raise_error(ApiRecipes::RecipeFileError, /contains ERB/)
+      expect { read(path, erb: true) }.to raise_error(RuntimeError, 'evaluated')
     end
-    ApiRecipes.reset!
+    loaded = `#{RbConfig.ruby} -I#{File.expand_path('../../lib', __dir__)} -e 'require "api_recipes"; print defined?(ERB).inspect'`
+    expect(loaded).to eq('nil')
     configure_test_apis(svc: { host: 'h.test', default_headers: { 'X-Note' => "<%= raise 'evaluated' %>" } })
     expect(ApiRecipes.svc.definition.default_headers['X-Note']).to eq("<%= raise 'evaluated' %>")
   end
 
   it 'reads YAML anchors and aliases without building objects, and refuses other tags' do
     file('x.yml', "base: &b\n  host: a.example.test\nsvc: *b\n") do |path|
-      ApiRecipes.configure do |c|
-        c.logger = Logger.new(IO::NULL)
-        c.apis_files_paths = [path]
-      end
-      expect(ApiRecipes.svc.definition.host).to eq('a.example.test')
+      expect(read(path)[:svc]).to eq(host: 'a.example.test')
     end
     file('y.yml', "svc:\n  host: !ruby/regexp /x/\n") do |path|
-      expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }.to raise_error(ApiRecipes::RecipeFileError)
+      expect { read(path) }.to raise_error(ApiRecipes::RecipeFileError)
     end
   end
 
   it 'refuses a file that is not a mapping, is empty or is not UTF-8, without showing its content' do
     { 'a.yml' => "- SECRET\n", 'b.yml' => '', 'c.yml' => "svc: \xff SECRET\n".b }.each do |name, content|
       file(name, content) do |path|
-        expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }
-          .to raise_error(ApiRecipes::RecipeFileError) { |error| expect(error.message).not_to include('SECRET') }
+        expect { read(path) }.to raise_error(ApiRecipes::RecipeFileError) { |error| expect(error.message).not_to include('SECRET') }
       end
     end
   end
 
-  it 'refuses a file named *.recipe.yml in apis_files_paths, whatever the case and the link, and does not run its ERB' do
+  it 'never reads a file named *.recipe.yml as a file of the project, whatever the case and the link, and does not run its ERB' do
     Dir.mktmpdir do |dir|
       text = "svc:\n  host: <%= raise 'evaluated' %>\n"
       shared = File.join(dir, 'x.recipe.yml')
@@ -61,8 +59,7 @@ describe 'Configuration files and secrets' do
       File.write(upper, text)
       File.symlink(shared, link)
       [shared, upper, link].each do |path|
-        expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }
-          .to raise_error(ApiRecipes::RecipeFileError, /is a portable recipe \(\.recipe\.yml\): give it to recipes_paths/)
+        expect { read(path, erb: true) }.to raise_error(ApiRecipes::RecipeFileError, /is a portable recipe \(\.recipe\.yml\): it is read as data only/)
       end
     end
   end
@@ -117,10 +114,7 @@ describe 'Configuration files and secrets' do
       yaml = "svc:\n  host: h.test\n  x-note: &n\n    1: 2\n    true: false\n  endpoints:\n    users:\n      x-doc: *n\n" \
              "      endpoints:\n        show:\n          x-deep:\n            3: 4\n"
       file('x.yml', yaml) do |path|
-        ApiRecipes.configure do |c|
-          c.logger = Logger.new(IO::NULL)
-          c.apis_files_paths = [path]
-        end
+        configure_test_apis(read(path))
         expect(ApiRecipes.svc.users.url.to_s).to eq('https://h.test/users')
       end
     end
@@ -144,7 +138,7 @@ describe 'Configuration files and secrets' do
     it 'works when the cycle was given in a YAML file' do
       yaml = "svc:\n  host: h.test\n  x-note: &n\n    self: *n\n  endpoints:\n    users:\n"
       file('cycle.yml', yaml) do |path|
-        ApiRecipes.configure { |c| silent.call(c); c.apis_files_paths = [path] }
+        ApiRecipes.configure { |c| silent.call(c); c.apis_configs = read(path) }
         expect { ApiRecipes.configure { |c| c.print_urls = false } }.not_to raise_error
         expect(ApiRecipes.svc.users.url.to_s).to eq('https://h.test/users')
       end
@@ -194,7 +188,7 @@ describe 'Configuration files and secrets' do
 
     it 'has a YAML alias that points to its own mapping' do
       file('loop.yml', "svc: &a\n  host: h.test\n  endpoints:\n    users: *a\n") do |path|
-        expect { ApiRecipes.configure { |c| c.apis_files_paths = [path] } }.to raise_error(ApiRecipes::ConfigurationError)
+        expect { configure_test_apis(read(path)) }.to raise_error(ApiRecipes::ConfigurationError)
       end
     end
 

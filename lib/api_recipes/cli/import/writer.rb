@@ -10,7 +10,7 @@ module ApiRecipes
       # Ruby's YAML generator. Before the text is returned it is read back and
       # compared with the data it was written from.
       class Writer
-        API_KEYS = %i[protocol host port base_url auth variables].freeze
+        API_KEYS = %i[recipe protocol host port base_url auth variables].freeze
         ENDPOINT_KEYS = %i[path verb route ok_code].freeze
         COMMENT_COLUMN = 34
         MAX_NAME = 1000

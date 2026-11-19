@@ -197,7 +197,7 @@ describe 'Portable recipes' do
       rescue ApiRecipes::ConfigurationError => e
         e.errors
       end
-      expect(found).to eq(["#{thief}: the api 'svc' is already defined by apis_configs or apis_files_paths: " \
+      expect(found).to eq(["#{thief}: the api 'svc' is already defined by apis_configs: " \
                            'a recipe never takes the place of an api'])
       expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
     end
@@ -311,6 +311,13 @@ describe 'Portable recipes' do
       sent = stub_request(:get, 'http://shop.example.test/orders/1').with(headers: { 'Authorization' => 'Bearer secret' })
       ApiRecipes.shop.orders.show(1).run
       expect(sent).to have_been_requested
+    end
+
+    it 'lists every variable the recipe asks a value for, also those it uses without declaring them' do
+      text = recipe_text('shop', 'host' => '{tenant}.example.test', 'default_headers' => { 'X-Key' => '{key}' },
+                                 'variables' => { 'zone' => { 'default' => 'eu' } }, 'base_url' => '{zone}')
+      _code, out, = install_text(text, '--yes')
+      expect(out).to include("  variables:     zone: default eu\n                 tenant: to be set\n                 key: to be set\n")
     end
 
     it 'shows the headers sent with every request, and update shows the ones that change' do
@@ -437,25 +444,36 @@ describe 'Portable recipes' do
     end
   end
 
-  describe 'a recipe file changed after it was installed' do
-    it 'stops configure, and so does a file that was never installed; the configuration stays the one it was' do
+  describe 'a recipe installed from a repository and changed afterwards' do
+    def from_a_cookbook
+      FileUtils.mkdir_p(@dir)
+      write_recipe(@dir, 'shop', recipe_text, repository: true)
+    end
+
+    it 'stops configure, and the configuration stays the one it was' do
       configure_test_apis
-      path = installed(recipe_text)
+      path = from_a_cookbook
       File.write(path, recipe_text('shop', 'host' => 'evil.example.test'))
-      expect(configure_problems(path).first).to include('was changed after it was installed')
-      File.delete(File.join(@dir, 'recipes.lock'))
-      expect(configure_problems(path).first).to include('is not in recipes.lock')
-      add_to_lock(@dir, 'other', 'x')
-      expect(configure_problems(path).first).to include('is not in recipes.lock')
+      expect(configure_problems(path).first).to include('was changed after it was installed from its repository')
       expect(ApiRecipes.apis).to eq(%i[svc versioned])
     end
 
     it 'is reported by check, which exits with 1' do
-      path = installed(recipe_text)
+      path = from_a_cookbook
       File.write(path, recipe_text('shop', 'host' => 'evil.example.test'))
       code, _out, err = run_cli('check', '--dir', @dir)
       expect(code).to eq(1)
-      expect(err).to include('was changed after it was installed')
+      expect(err).to include('was changed after it was installed from its repository')
+    end
+
+    it 'is not what a recipe of the project is: one that the lock ties to no repository is loaded as it is written' do
+      path = installed(recipe_text)
+      File.write(path, recipe_text('shop', 'host' => 'mine.example.test'))
+      expect(configure_problems(path)).to eq([])
+      expect(ApiRecipes.shop.definition.host).to eq('mine.example.test')
+      File.delete(File.join(@dir, 'recipes.lock'))
+      expect(configure_problems(path)).to eq([])
+      expect(run_cli('check', '--dir', @dir).first).to eq(0)
     end
   end
 

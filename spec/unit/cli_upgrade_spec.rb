@@ -111,12 +111,13 @@ describe 'api_recipes upgrade' do
 
   it 'evaluates ERB only when asked, and without it says what it did not check' do
     code, out, = run('upgrade', '--config', File.join(root, 'config/with_erb.yml'))
-    expect(code).to eq(0)
-    expect(out).to include('with_erb.yml: 1 value comes from ERB and was not checked', 'Nothing to change')
+    expect(code).to eq(1)
+    expect(out).to include('with_erb.yml: 1 value comes from ERB and was not checked', '1 finding')
+    expect(out).not_to include('[config]')
     code, out, = run('upgrade', '--erb', '--config', File.join(root, 'config/with_erb.yml'))
-    expect(code).to eq(0)
-    expect(out).to include('Nothing to change')
-    expect(out).not_to include('comes from ERB')
+    expect(code).to eq(1)
+    expect(out).to include('1 finding')
+    expect(out).not_to include('comes from ERB', '[config]')
   end
 
   it 'changes no file' do

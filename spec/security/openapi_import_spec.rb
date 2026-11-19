@@ -58,8 +58,8 @@ describe 'Importing an OpenAPI description' do
                      ] } } })
       code, out, = import(text, '--name', 'svc')
       expect(code).to eq(0)
-      expect(YAML.safe_load(out)).to eq('svc' => { 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
-      expect(out.lines.size).to eq(5)
+      expect(YAML.safe_load(out)).to eq('svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
+      expect(out.lines.size).to eq(9)
     end
 
     it 'with ERB is removed from the comments, and loading the recipe as a file runs nothing' do
@@ -75,10 +75,7 @@ describe 'Importing an OpenAPI description' do
         code, = import(text, '--name', 'svc', '--output', recipe)
         expect(code).to eq(0)
         expect(File.read(recipe)).not_to match(/<%|%>/)
-        ApiRecipes.configure do |config|
-          config.logger = Logger.new(IO::NULL)
-          config.apis_files_paths = [recipe]
-        end
+        configure_test_apis(ApiRecipes::CLI::Description.read(recipe, erb: true))
         expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
         expect(File.exist?(marker)).to be(false)
       ensure
@@ -95,7 +92,7 @@ describe 'Importing an OpenAPI description' do
                        ] } } })
         code, out, = import(text, '--name', 'svc')
         expect(code).to eq(0)
-        expect(YAML.safe_load(out)).to eq('svc' => { 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
+        expect(YAML.safe_load(out)).to eq('svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
         expect(out).not_to match(/[\u2028\u2029\u0085\v\f]/)
       end
     end
@@ -208,7 +205,7 @@ describe 'Importing an OpenAPI description' do
       allow(ApiRecipes::CLI::Import::Document).to receive(:load).and_return(ApiRecipes::CLI::Import::Document.new(root))
       result = ApiRecipes::CLI::Import.new('unused', name: 'svc').call
       expect(YAML.safe_load(result.text)).to eq(
-        'svc' => { 'host' => '{v}.example.test', 'variables' => { 'v' => {} }, 'endpoints' => { 'users' => nil } }
+        'svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => '{v}.example.test', 'endpoints' => { 'users' => nil } }
       )
       expect(result.warnings.join.length).to be < 2000
     end
@@ -221,7 +218,7 @@ describe 'Importing an OpenAPI description' do
            "paths:\n  /users:\n    get: {operationId: *x9, responses: *x9}\n"
     code, out, err = Timeout.timeout(10) { import(text, '--name', 'svc') }
     expect(code).to eq(0)
-    expect(YAML.safe_load(out)).to eq('svc' => { 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
+    expect(YAML.safe_load(out)).to eq('svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
     expect(err.length).to be < 2000
   end
 

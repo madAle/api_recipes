@@ -37,6 +37,9 @@ module ApiRecipes
                  'ApiRecipes::Settings was removed: the defaults are listed in the README'),
         Rule.new(:breaks, /\bconfiguration\.setup\b/,
                  'configuration.setup was removed: configure loads the configuration'),
+        Rule.new(:breaks, /\.apis_files_paths\b/,
+                 'apis_files_paths was removed: an api is described by a portable recipe, loaded with recipes_paths. ' \
+                 'Run `api_recipes convert`: it moves every description of the project to a recipe and changes this configuration'),
         Rule.new(:breaks, /ApiRecipes\.print_urls/, 'use config.print_urls inside ApiRecipes.configure', false, :print_urls),
         Rule.new(:breaks, /_aprcps_|set_authorization_for_api|set_basic_auth_for_api|copy_global_authorizations_to_api/,
                  'internal method removed'),
@@ -157,8 +160,8 @@ module ApiRecipes
       def report(out, err, input: nil)
         findings = run
         screen = Screen.new(out)
-        changed = @code && Fix.asks?(input) ? offered(screen, input) : []
-        findings = run unless changed.empty?
+        changed = @code && Fix.asks?(input, out) ? offered(screen, input, out, err) : []
+        findings = look_again unless changed.empty?
         unless @notes.empty?
           screen.section('🔎', 'What was checked', plain: false)
           @notes.each { |note| screen.line(note) }
@@ -172,7 +175,7 @@ module ApiRecipes
         pasted = @code && code_to_paste(screen)
         unless changed.empty?
           screen.section('✅', 'Changed in the project')
-          changed.each { |file| screen.item("edited #{shown_path(file)}") }
+          changed.each { |file, what| screen.item("#{what} #{shown_path(file)}") }
           screen.line('Every change is in `git diff`.')
         end
         @warnings.each { |warning| err.puts warning }
@@ -185,21 +188,79 @@ module ApiRecipes
 
       private
 
-      # Offers each change the command can make. The project is read again
-      # after a change that was made. Returns the files that were written.
-      def offered(screen, input)
-        fix = Fix.new(screen, input, shown: method(:shown_path))
+      CONVERT_NOTE = ['3.0 loads only portable recipes. The description becomes one, and what its ERB tags gave is given by ' \
+                      'config.values, in the file that calls ApiRecipes.configure.',
+                      'y: move the api to a recipe now',
+                      'n: leave it, and run `api_recipes convert` later'].freeze
+
+      # Offers each change the command can make: first the apis that move to
+      # a portable recipe, then the others. The project is read again after
+      # a change that was made. Returns the files that were written.
+      def offered(screen, input, out, err)
+        ours = {}
+        fix = Fix.new(screen, input, shown: method(:shown_path), ours: ours)
         declined = []
-        written = []
-        while (change = changes.find { |one| !declined.include?(one.key) })
+        written = {}
+        loop do
+          # Only the whole project is moved to recipes: given some files, the
+          # command does not know the others.
+          key, title, migration = (@project ? conversions(ours, out, err) : []).find { |one| !declined.include?(one.first) }
+          if key
+            declined << key
+            preview = migration.preview
+            next unless fix.confirm(title, CONVERT_NOTE, preview) && migration.finish.zero?
+
+            preview[:created].each_key { |file| written[file] = 'created' }
+            preview[:edited].each_key { |file| written[file] ||= 'edited' }
+            preview[:deleted].each { |file| written[file] = 'deleted' }
+            look_again
+            next
+          end
+          change = changes.find { |one| !declined.include?(one.key) }
+          break unless change
+
           files = fix.offer(change)
           declined << change.key
           next unless files
 
-          written |= files
-          run
+          files.each { |file| written[file] ||= 'edited' }
+          look_again
         end
         written
+      end
+
+      # The project as the changes left it: its files are found again.
+      def look_again
+        if @project
+          @project = Project.new
+          @paths = @project.ruby_files
+          @configs = @project.config_files
+          @specific = @all = nil
+        end
+        run
+      end
+
+      # [[key, title, migration]] for each api that a file of the project
+      # describes and that the command can move to a portable recipe by
+      # itself. The others stay findings: `api_recipes convert` says why.
+      def conversions(ours, out, err)
+        described = @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+        described.sort.flat_map do |file|
+          names = begin
+            Convert.shape(File.read(file)).keys
+          rescue Convert::Refused, Psych::Exception, SystemCallError
+            []
+          end
+          names.filter_map do |name|
+            result = Convert.new(file, name: names.size > 1 ? name : nil).call
+            migration = Convert::Migration.new(result, file, out: out, err: err, written: ours)
+            next unless migration.prepare.empty?
+
+            [[:convert, file, result.name], "Move the api #{Recipes::Summary.shown(result.name, 100)} to a portable recipe", migration]
+          rescue Convert::Refused, Convert::Unusable, SystemStackError
+            nil
+          end
+        end
       end
 
       # The changes this command is sure of, in the order they are offered.
@@ -218,12 +279,15 @@ module ApiRecipes
 
         urls = @startup.select { |item| item[:api].nil? }
         values = @startup.select { |item| item[:api] }
-        found = []
+        found = [without_files(file, text, block)]
         if urls.size == 1 && !block.assigned_anywhere?(:print_urls)
           found << change(:print_urls, 'Move print_urls into the block of ApiRecipes.configure', urls, file, text, block,
                           ["#{block.config}.print_urls = #{urls.first[:code]}"])
         end
-        unless values.empty? || block.assigned_anywhere?(:values)
+        # Two credentials for one api, or one given twice: configure would
+        # refuse the first, and which one 2.x kept depends on the order.
+        twice = values.group_by { |item| item[:api] }.any? { |_, list| list.size > 1 }
+        unless values.empty? || twice || block.assigned_anywhere?(:values)
           found << change(:values, 'Give the credentials of the application to ApiRecipes.configure, as config.values', values, file, text,
                           block, ["#{block.config}.values = {", *entries_of(values).map { |entry| "  #{entry}" }, '}'])
         end
@@ -238,7 +302,7 @@ module ApiRecipes
         tree = text && Code.tree(text)
         clause = tree && rescue_at(tree, item[:line])&.last
         line = text && text.lines[item[:line] - 1]
-        return nil unless clause && line.match?(/\A[ \t]*rescue\b/)
+        return nil unless clause && line.match?(/\A[ \t]*rescue\b/) && names_gem?(text)
         return nil unless clause.exceptions.empty? || clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'StandardError' }
 
         indent = line[/\A[ \t]*/]
@@ -268,13 +332,46 @@ module ApiRecipes
         nil
       end
 
-      # Whether a clause before the one at line number rescues ApiRecipes::Error.
+      # Whether a clause before the one at line number catches the errors of
+      # the gem first: one that names ApiRecipes::Error, Exception or
+      # StandardError, or names no class.
       def gem_errors_handled?(text, number)
         tree = Code.tree(text)
         earlier = tree && rescue_at(tree, number)&.first
         return false unless earlier
 
-        earlier.any? { |clause| clause.exceptions.any? { |one| one.slice.delete_prefix('::') == 'ApiRecipes::Error' } }
+        earlier.any? do |clause|
+          clause.exceptions.empty? || clause.exceptions.any? { |one| %w[ApiRecipes::Error Exception StandardError].include?(one.slice.delete_prefix('::')) }
+        end
+      end
+
+      # Whether the code of a file names the gem: a change is made only there.
+      def names_gem?(text)
+        return @project.uses_gem?(text) if @project
+
+        text.each_line.reject { |line| line.lstrip.start_with?('#') }.join.match?(/\bApiRecipes\b/)
+      end
+
+      # apis_files_paths goes out of the block of configure once no file of
+      # the project describes an api: 3.0 refuses the option.
+      def without_files(file, text, block)
+        given = block.assignments(:apis_files_paths)
+        # Only in the whole project the command knows that no description is left.
+        return nil if !@project || given.empty? || @configs.any? { |one| !one.end_with?(Internals::Recipe::SUFFIX) }
+        # The lines of a heredoc come after the statement that opens it.
+        return nil if given.any? { |node| !Code.nodes(node) { |one| one.respond_to?(:opening_loc) && one.opening_loc&.slice&.start_with?('<<') }.empty? }
+
+        lines = text.lines
+        gone = given.flat_map do |node|
+          first = node.location.start_line
+          last = node.location.end_line
+          alone = lines[first - 1].b[0...node.location.start_column].strip.empty? && lines[last - 1].b[node.location.end_column..].to_s.strip.empty?
+          return nil unless alone
+
+          (first..last).to_a
+        end
+        written = lines.each_with_index.reject { |_, index| gone.include?(index + 1) }.map(&:first).join
+        Code.tree(written) ? Fix::Change.new(:files, 'Take apis_files_paths, which 3.0 refuses, out of the block of ApiRecipes.configure', { file => written }) : nil
       end
 
       # The texts of the files after the lines of items are taken out and
@@ -283,7 +380,7 @@ module ApiRecipes
       def change(key, title, items, file, text, block, added)
         texts = items.group_by { |item| item[:file] }.to_h { |path, list| [path, [path == file ? text : read_ruby(path), list.map { |item| item[:line] }]] }
         texts[file] ||= [text, []]
-        return nil unless texts.all? { |_, (content, lines)| content && lines.all? { |number| own_statement?(content, number) } }
+        return nil unless texts.all? { |path, (content, lines)| content && lines.all? { |number| movable?(content, number, path == file ? block : nil, lines) } }
 
         written = texts.to_h do |path, (content, lines)|
           kept = content.lines.each_with_index.reject { |_, index| lines.include?(index + 1) }
@@ -296,14 +393,50 @@ module ApiRecipes
         written.values.all? { |content| Code.tree(content) } ? Fix::Change.new(key, title, written) : nil
       end
 
-      # Whether line number of text holds one whole statement and nothing else.
-      def own_statement?(text, number)
+      MOVED = %i[print_urls= authorization= basic_auth=].freeze
+
+      # Whether line number of text holds one assignment of a value given
+      # when the application starts, and nothing else, whose value the block
+      # of configure would give the same: it reads no variable and no method
+      # of the file, and no other code that may prepare it
+      # runs before it: in the file of the block, none between the block and
+      # the line; in another file, which runs at another time, none at all.
+      # moved: the lines of the file that the change takes out.
+      def movable?(text, number, block, moved)
         tree = Code.tree(text)
         return false unless tree
 
         statements = Code.nodes(tree) { |node| node.is_a?(Prism::StatementsNode) }.flat_map(&:body)
         here = statements.select { |node| node.location.start_line == number && node.location.end_line == number }
-        here.size == 1 && text.lines[number - 1].strip == here.first.slice
+        return false unless here.size == 1 && text.lines[number - 1].strip == here.first.slice
+
+        value = assigned(here.first)
+        return false unless value && Code.nodes(value) { |one| local_value?(one) }.empty?
+
+        others = tree.statements.body.reject { |other| moved.include?(other.location.start_line) }
+        return others.empty? unless block
+        return true unless number > block.last
+
+        others.none? { |other| other.location.start_line > block.last && other.location.start_line < number }
+      end
+
+      # The value that node gives to one of the options moved, or nil.
+      def assigned(node)
+        if node.is_a?(Prism::CallNode) && MOVED.include?(node.name) && node.arguments&.arguments&.size == 1
+          node.arguments.arguments.first
+        elsif node.is_a?(Prism::CallOrWriteNode) && MOVED.include?(node.write_name)
+          node.value
+        end
+      end
+
+      # A value that only the place where it is written has.
+      def local_value?(node)
+        case node
+        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::SelfNode,
+             Prism::SourceFileNode, Prism::SourceLineNode then true
+        when Prism::CallNode then node.receiver.nil? && !%i[[] !].include?(node.name)
+        else false
+        end
       end
 
       def entries_of(items)
@@ -318,18 +451,18 @@ module ApiRecipes
         counts = findings.group_by(&:kind).transform_values(&:size)
         lines = ->(count) { "#{count} line#{'s' unless count == 1}" }
         steps = []
-        steps << "Fix the #{lines.call(counts[:breaks])} marked breaks: that code stops working, and each line says what to use instead#{'. The code to paste, above, does it for the values given when the application starts' if pasted}" if counts[:breaks]
+        described = @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+        unless described.empty?
+          steps << "Run `api_recipes convert`: it moves the #{described.size == 1 ? 'description' : "#{described.size} descriptions"} of the " \
+                   'project to portable recipes, changes the configuration by itself and says what it did. 3.0 loads no other file'
+        end
+        other = (counts[:breaks] || 0) - findings.count { |finding| finding.kind == :breaks && (described.include?(finding.file) || finding.message.start_with?('apis_files_paths')) }
+        steps << "Fix the #{lines.call(other)} marked breaks#{' that convert does not take care of' unless described.empty?}: that code stops working, and each line says what to use instead#{'. The code to paste, above, does it for the values given when the application starts' if pasted}" if other.positive?
         steps << "Correct what is marked config (#{counts[:config]}): each is a problem in a file that describes an api" if counts[:config]
         steps << "Read the #{lines.call(counts[:check])} marked check: the result changes, and only you can tell whether the code still does what it should. A check line is reported at every run" if counts[:check]
         steps << 'Go through what this command cannot find: look in the code for the changes that concern the project'
         steps << 'Run this command again: go on when only check lines that you have read are left' if counts[:breaks] || counts[:config]
         steps << 'Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once'
-        described = @project ? @configs.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) } : []
-        unless described.empty?
-          steps << "Then, if you want, move an api to a portable recipe: run `api_recipes convert FILE` for " \
-                   "#{described.first(3).map { |file| shown_path(file) }.join(', ')}#{' and the others' if described.size > 3}. " \
-                   'It changes the project by itself and says what it did; the files the project has now keep working as they are'
-        end
         screen.section('👉', 'What to do now')
         steps.each_with_index { |step, index| screen.item(step, "#{index + 1}.") }
       end
@@ -419,7 +552,7 @@ module ApiRecipes
       def in_the_tree(file, text, found)
         reported = found.select { |finding| WRITER_RULES.any? { |rule| rule.message == finding.message } }.map(&:line)
         uses = !@project || @project.uses_gem?(text)
-        TreeRules.findings(text, uses_gem: uses, reported: reported).map do |one|
+        TreeRules.findings(text, uses_gem: uses, reported: reported, apis: @project ? @project.api_names : []).map do |one|
           Finding.new(file: file, line: one.line, kind: one.kind, message: one.message)
         end
       end
@@ -520,7 +653,10 @@ module ApiRecipes
         inside = @startup.select { |item| block && item[:file] == file && item[:line].between?(block.first, block.last) }
         added = @startup.select { |item| item[:api].nil? }.first(1).map { |item| "#{config}.print_urls = #{item[:code]}" }
         added = [] if block&.line_of(:print_urls)
-        entries = entries_of(@startup.select { |item| item[:api] })
+        # config.values takes one credential for an api: given both, which
+        # one the application uses is left to the person.
+        both = @startup.select { |item| item[:api] }.group_by { |item| item[:api] }.select { |_, list| list.map { |item| item[:key] }.uniq.size > 1 }
+        entries = entries_of(@startup.select { |item| item[:api] && !both.key?(item[:api]) })
         merged = block && block.line_of(:values)
         added += ["#{config}.values = {", *entries.map { |entry| "  #{entry}" }, '}'] unless entries.empty? || merged
 
@@ -537,8 +673,13 @@ module ApiRecipes
           screen.line("and add to the Hash that #{config}.values is given at line #{merged}:")
           screen.code(entries)
         end
-        outside = (@startup - inside).map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }
+        outside = (@startup - inside - both.values.flatten).map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }
         screen.line("Then remove the lines that gave these values: #{outside.join(', ')}") unless outside.empty?
+        both.each do |api, list|
+          screen.line("#{Recipes::Summary.shown(api, 100)} is given both authorization and basic_auth " \
+                      "(#{list.map { |item| "#{shown_path(item[:file])}:#{item[:line]}" }.join(', ')}): config.values takes one of them, " \
+                      'add the one the application uses')
+        end
         true
       end
 
@@ -579,7 +720,7 @@ module ApiRecipes
 
         unchecked = []
         tags = false
-        apis = Configuration.new.read_recipe_file(file, erb: @erb) do |text|
+        apis = Description.read(file, erb: @erb) do |text|
           tags = true
           without_erb(file, text)
         end
@@ -588,18 +729,25 @@ module ApiRecipes
         unchecked = erb_values(apis)
         Internals::Compiler.compile_all(apis)
         note_unchecked(file, unchecked)
-        ConfigRules.findings(apis).map { |message| Finding.new(file: file, line: nil, kind: :check, message: message) }
+        [to_convert(file)] + ConfigRules.findings(apis).map { |message| Finding.new(file: file, line: nil, kind: :check, message: message) }
       rescue RecipeFileError => e
         return not_checked(file) if tags && e.errors.all? { |problem| problem.include?('invalid YAML') }
 
-        e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }
+        [to_convert(file)] + e.errors.map { |problem| config_finding(file, problem.delete_prefix("#{file}: ")) }
       rescue ConfigurationError => e
         note_unchecked(file, unchecked)
-        checked(e.errors, unchecked).map { |problem| config_finding(file, problem) }
+        [to_convert(file)] + checked(e.errors, unchecked).map { |problem| config_finding(file, problem) }
       rescue SystemStackError
         [config_finding(file, 'is nested too deeply to be checked')]
       rescue StandardError, ScriptError => e
         [config_finding(file, "could not be evaluated (#{e.class})")]
+      end
+
+      # 3.0 loads no file of the project that describes an api.
+      def to_convert(file)
+        Finding.new(file: file, line: nil, kind: :breaks,
+                    message: 'describes an api in a file of the project, which 3.0 no longer loads: an api is described by a ' \
+                             'portable recipe. `api_recipes convert` moves it to one')
       end
 
       # A file whose tags give a name or a part of the structure is not

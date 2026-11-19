@@ -5,6 +5,7 @@ require 'fileutils'
 require 'api_recipes'
 require 'api_recipes/version'
 require 'api_recipes/cli/code'
+require 'api_recipes/cli/description'
 require 'api_recipes/cli/tags'
 require 'api_recipes/cli/calls'
 require 'api_recipes/cli/upgrade'
@@ -34,7 +35,7 @@ module ApiRecipes
             gives the code to paste, with the whole block of ApiRecipes.configure; --no-code
             leaves the code out.
             Exits with 1 if it finds something, 2 if it could not read something, 0 otherwise.
-        import [--name NAME] [--only GLOB]... [--except GLOB]... [--server N] [--calls] [--output FILE] FILE
+        import [--name NAME] [--version VERSION] [--only GLOB]... [--except GLOB]... [--server N] [--calls] [--output FILE] FILE
             Writes a recipe from the OpenAPI 3.0 or 3.1 description in FILE (YAML or JSON), on
             STDOUT or in the file given with --output, which must not exist. Warnings and a
             summary go to STDERR. --only and --except choose the paths: * also crosses slashes.
@@ -49,9 +50,10 @@ module ApiRecipes
             without running the tag; --erb evaluates the file: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
-        convert [--name NAME] [--version VERSION] [--calls] [--to DIR] FILE
+        convert [--name NAME] [--version VERSION] [--calls] [--to DIR] [FILE]
             Moves the api that the configuration FILE of a project describes to a portable
-            recipe. In the root of a project (a folder with a Gemfile, or where a git
+            recipe. Without FILE, in the root of a project: every api that a file of the
+            project describes, one after the other. In the root of a project (a folder with a Gemfile, or where a git
             repository starts): installs NAME.recipe.yml in config/api_recipes,
             moves the code of each ERB tag to config.values in the file that calls
             ApiRecipes.configure, removes the old description, and lists every file it
@@ -139,6 +141,7 @@ module ApiRecipes
         parser.on('--only GLOB') { |glob| options[:only] << glob }
         parser.on('--except GLOB') { |glob| options[:except] << glob }
         parser.on('--server N', Integer) { |number| options[:server] = number }
+        parser.on('--version VERSION') { |version| options[:version] = version }
         parser.on('--calls') { options[:calls] = true }
         parser.on('--output FILE') { |file| output = file }
         paths = parser.parse(args)
@@ -149,6 +152,11 @@ module ApiRecipes
         end
 
         result = Import.new(paths.first, **options).call
+        expected = "#{result.name}#{Internals::Recipe::SUFFIX}"
+        if output&.end_with?(Internals::Recipe::SUFFIX) && File.basename(output) != expected
+          err.puts "--output: a recipe called #{result.name} is read from a file called #{expected}, not #{Recipes::Summary.shown(File.basename(output), 100)}"
+          return 2
+        end
         return 2 unless write_recipe(result.text, output, out, err)
 
         result.warnings.each { |warning| err.puts "warning: #{warning}" }
@@ -204,8 +212,10 @@ module ApiRecipes
         parser.on('--calls') { options[:calls] = true }
         parser.on('--to DIR') { |dir| directory = dir }
         files = parser.parse(args)
+        return convert_all(options, out, err) if files.empty? && directory.nil? && options[:name].nil? && project_root?
+
         unless files.size == 1
-          err.puts 'convert needs one configuration file'
+          err.puts 'convert needs one configuration file, or none in the root of a project: it then converts every api the project describes'
           return 2
         end
 
@@ -284,6 +294,46 @@ module ApiRecipes
       rescue OptionParser::ParseError => e
         err.puts e.message
         2
+      end
+
+      # Every api that a file of the project describes moves to a portable
+      # recipe, one at a time. Returns the highest exit code.
+      def convert_all(options, out, err)
+        described = Upgrade::Project.new.config_files.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+        if described.empty?
+          out.puts 'No file of this project describes an api: there is nothing to convert'
+          return 0
+        end
+
+        written = {}
+        codes = described.sort.flat_map do |file|
+          names = begin
+            Convert.shape(File.read(file)).keys
+          rescue Convert::Refused, Psych::Exception, SystemCallError
+            [nil]
+          end
+          names.map { |name| convert_one(file, names.size > 1 ? name : nil, options, written, out, err) }
+        end
+        codes.max
+      end
+
+      def convert_one(file, name, options, written, out, err)
+        out.puts
+        result = Convert.new(file, **options, name: name).call
+        Convert::Migration.new(result, file, out: out, err: err, written: written).call
+      rescue Convert::Refused => e
+        err.puts "#{Recipes::Summary.shown(file, 300)} was not converted:"
+        e.reasons.each { |reason| err.puts "  - #{reason}" }
+        1
+      rescue Convert::Unusable => e
+        err.puts e.message
+        2
+      rescue SystemStackError
+        err.puts "#{Recipes::Summary.shown(file, 300)}: is nested too deeply to be read"
+        1
+      rescue StandardError => e
+        err.puts "convert failed (#{e.class}): this is a defect of api_recipes, not of the file"
+        1
       end
 
       def routes(args, out, err)
