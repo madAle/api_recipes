@@ -1,4 +1,10 @@
-## Unreleased
+## Version 3.0.0.beta5
+
+The fifth pre-release of 3.0 describes every api with a portable recipe or
+with `apis_configs`: the gem loads no other file and evaluates no ERB,
+`convert` moves a whole project in one run, a `{name}` that a description
+uses is a variable without a declaration, and `upgrade` makes on a terminal
+the changes it is sure of.
 
 - A `{name}` that a description uses is a variable of the API, declared or
   not. `variables` declares one only to give it a `default` or a

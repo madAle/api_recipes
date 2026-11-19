@@ -13,6 +13,7 @@ stable line until `3.0.0` is final.
 | `3.0.0.beta2` | the OpenAPI importer |
 | `3.0.0.beta3` | portable recipes and a command to install them; variables in paths, `default_params` and `resource`; options looked for up the tree; values of the application and of a class given at startup |
 | `3.0.0.beta4` | `upgrade` without arguments and `convert`, which moves an api of a project to a portable recipe, both with the code to paste; variables in the protocol, the port and the other options of a request |
+| `3.0.0.beta5` | an api is described by a portable recipe or by `apis_configs`, and nothing else: `apis_files_paths` and ERB removed, `convert` for a whole project; every `{name}` that a description uses is a variable; `upgrade` makes on a terminal the changes it is sure of |
 | `3.0.0` | all of the above, after real use |
 
 A part that is not mature when the others are ships marked as experimental
@@ -31,8 +32,8 @@ changes is underneath.
 - The DSL methods are generated once per node and delegate to `[]`. No method is
   defined while a request is being built.
 - The URL and the http.rb client are built once, when the request is sent.
-- The tree does not depend on where it comes from: YAML files, a Hash and
-  imported descriptions are interchangeable sources.
+- The tree does not depend on where it comes from: a portable recipe and a
+  Hash given to `apis_configs` are interchangeable sources.
 - `with` returns a copy of an api or of an endpoint with some options changed,
   for the chain or the request that follows it, and stores nothing:
   `github.with(host: 'github.example.com')`, `users.show('octocat').with(timeout: 10)`.
@@ -77,13 +78,14 @@ Each item is a known defect of the 2.x line.
 - The gem logs a warning, once for each endpoint, when a path parameter value is
   sent differently than in 2.x. `config.upgrade_warnings = false` turns it off.
 - `api_recipes upgrade` searches the Ruby code and the configuration files of an
-  application for what changed. It never changes a file.
+  application for what changed. On a terminal it offers the changes it is
+  sure of, each shown as a diff and made only after a yes.
 
 ### OpenAPI importer
 
 A command turns an OpenAPI description into a recipe file, for example:
 
-    $ api_recipes import openapi.yml --only 'repos/*' > config/apis/github.yml
+    $ api_recipes import openapi.yml --name github --only 'repos/*' --output recipes/github.recipe.yml
 
 - The description is imported once, not read when the application starts: a
   recipe contains only the endpoints that are used, and stays readable.
