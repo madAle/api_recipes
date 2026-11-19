@@ -60,24 +60,36 @@ describe ApiRecipes::CLI::Import::Server do
     expect(result.warnings).to contain_exactly(match(/'my-shop'.*'my_shop'/), match(/'1st'.*'_1st'/))
   end
 
-  it 'declares a variable that the description uses and does not define, without a default' do
+  it 'uses a variable that the description uses and does not define, with no declaration: it has no default' do
     result = read(server('https://{shop}.example.test'))
-    expect(result.options).to eq(host: '{shop}.example.test', variables: { 'shop' => {} })
+    expect(result.options).to eq(host: '{shop}.example.test')
     expect(result.warnings).to contain_exactly(match(/'shop'.*not defined/))
   end
 
-  it 'writes no host for a relative address, and says to set it' do
+  it 'makes the host a variable for a relative address, and says to set it' do
     result = read(server('/v1'))
-    expect(result.options).to eq(base_url: 'v1')
-    expect(result.warnings).to contain_exactly(match(/relative.*set host/))
-    expect(read(server('/')).options).to eq({})
+    expect(result.options).to eq(host: '{host}', base_url: 'v1')
+    expect(result.warnings).to contain_exactly(match(/relative: the host is the variable \{host\}/))
+    expect(read(server('/')).options).to eq(host: '{host}')
   end
 
-  it 'writes nothing when the description names no server, and says to set the host' do
+  it 'names the variable of the host api_host when the address has a variable called host, also in the warning' do
+    result = read(server('/{host}/v1', 'host' => { 'default' => 'eu' }))
+    expect(result.options).to eq(host: '{api_host}', base_url: '{host}/v1', variables: { 'host' => { 'default' => 'eu' } })
+    expect(result.warnings).to contain_exactly(match(/relative: the host is the variable \{api_host\}/))
+  end
+
+  it 'names the variable of the host with a name that the address does not use' do
+    result = read(server('/{host}/{api_host}', 'host' => { 'default' => 'eu' }, 'api_host' => { 'default' => 'x' }))
+    expect(result.options[:host]).to eq('{api_host_2}')
+    expect(result.warnings).to contain_exactly(match(/the host is the variable \{api_host_2\}/))
+  end
+
+  it 'makes the host a variable when the description names no server, and says so' do
     result = read(:absent)
-    expect(result.options).to eq({})
-    expect(result.warnings).to contain_exactly(match(/no server.*set host/))
-    expect(read([]).options).to eq({})
+    expect(result.options).to eq(host: '{host}')
+    expect(result.warnings).to contain_exactly(match(/no server: the host is the variable \{host\}/))
+    expect(read([]).options).to eq(host: '{host}')
   end
 
   it 'reads the server that was asked for' do

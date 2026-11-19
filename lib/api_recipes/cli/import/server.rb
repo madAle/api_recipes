@@ -5,7 +5,8 @@ module ApiRecipes
     class Import
       # One entry of `servers` as the options of an api: protocol, host, port,
       # base_url and variables. Only what differs from the defaults of the gem
-      # is returned.
+      # is returned. A recipe needs a host: one that the description does not
+      # give is a variable, which the application gives.
       class Server
         Result = Data.define(:options, :warnings)
 
@@ -28,7 +29,7 @@ module ApiRecipes
 
         def read
           server = chosen
-          return Result.new(options: {}, warnings: @warnings) if server.nil?
+          return Result.new(options: { host: host_variable('the description names no server') }, warnings: @warnings) if server.nil?
 
           @where = "servers[#{@index}]"
           @declared = server['variables'].is_a?(Hash) ? server['variables'] : {}
@@ -49,7 +50,6 @@ module ApiRecipes
           if servers.empty?
             raise Error, "--server #{@index}: the description names no server" unless @index.zero?
 
-            @warnings << 'the description names no server: set host in the recipe'
             return nil
           end
           unless @index.between?(0, servers.size - 1)
@@ -63,8 +63,18 @@ module ApiRecipes
         end
 
         def relative(path)
-          @warnings << 'the server address is relative: set host in the recipe'
-          with_variables({ base_url: base_url(path) }.compact)
+          options = with_variables({ base_url: base_url(path) }.compact)
+          { host: host_variable('the server address is relative') }.merge(options)
+        end
+
+        # The variable that stands for the host, named so that it is not one
+        # of the variables of the address.
+        def host_variable(why)
+          taken = @names.values
+          name = %w[host api_host].find { |one| !taken.include?(one) }
+          name ||= (2..).lazy.map { |number| "api_host_#{number}" }.find { |one| !taken.include?(one) }
+          @warnings << "#{why}: the host is the variable {#{name}}, to give with config.values"
+          "{#{name}}"
         end
 
         def absolute(scheme, authority, path)
@@ -140,11 +150,12 @@ module ApiRecipes
           end
         end
 
-        # Adds the variables that host and base_url use, in the order they appear.
+        # Adds the declarations of the variables that host and base_url use,
+        # in the order they appear. A variable with no default and no
+        # description needs none: the recipe uses it.
         def with_variables(options)
-          return options if @names.empty?
-
-          options.merge(variables: @names.to_h { |original, name| [name, declaration(original)] })
+          declared = @names.to_h { |original, name| [name, declaration(original)] }.reject { |_, spec| spec.empty? }
+          declared.empty? ? options : options.merge(variables: declared)
         end
 
         def declaration(original)

@@ -57,26 +57,25 @@ RSpec.describe 'portable recipes in recipes_paths' do
       .to raise_error(ArgumentError, 'recipes_paths must be an Array')
   end
 
-  it 'does not load a file that is not in the lock of its folder' do
+  it 'loads a recipe of the project as it is written: one that no lock names, or that the lock ties to no repository' do
     path = write_recipe(@dir, lock: false)
-    expect(problems { configure_recipes(path) })
-      .to eq(["#{path}: is not in recipes.lock (there is no recipes.lock in its folder): a recipe is loaded only after " \
-              "it was installed. Install it with `api_recipes install #{path}`"])
+    configure_recipes(path)
+    expect(ApiRecipes.apis).to eq([:shop])
     add_to_lock(@dir, 'other', 'x')
-    expect(problems { configure_recipes(path) })
-      .to eq(["#{path}: is not in recipes.lock: a recipe is loaded only after it was installed. " \
-              "Install it with `api_recipes install #{path}`"])
-    expect(ApiRecipes.apis).to eq([])
+    add_to_lock(@dir, 'shop', 'an older text')
+    File.write(path, recipe_text('shop', 'host' => 'changed.example.test'))
+    configure_recipes(path)
+    expect(ApiRecipes.shop.definition.host).to eq('changed.example.test')
   end
 
-  it 'does not load, and does not even parse, a file changed after it was installed' do
-    path = write_recipe(@dir)
+  it 'does not load, and does not even parse, a file changed after it was installed from a repository' do
+    path = write_recipe(@dir, repository: true)
     File.write(path, "shop: [not a recipe\n")
     allow(ApiRecipes::Internals::PlainYaml).to receive(:load).and_call_original
     expect(ApiRecipes::Internals::PlainYaml).not_to receive(:load).with(/not a recipe/, anything)
     expect(problems { configure_recipes(path) })
-      .to eq(["#{path}: was changed after it was installed: its checksum is not the one in recipes.lock. " \
-              "To accept the file as it is now, run `api_recipes install #{path}`"])
+      .to eq(["#{path}: was changed after it was installed from its repository: its checksum is not the one in recipes.lock. " \
+              "To keep the file as it is now, as a recipe of the project, run `api_recipes install #{path}`"])
   end
 
   it 'reads the lock of each folder once' do
@@ -97,7 +96,7 @@ RSpec.describe 'portable recipes in recipes_paths' do
 
   it 'refuses a recipe whose api another source defines, whatever the order of the assignments' do
     path = write_recipe(@dir)
-    expected = ["#{path}: the api 'shop' is already defined by apis_configs or apis_files_paths: " \
+    expected = ["#{path}: the api 'shop' is already defined by apis_configs: " \
                 'a recipe never takes the place of an api']
     found = problems do
       ApiRecipes.configure do |config|
@@ -106,9 +105,13 @@ RSpec.describe 'portable recipes in recipes_paths' do
       end
     end
     expect(found).to eq(expected)
-    plain = File.join(@dir, 'plain.yml')
-    File.write(plain, "shop:\n  host: mine.test\n")
-    expect(problems { configure_recipes(path, apis_files_paths: [plain]) }).to eq(expected)
+    found = problems do
+      ApiRecipes.configure do |config|
+        config.apis_configs = { shop: { host: 'mine.test' } }
+        config.recipes_paths = [path]
+      end
+    end
+    expect(found).to eq(expected)
     expect(ApiRecipes.apis).to eq([])
   end
 

@@ -295,12 +295,11 @@ describe 'default_params, and the headers and parameters of an endpoint' do
                 'svc.default_params.map: must be a string, a number or a boolean'])
     end
 
-    it 'reports a variable that the api does not declare, on the api and on an endpoint' do
+    it 'makes a variable of a name that the parameters and the headers use, on the api and on an endpoint' do
       api = { host: 'h.test', default_params: { v: '{version}' },
               endpoints: { users: { default_params: { z: '{zone}' }, default_headers: { 'X-Zone' => '{zone}' } } } }
-      expect(problems(api)).to eq(["svc.default_params.v: unknown variable 'version'",
-                                   "svc.endpoints.users.default_headers.X-Zone: unknown variable 'zone'",
-                                   "svc.endpoints.users.default_params.z: unknown variable 'zone'"])
+      expect(problems(api)).to eq([])
+      expect(ApiRecipes::Internals::Compiler.compile(:svc, api).variables.keys).to eq(%i[version zone])
     end
 
     it 'checks the headers of an endpoint as those of the api' do

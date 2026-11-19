@@ -69,10 +69,15 @@ Or install it directly:
 
 ## Quick start
 
-**1. Describe the API** in a YAML file, for example `config/apis/github.yml`:
+**1. Describe the API** in a recipe, a YAML file called after the API, for
+example `config/api_recipes/github.recipe.yml`:
 
 ```yaml
 github:
+  recipe:
+    name: github
+    version: 1.0.0
+    format: 1
   host: api.github.com
   endpoints:
     users:                # GET /users
@@ -89,7 +94,7 @@ github:
 require 'api_recipes'
 
 ApiRecipes.configure do |config|
-  config.apis_files_paths = ['config/apis/github.yml']
+  config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
 end
 ```
 
@@ -296,8 +301,10 @@ All options are listed in the [options reference](#options-reference).
 ### Headers and parameters sent with every request
 
 `default_headers` are sent with every request, and `default_params` are added
-to every query string. Both can also be written on an endpoint: there they hold
-for that endpoint and for the ones below it, on top of those of the API.
+to every query string. Both can also be written on an endpoint. A request
+looks for them up the tree: on its endpoint, then on each endpoint that
+contains it, then on the API, and sends what it finds, the nearest winning
+for a name written more than once.
 
 ```yaml
 billing:
@@ -349,8 +356,10 @@ of an endpoint, the value of a header or of a parameter sent with every
 request, or in one of the options that are read when a request is sent:
 `protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
 `ok_code`. Use it for what changes from one account or one environment to the
-next, such as the address of a shop. Declare the variables of the API, with an
-optional `default` and `description`:
+next, such as the address of a shop. Every `{name}` that the API uses is one of
+its variables. Declare a variable under `variables` to give it a `default` or a
+`description`; one with neither needs no declaration, and a value must be
+given to it:
 
 ```yaml
 shopify:
@@ -359,8 +368,6 @@ shopify:
       description: the part of the shop address before .myshopify.com
     api_version:
       default: '2026-10'
-    location:
-      description: the id of the location this client works for
   host: '{shop}.myshopify.com'
   base_url: admin/api/{api_version}
   auth:
@@ -371,6 +378,8 @@ shopify:
     inventory:
       path: /locations/{location}/inventory_levels
 ```
+
+Here `location` is a variable too, with no default.
 
 A variable without a value and without a default raises
 `ApiRecipes::MissingVariable` as soon as it is needed: when the chain reaches
@@ -426,8 +435,8 @@ store.shopify.products.url.to_s
 ```
 
 The options that a class gives to `api` can use the variables of the API, as in
-`api :shopify, host: '{shop}.staging.example.test'`. When an API exists only in
-a class, the names given in `variables:` are its variables, so each one gets a
+`api :shopify, host: '{shop}.staging.example.test'`, and new ones: a `{name}`
+they use is a variable of the API for that class. `variables:` gives them a
 value there, and an object or `with` can give another:
 
 ```ruby
@@ -522,8 +531,11 @@ In a parameter it is encoded like every value of a query string. Anything else
 raises `ApiRecipes::InvalidVariable`.
 A word in braces that is not a variable is written `\{word}` in a path and in
 a `base_url`.
-A name that the API does not declare raises `ApiRecipes::ConfigurationError` at
-every level, so a misspelled name is never ignored.
+A value given for a name that the API neither declares nor uses raises
+`ApiRecipes::ConfigurationError` at every level, so a name misspelled in your
+code is never ignored. A `{name}` misspelled in the description is a variable
+with no default: the first request that needs it raises
+`ApiRecipes::MissingVariable`, which names it.
 `variables` without an assignment returns the values of the level you call it
 on: those of `config.values` on `ApiRecipes.shopify`, those given to `api` on a
 class, those assigned on an object. On an object, assigning `nil` clears them,
@@ -533,39 +545,52 @@ and a default declared in the file applies again.
 
 Configure ApiRecipes once, when your application starts.
 
-### From YAML files
+### From recipes
 
 ```ruby
 ApiRecipes.configure do |config|
-  config.apis_files_paths = ['config/apis/github.yml', 'config/apis/billing.yml']
+  config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
+  config.values = {
+    billing: { variables: { billing_host: ENV.fetch('BILLING_HOST', 'billing.example.com') } }
+  }
 end
 ```
 
-A file can describe one API or several. If two files describe the same API, the
-later one replaces the earlier one entirely. The same holds for the sources
-together: they are applied in the order they are assigned, so assigning
-`apis_configs` after `apis_files_paths` lets the Hash replace the file.
-
-A file that is missing, empty, not valid YAML or not valid UTF-8 raises
-`ApiRecipes::RecipeFileError`, which names the file. A file called
-`something.recipe.yml` is a [portable recipe](#portable-recipes) and goes in
-`recipes_paths`, where it is never evaluated with ERB: here it is refused,
-unless `recipes_paths` has it too, in which case it is left to `recipes_paths`.
-So one pattern, such as `config/apis/*.yml*`, can match both kinds of file in
-one folder.
-
-Files are evaluated with ERB before being parsed, so values can come from the
-environment:
+A recipe is a file called `NAME.recipe.yml` that describes the API called
+`NAME`, with the key `recipe` that gives its name, its version and the format.
+It holds data and no code: it is never evaluated with ERB, and `<%` anywhere in
+it is an error. What changes from one environment to another is a
+[variable](#variables), and the application gives its value with
+`config.values`:
 
 ```yaml
 billing:
-  host: <%= ENV.fetch('BILLING_HOST', 'billing.example.com') %>
-  timeout: <%= ENV.fetch('BILLING_TIMEOUT', 3) %>
+  recipe:
+    name: billing
+    version: 1.0.0
+    format: 1
+  variables:
+    billing_host:
+      default: billing.example.com
+  host: '{billing_host}'
   endpoints:
     invoices:
 ```
 
-Only files you wrote and trust should be loaded: ERB runs the Ruby code in them.
+A recipe you write in your project is loaded as it is written, and you change
+it as any other file. One that you took from a repository with
+`api_recipes install` is also compared with `recipes.lock`: see
+[Portable recipes](#portable-recipes). The rules of the format are under
+[Writing a portable recipe](#writing-a-portable-recipe), and
+`api_recipes check FILE` says whether a file follows them.
+
+A file that is missing, not valid YAML, not valid UTF-8 or not a recipe raises
+`ApiRecipes::RecipeFileError`, which names the file.
+
+2.x loaded YAML files evaluated with ERB through `apis_files_paths`. That
+option was removed: assigning it raises `ApiRecipes::Error`, and
+`api_recipes convert` moves those files to recipes. See
+[From a file of your project](#from-a-file-of-your-project).
 
 ### From a Hash
 
@@ -592,11 +617,11 @@ configuration stays active.
 When an API publishes an OpenAPI description, the `api_recipes` command writes
 the recipe for you:
 
-    $ api_recipes import openapi.yml --name github --output config/apis/github.yml
+    $ api_recipes import openapi.yml --name github --output config/api_recipes/github.recipe.yml
 
 The description is read once, when you run the command. Your application never
-reads it: it loads the recipe, which is a file like the ones above, and you can
-read it, trim it and rename things in it. These operations
+reads it: it loads the recipe, which is a file like the ones above, complete with its
+`recipe` key, and you can read it, trim it and rename things in it. These operations
 
 ```
 GET    /users
@@ -613,6 +638,10 @@ become this recipe:
 ```
 # Generated by api_recipes import from GitHub 1.0
 github:
+  recipe:
+    name: github
+    version: 1.0.0
+    format: 1
   host: api.github.com
   endpoints:
     users:                        # GET /users (users/list)
@@ -652,11 +681,23 @@ github:
 
 | Option | Meaning |
 | --- | --- |
-| `--name NAME` | the name of the API in the recipe. Default: the title of the description, in lower case with `_` |
+| `--name NAME` | the name of the API and of the recipe: lowercase letters, digits and `_`. Default: the title of the description, in lower case with `_` |
+| `--version VERSION` | the version of the recipe. Default: `1.0.0` |
 | `--only GLOB` | only the paths that match; can be repeated. `*` also crosses `/`: `--only 'repos/*'` |
 | `--except GLOB` | leaves out the paths that match; can be repeated |
 | `--server N` | which entry of `servers` gives the address, counted from 0. Default: the first |
+| `--calls` | writes under each endpoint how it is called in Ruby |
 | `--output FILE` | writes the recipe in FILE, which must not exist, instead of on STDOUT |
+
+With `--calls`, who reads the recipe sees the call beside the request it
+sends. The call starts after the name of the API, as in `github.users.show('octocat')`:
+
+    users:                        # GET /users (users/list)
+                                  # .users
+      endpoints:
+        show:                     # GET /users/{username} (users/get-by-username)
+                                  # .users.show(username)
+          path: "/:username"
 
 The input is one local file, YAML or JSON, OpenAPI 3.0 or 3.1. Warnings and a
 summary go to STDERR, so the recipe can be redirected. The command exits with 1
@@ -667,6 +708,7 @@ when the description cannot be imported and with 2 when the arguments are wrong.
 | From the description | In the recipe |
 | --- | --- |
 | the address of the server | `protocol`, `host`, `port`, `base_url` |
+| no server, or an address without a host | `host: '{host}'`, a variable that the application gives with `config.values` |
 | the variables of the server | `variables`, with their defaults |
 | the paths | the tree of endpoints |
 | the path parameters | `:name` placeholders |
@@ -728,30 +770,34 @@ A portable recipe is a recipe made to be shared: one API in one file, and
 nothing but data. You install it with a command that shows what it does before
 it writes anything, and you load it with `recipes_paths`.
 
-    $ api_recipes install github
-    github 1.0.0
-      summary:       GitHub REST API, users, repositories, issues and pull requests
+    $ api_recipes install github_essentials
+    reading github_essentials from https://github.com/madAle/api_recipes-cookbook
+    github_essentials 1.0.0
+      summary:       GitHub REST API, the most used calls on users, repositories, issues and pull requests
       homepage:      https://docs.github.com/en/rest
-      from:          https://github.com/madAle/api_recipes-cookbook, commit a4e8dd017d05
+      from:          https://github.com/madAle/api_recipes-cookbook, commit cd19ca58aea1
       address:       https://api.github.com
       credential:    in the Authorization header
       headers:       Accept: application/vnd.github+json
       calls:         14, of which 2 are not GET:
-        POST  github.repos.issues(owner, repo).create                         /repos/:owner/:repo/issues
-        POST  github.repos.issues(owner, repo).comments(issue_number).create  /repos/:owner/:repo/issues/:issue_number/comments
-    Install github 1.0.0 in config/api_recipes? [y/N] y
-    github 1.0.0 is installed in config/api_recipes/github.recipe.yml
+        POST  github_essentials.repos.issues(owner, repo).create                         /repos/:owner/:repo/issues
+        POST  github_essentials.repos.issues(owner, repo).comments(issue_number).create  /repos/:owner/:repo/issues/:issue_number/comments
+    Install github_essentials 1.0.0 in config/api_recipes? [y/N] y
+    github_essentials 1.0.0 is installed in config/api_recipes/github_essentials.recipe.yml
 
 ```ruby
 ApiRecipes.configure do |config|
   config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
 end
 
-ApiRecipes.github.users.show('octocat').run
+ApiRecipes.github_essentials.users.show('octocat').run
 ```
 
+`github_essentials` has the most used calls of the GitHub API; the recipe
+called `github` has every operation, 1,281 calls with the same names.
+
 The command writes two files in `config/api_recipes`: the recipe,
-`github.recipe.yml`, and `recipes.lock`, which records the version, the
+`github_essentials.recipe.yml`, and `recipes.lock`, which records the version, the
 repository, the commit and the checksum of each installed recipe. Commit both
 to your repository: the application downloads nothing when it starts.
 
@@ -763,7 +809,7 @@ layout.
 ### Installing, updating and checking
 
     $ api_recipes install github                      # the recipe at the head of the cookbook
-    $ api_recipes install github --version 1.0.0      # the one at the tag github-1.0.0
+    $ api_recipes install github --version 2.0.0      # the one at the tag github-2.0.0
     $ api_recipes install billing --from https://github.com/acme/api-recipes
     $ api_recipes install ./billing.recipe.yml        # a file of yours
     $ api_recipes update github
@@ -848,15 +894,21 @@ this when it runs: the installed recipes are files of your project.
 
 ### What `configure` checks
 
-Every file of `recipes_paths` must be called `NAME.recipe.yml` and must be in
-the `recipes.lock` of its folder with the checksum it has now. A file that was
-changed after it was installed, or that was never installed, raises
-`ApiRecipes::ConfigurationError` and the previous configuration stays:
+Every file of `recipes_paths` must be called `NAME.recipe.yml` and follow the
+rules of the format. A recipe that `recipes.lock` ties to a repository, because
+`install` took it from one, must also have the checksum the lock records. When
+it was changed afterwards, `configure` raises `ApiRecipes::ConfigurationError`
+and the previous configuration stays:
 
-    config/api_recipes/github.recipe.yml: was changed after it was installed: its checksum is not the one in recipes.lock. To accept the file as it is now, run `api_recipes install config/api_recipes/github.recipe.yml`
+    config/api_recipes/github.recipe.yml: was changed after it was installed from its repository: its checksum is not the one in recipes.lock. To keep the file as it is now, as a recipe of the project, run `api_recipes install config/api_recipes/github.recipe.yml`
 
-A recipe never replaces an API: a name that `apis_configs`, `apis_files_paths`
-or another recipe already defines is an error. Everything else works as for any
+A recipe that the lock does not tie to a repository is a recipe of the project:
+one you wrote, one that `convert` or `import` wrote, or one you accepted with
+`install FILE` after changing it. It is loaded as it is written, with nothing
+to compare it with, and `update` leaves it alone.
+
+A recipe never replaces an API: a name that `apis_configs` or another recipe
+already defines is an error. Everything else works as for any
 API: credentials, variables, `with`, and `api :github` in a class. To add a
 `verify_with`, which a recipe cannot carry, declare it in your code:
 
@@ -935,14 +987,19 @@ published version is the tag `NAME-VERSION`, for example `billing-1.2.0`.
 When the API is already described in a file of your project, `convert` moves
 it to a portable recipe. Run it in the root of the project: a Rails
 application or any other Ruby project, wherever `ApiRecipes.configure` is
-called.
+called. With no file it moves every API that a file of the project describes,
+one after the other, which is what a project that comes from 2.x needs:
+
+    $ bundle exec api_recipes convert
+
+With a file it moves the API of that file:
 
     $ bundle exec api_recipes convert config/apis/billing.yml.erb
     billing 1.0.0 now comes from a portable recipe: 2 calls
 
     Changed in the project
       created  config/api_recipes/billing.recipe.yml, with its line in config/api_recipes/recipes.lock
-      edited   config/initializers/api_recipes.rb: recipes_paths and config.values
+      edited   config/initializers/api_recipes.rb: recipes_paths and config.values; apis_files_paths, which loads nothing now, is gone
       edited   app/models/invoice.rb: verify_with on the declaration of the api
       deleted  config/apis/billing.yml.erb
 
@@ -959,7 +1016,6 @@ the code of each tag is moved, as it is written, to `config.values`.
 
 ```ruby
 ApiRecipes.configure do |config|
-  config.apis_files_paths = Dir[File.expand_path('../apis/*.yml.erb', __dir__)]
   config.values = {
     billing: { variables: {
       billing_host: (ENV['BILLING_HOST'] || 'billing.example.test'),
@@ -986,7 +1042,15 @@ What the command does:
   after its place, and a default written in the tag as plain text or as a
   number (`ENV.fetch('NAME', 'text')`, `ENV['NAME'] || 443`) becomes the
   default of the variable. A default that a tag gave to a variable the file
-  declares is given by the application from now on.
+  declares is given by the application from now on. Only a variable with a
+  default is declared in the recipe.
+- **A word in braces stays text**, as 2.x sent it, unless the file declares a
+  variable with that name: it is written `\{word}` in a `path` and in the
+  `base_url`, and a header or a parameter that holds one is given by a
+  variable whose default is its text.
+- **`--calls` writes beside each endpoint how it is called in Ruby**, as
+  `show:   # .invoices.show(id)`, after the name of the API. The recipe is the
+  same with or without them.
 - **Nothing in the file is run**, and there is no option that runs it. The
   code of a tag goes to `config.values` as text, and each tag has its own
   variable, also two tags in one value. `.compact` leaves out a variable whose
@@ -1002,7 +1066,12 @@ What the command does:
   before you share it.
 - **The old description is removed**: the file is deleted, or only the lines
   of that API when it describes others, because a recipe never takes the place
-  of an API that another source defines.
+  of an API that another source defines. With the last description of the
+  project the lines of `config.apis_files_paths` are taken out, when git has
+  the file as it is now or as this run of the command left it, unless they
+  still name a file that describes an API, as one in `vendor` that the command
+  does not look at; otherwise the command tells you to take them out, because
+  3.0 refuses the option.
 - **`verify_with`**, which a recipe cannot carry, is given to each `api :name`
   that a class or a module declares. One that a tag gave, or that an endpoint
   had, is left to you, as it is when one of the declarations gives its options
@@ -1014,7 +1083,11 @@ It changes your files only when that is safe, and all at once or not at all:
 
 - Lines are added only to a plain file of the project that is in the last
   commit of git. A file is deleted, or lines are taken out of it, only when
-  git has it committed as it is now. A symbolic link, and a file that git was told to skip, are never
+  git has it committed as it is now: the command works out the id of the
+  file and compares it with the one in the index and in the last commit, so
+  that no filter of the repository runs. A file that differs only by CR LF
+  at the end of its lines, as git writes it with `core.autocrlf`, counts as
+  committed. A symbolic link, and a file that git was told to skip, are never
   changed. Outside a git repository the project is not changed.
 - Ruby is read as a tree, never matched as lines and never run, and the
   command edits only what it can read whole:
@@ -1024,14 +1097,18 @@ It changes your files only when that is safe, and all at once or not at all:
   - `config.values`, which is added, or which gets one more entry when it is
     given a Hash between braces whose keys are all written as names, none of
     them the API, and whose closing brace starts a line;
-  - `config.apis_files_paths`, when the old file is deleted: it must be given
-    patterns of `Dir`, or a list between brackets of names written as text,
-    from which the one element that names the file is taken out.
+  - `config.apis_files_paths`, while other files still describe an API: it
+    must be given patterns of `Dir`, or a list between brackets of names
+    written as text, from which the one element that names the file is taken
+    out. With the last description the whole assignment goes, unless it still
+    names another file that describes an API.
 
   Anything else stops it: another mention of the old file in the code, another
   file that describes the API, a `recipes_paths` it cannot read.
 - Every Ruby file it changes must still be Ruby with the change, and when a
-  write fails every file is put back as it was.
+  write fails every file is put back as it was. A file that changed after the
+  command read it is not written over. The recipe is not written below a
+  symbolic link.
 - When a step is not possible, nothing is written, the command says why, and
   it gives the steps to do by hand with the code to paste: the commands that
   write and install the recipe, the lines for the block of
@@ -1445,7 +1522,7 @@ body, a credential or a query string: the body is on `error.response`.
 | `ApiRecipes::CredentialOriginMismatch` | a request would send a credential to an origin other than the one it was set for |
 | `ApiRecipes::InvalidUrl` | the address that would be contacted is not the one that was validated |
 | `ApiRecipes::ConfigurationError` | the configuration or the options of `with` or `follow` are not valid; has `errors`, the list of problems |
-| `ApiRecipes::RecipeFileError` | a configuration file cannot be read; a kind of `ConfigurationError` that names the file |
+| `ApiRecipes::RecipeFileError` | a recipe file cannot be read; a kind of `ConfigurationError` that names the file |
 | `ApiRecipes::ApiNameClashError` | an API is declared twice in a class hierarchy, or `api :name` names a method the class already has |
 | `ApiRecipes::ApiConfigIsNotAnHash` | the second argument of `api` is not a Hash |
 | `HTTP::TimeoutError`, `HTTP::ConnectionError` | http.rb network errors |
@@ -1602,7 +1679,7 @@ ApiRecipes does not check its origin, so prefer the levels above.
 ApiRecipes.configure do |config|
   config.logger = Rails.logger          # any Logger
   config.print_urls = true              # log the URL of every request
-  config.apis_files_paths = ['config/apis/github.yml']
+  config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
 end
 ```
 
@@ -1689,8 +1766,22 @@ github.users.show(username)                            GET    https://api.github
 github.repos.issues(owner, repo).create                POST   https://api.github.com/repos/:owner/:repo/issues
 ```
 
-A file that contains ERB is read only with `--erb`, because that runs the code
-in it.
+With no file, in the root of a project, it lists the calls of every API of the
+project: it finds the files that describe an API, and the installed recipes, as
+`api_recipes upgrade` does.
+
+```
+$ bundle exec api_recipes routes
+shop.orders                POST  https://shop.example.com/orders
+billing.invoices           GET   {erb}://{erb}/api/v1/invoices
+billing.invoices.show(id)  GET   {erb}://{erb}/api/v1/invoices/:id
+config/apis/billing.yml.erb: what an ERB tag gives is shown as {erb}; --erb evaluates the file, which runs the code in it
+```
+
+A file that contains ERB is not run: what a `<%= ... %>` tag gives is shown as
+the variable `{erb}`. `--erb` evaluates the file instead, which runs the code
+in it. A file where a tag gives a name, or where a `<% ... %>` tag decides
+which lines exist, is listed only with `--erb`.
 
 ## Recipes
 
@@ -1700,7 +1791,7 @@ in it.
 # config/initializers/api_recipes.rb
 ApiRecipes.configure do |config|
   config.logger = Rails.logger
-  config.apis_files_paths = Dir[Rails.root.join('config', 'apis', '*.yml').to_s]
+  config.recipes_paths = Dir[Rails.root.join('config', 'api_recipes', '*.recipe.yml').to_s]
   config.values = { github: { authorization: "Bearer #{Rails.application.credentials.github_token}" } }
 end
 ```
@@ -1710,14 +1801,33 @@ A value that depends on the user who is signed in does not go there: see
 
 ### One host per environment
 
-Keep one file and let ERB pick the values:
+Keep one recipe, with the address as variables, and let each environment give
+its values:
 
 ```yaml
 reports:
-  protocol: <%= ENV.fetch('REPORTS_PROTOCOL', 'https') %>
-  host: <%= ENV.fetch('REPORTS_HOST', 'reports.example.com') %>
+  recipe:
+    name: reports
+    version: 1.0.0
+    format: 1
+  variables:
+    protocol:
+      default: https
+    host:
+      default: reports.example.com
+  protocol: '{protocol}'
+  host: '{host}'
   endpoints:
     monthly:
+```
+
+```ruby
+ApiRecipes.configure do |config|
+  config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
+  config.values = {
+    reports: { variables: { protocol: ENV['REPORTS_PROTOCOL'], host: ENV['REPORTS_HOST'] }.compact }
+  }
+end
 ```
 
 ### Every page of a list
@@ -1863,8 +1973,9 @@ What ApiRecipes does:
   evaluated with ERB and is read as plain YAML, without anchors, aliases or
   tags. It cannot carry `verify_with`, cannot take the name of an API you
   already have, and cannot let a variable decide where its host ends. Its
-  text, comments included, holds only visible characters. It is loaded only if
-  it matches the checksum in `recipes.lock`.
+  text, comments included, holds only visible characters. One that `install`
+  took from a repository is loaded only if it matches the checksum in
+  `recipes.lock`.
 - **`api_recipes install` and `update`** show where the requests and the
   credential go, the headers and the parameters sent with every request, those
   that an endpoint adds, and which calls are not GET, the ones that `resource`
@@ -1890,8 +2001,8 @@ What ApiRecipes does:
   `Marshal.dump` and `YAML.dump`, and its JSON is the one of `to_h`.
 - **`fill`** calls only public writers and skips keys that are not plain
   attribute names.
-- **Configuration files** are read with `YAML.safe_load`, and the options are
-  validated when they are loaded.
+- **The configuration** is validated when it is loaded, whether it comes
+  from a recipe or from `apis_configs`.
 
 What stays with your application:
 
@@ -1905,7 +2016,12 @@ What stays with your application:
   the variables of one user on it. Use `with`, or an object made for the request.
 - `response.original_response` is the raw http.rb response, and it gives access
   to the request that was sent, headers included. Do not log or serialize it.
-- ERB in a configuration file runs code. Load only files you trust.
+- The gem evaluates no ERB. `api_recipes upgrade --erb` and
+  `api_recipes routes --erb` do, on the files of a 2.x project that you name:
+  that runs the code in them.
+- A recipe of the project, which the lock ties to no repository, is loaded as
+  it is written: review a recipe that someone adds to the folder as you review
+  code, because it decides where the requests and the credential go.
 - Read what `api_recipes install` shows before you answer yes. ApiRecipes checks
   the form of a recipe, not whose host it names. Commit the installed recipes
   and `recipes.lock`, and review their changes as you review code: the lock
@@ -1922,9 +2038,8 @@ Every protection has an example in [`spec/security`](spec/security); its
 
 | Option | Meaning |
 | --- | --- |
-| `apis_files_paths` | Array of YAML files, evaluated with ERB |
+| `recipes_paths` | Array of portable recipes (`NAME.recipe.yml`), read as data only; one that `recipes.lock` ties to a repository is compared with it |
 | `apis_configs` | Hash of API descriptions |
-| `recipes_paths` | Array of installed portable recipes (`NAME.recipe.yml`), read as data only and checked against `recipes.lock` |
 | `values` | for each API, its credential and the values of its variables for the whole application, as `{ api_name: { authorization: '...', variables: { name: value } } }`; `basic_auth` in place of `authorization` |
 | `logger` | a Logger to use |
 | `log_to` | path or IO for the default logger (default: STDERR) |
@@ -1962,8 +2077,8 @@ Every protection has an example in [`spec/security`](spec/security); its
 | `on_bad_code` | looked for up the tree | `raise` or `ignore` |
 | `mime_type` | looked for up the tree | content type used by `response.data` |
 | `verify_with` | looked for up the tree | method that decides whether a response is a success |
-| `default_headers` | none | headers added to those of the API, for this endpoint and the ones below it |
-| `default_params` | none | query parameters added to those of the API, for this endpoint and the ones below it |
+| `default_headers` | none | headers of this endpoint; a request finds them here when it looks up the tree, before those of the API |
+| `default_params` | none | query parameters of this endpoint; a request finds them here when it looks up the tree, before those of the API |
 | `resource` | `no` | `yes` adds the endpoints `show`, `create`, `update`, `replace` and `delete`; a list adds only the ones it names |
 | `endpoints` | none | nested endpoints |
 
@@ -2038,8 +2153,8 @@ Run one from the root of the repository:
 
     $ bundle exec ruby examples/simple_usage.rb
 
-[`examples/config/github.yml.erb`](examples/config/github.yml.erb) is a
-configuration file with every option commented.
+[`examples/config/github.recipe.yml`](examples/config/github.recipe.yml) is a
+recipe with every option commented.
 
 ## Compatibility
 

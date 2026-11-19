@@ -58,8 +58,8 @@ describe 'Importing an OpenAPI description' do
                      ] } } })
       code, out, = import(text, '--name', 'svc')
       expect(code).to eq(0)
-      expect(YAML.safe_load(out)).to eq('svc' => { 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
-      expect(out.lines.size).to eq(5)
+      expect(YAML.safe_load(out)).to eq('svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
+      expect(out.lines.size).to eq(9)
     end
 
     it 'with ERB is removed from the comments, and loading the recipe as a file runs nothing' do
@@ -75,10 +75,7 @@ describe 'Importing an OpenAPI description' do
         code, = import(text, '--name', 'svc', '--output', recipe)
         expect(code).to eq(0)
         expect(File.read(recipe)).not_to match(/<%|%>/)
-        ApiRecipes.configure do |config|
-          config.logger = Logger.new(IO::NULL)
-          config.apis_files_paths = [recipe]
-        end
+        configure_test_apis(ApiRecipes::CLI::Description.read(recipe, erb: true))
         expect(ApiRecipes.svc.users.url.to_s).to eq('https://api.example.test/users')
         expect(File.exist?(marker)).to be(false)
       ensure
@@ -95,7 +92,7 @@ describe 'Importing an OpenAPI description' do
                        ] } } })
         code, out, = import(text, '--name', 'svc')
         expect(code).to eq(0)
-        expect(YAML.safe_load(out)).to eq('svc' => { 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
+        expect(YAML.safe_load(out)).to eq('svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
         expect(out).not_to match(/[\u2028\u2029\u0085\v\f]/)
       end
     end
@@ -208,7 +205,7 @@ describe 'Importing an OpenAPI description' do
       allow(ApiRecipes::CLI::Import::Document).to receive(:load).and_return(ApiRecipes::CLI::Import::Document.new(root))
       result = ApiRecipes::CLI::Import.new('unused', name: 'svc').call
       expect(YAML.safe_load(result.text)).to eq(
-        'svc' => { 'host' => '{v}.example.test', 'variables' => { 'v' => {} }, 'endpoints' => { 'users' => nil } }
+        'svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => '{v}.example.test', 'endpoints' => { 'users' => nil } }
       )
       expect(result.warnings.join.length).to be < 2000
     end
@@ -221,7 +218,7 @@ describe 'Importing an OpenAPI description' do
            "paths:\n  /users:\n    get: {operationId: *x9, responses: *x9}\n"
     code, out, err = Timeout.timeout(10) { import(text, '--name', 'svc') }
     expect(code).to eq(0)
-    expect(YAML.safe_load(out)).to eq('svc' => { 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
+    expect(YAML.safe_load(out)).to eq('svc' => { 'recipe' => { 'name' => 'svc', 'version' => '1.0.0', 'format' => 1 }, 'host' => 'api.example.test', 'endpoints' => { 'users' => nil } })
     expect(err.length).to be < 2000
   end
 
@@ -254,5 +251,37 @@ describe 'Importing an OpenAPI description' do
     code, out, err = Timeout.timeout(10) { import(text) }
     expect([code, out]).to eq([1, ''])
     expect(err).to match(/keys must be plain text/)
+  end
+
+  # `import --calls` and `convert --calls` write in a comment how each endpoint
+  # is called. The comment is made from the recipe just written and checked.
+  describe 'the calls written beside the endpoints' do
+    let(:node) { Struct.new(:name, :path_params, :endpoints) { def route? = true } }
+
+    it 'hold only names of endpoints and of parameters: anything else is not written' do
+      hostile = [node.new("a\nhost: evil.test", [], {}), node.new('b', ["<%= system('x') %>"], {}), node.new('c # d', [], {}),
+                 node.new("e\u202E", [], {}), node.new('fine', ['id'], {})]
+      definition = Struct.new(:endpoints).new(hostile.to_h { |one| [one.name, one] })
+      expect(ApiRecipes::CLI::Calls.of(definition)).to eq(['fine'] => '.fine(id)')
+    end
+
+    it 'are written on one line each, without ERB, by the writer of import' do
+      leaf = ApiRecipes::CLI::Import::Tree::Node.new('a', {}, 'GET /a', [])
+      text = ApiRecipes::CLI::Import::Writer.new(name: 'svc', options: { host: 'h.test' }, nodes: [leaf],
+                                                 calls: { %w[a] => ".a\nhost: evil.test <%= raise 'x' %>" }).to_yaml
+      expect(text).not_to match(/<%|%>/)
+      expect(YAML.safe_load(text)).to eq('svc' => { 'host' => 'h.test', 'endpoints' => { 'a' => nil } })
+    end
+
+    it 'leave the recipe as it is without them, also from a hostile description' do
+      text = openapi('paths' => { '/users/{id}' => { 'get' => { 'operationId' => "x\nhost: evil.test <%= 1 %>" } },
+                                  '/a b/{c-d}/{e.f}' => { 'get' => { 'summary' => "<%= 2 %>\n# .evil" } } })
+      code, plain, = import(text, '--name', 'svc')
+      expect([code, import(text, '--name', 'svc', '--calls').first]).to eq([0, 0])
+      with_calls = import(text, '--name', 'svc', '--calls')[1]
+      expect(YAML.safe_load(with_calls)).to eq(YAML.safe_load(plain))
+      expect(with_calls.lines - plain.lines).to all(match(/\A +# \.[\w.?!(), ]+\n\z/))
+      expect((with_calls.lines - plain.lines).map(&:strip)).to eq(['# .users.show(id)', '# .a_b.show(c_d, e_f)'])
+    end
   end
 end

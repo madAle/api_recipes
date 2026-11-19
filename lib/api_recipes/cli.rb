@@ -5,6 +5,9 @@ require 'fileutils'
 require 'api_recipes'
 require 'api_recipes/version'
 require 'api_recipes/cli/code'
+require 'api_recipes/cli/description'
+require 'api_recipes/cli/tags'
+require 'api_recipes/cli/calls'
 require 'api_recipes/cli/upgrade'
 require 'api_recipes/cli/import'
 require 'api_recipes/cli/routes'
@@ -24,27 +27,33 @@ module ApiRecipes
             Without arguments, in the root of a project: finds its Ruby files and the files
             that describe an api, and looks for what changed in api_recipes 3.0. It says what
             it checked. With arguments: the Ruby files under each PATH, and each configuration
-            FILE checked with the 3.0 rules. It never changes a file. A file that contains ERB
+            FILE checked with the 3.0 rules. On a terminal it offers to make the changes it is
+            sure of, one at a time: it shows each as a diff and changes a file only when the
+            answer is y. Away from a terminal it never changes a file. A file that contains ERB
             is checked without running its code, leaving out what its tags give; --erb
             evaluates it instead: this runs the code in it. Where what to write is known it
             gives the code to paste, with the whole block of ApiRecipes.configure; --no-code
             leaves the code out.
             Exits with 1 if it finds something, 2 if it could not read something, 0 otherwise.
-        import [--name NAME] [--only GLOB]... [--except GLOB]... [--server N] [--output FILE] FILE
+        import [--name NAME] [--version VERSION] [--only GLOB]... [--except GLOB]... [--server N] [--calls] [--output FILE] FILE
             Writes a recipe from the OpenAPI 3.0 or 3.1 description in FILE (YAML or JSON), on
             STDOUT or in the file given with --output, which must not exist. Warnings and a
             summary go to STDERR. --only and --except choose the paths: * also crosses slashes.
-            --server chooses the entry of servers, counted from 0. Nothing in FILE is run, no
+            --server chooses the entry of servers, counted from 0. --calls writes under each
+            endpoint how it is called in Ruby. Nothing in FILE is run, no
             other file is read and the network is not used.
             Exits with 1 if the description cannot be imported, 2 if the arguments are wrong.
-        routes [--erb] FILE...
+        routes [--erb] [FILE]...
             Lists the calls that the recipes in each FILE offer, with the verb and the address.
-            A file that contains ERB is evaluated only with --erb: this runs the code in it.
+            Without a FILE, in the root of a project: the calls of every file that describes
+            an api and of every installed recipe. What an ERB tag gives is shown as {erb},
+            without running the tag; --erb evaluates the file: this runs the code in it.
             A file called NAME.recipe.yml is read as a portable recipe: as data only.
             Exits with 1 if a file is not a valid configuration, 2 if it could not read one.
-        convert [--name NAME] [--version VERSION] [--to DIR] FILE
+        convert [--name NAME] [--version VERSION] [--calls] [--to DIR] [FILE]
             Moves the api that the configuration FILE of a project describes to a portable
-            recipe. In the root of a project (a folder with a Gemfile, or where a git
+            recipe. Without FILE, in the root of a project: every api that a file of the
+            project describes, one after the other. In the root of a project (a folder with a Gemfile, or where a git
             repository starts): installs NAME.recipe.yml in config/api_recipes,
             moves the code of each ERB tag to config.values in the file that calls
             ApiRecipes.configure, removes the old description, and lists every file it
@@ -52,7 +61,8 @@ module ApiRecipes
             all: when it cannot, it gives the steps and the code to paste. With --to DIR it
             writes the recipe alone in DIR and leaves the project as it is. Nothing in FILE is run: a tag becomes a variable. A header or a parameter named
             like a credential is never copied into the recipe. --name chooses the api when
-            FILE describes several; --version is the version of the recipe (1.0.0).
+            FILE describes several; --version is the version of the recipe (1.0.0); --calls
+            writes beside each endpoint how it is called in Ruby.
             Exits with 1 if FILE cannot become a recipe or the project cannot be changed
             safely, 2 if the arguments are wrong or something could not be read or written.
         install [--version VERSION] [--from URL] [--to DIR] [--yes] NAME|FILE
@@ -100,7 +110,7 @@ module ApiRecipes
           out.puts USAGE
           0
         when 'upgrade'
-          upgrade(args, out, err)
+          upgrade(args, out, err, input)
         when 'import'
           import(args, out, err)
         when 'routes'
@@ -131,6 +141,8 @@ module ApiRecipes
         parser.on('--only GLOB') { |glob| options[:only] << glob }
         parser.on('--except GLOB') { |glob| options[:except] << glob }
         parser.on('--server N', Integer) { |number| options[:server] = number }
+        parser.on('--version VERSION') { |version| options[:version] = version }
+        parser.on('--calls') { options[:calls] = true }
         parser.on('--output FILE') { |file| output = file }
         paths = parser.parse(args)
         problem = import_problem(paths, output, options[:name])
@@ -140,6 +152,11 @@ module ApiRecipes
         end
 
         result = Import.new(paths.first, **options).call
+        expected = "#{result.name}#{Internals::Recipe::SUFFIX}"
+        if output&.end_with?(Internals::Recipe::SUFFIX) && File.basename(output) != expected
+          err.puts "--output: a recipe called #{result.name} is read from a file called #{expected}, not #{Recipes::Summary.shown(File.basename(output), 100)}"
+          return 2
+        end
         return 2 unless write_recipe(result.text, output, out, err)
 
         result.warnings.each { |warning| err.puts "warning: #{warning}" }
@@ -192,10 +209,13 @@ module ApiRecipes
         parser = OptionParser.new
         parser.on('--name NAME') { |name| options[:name] = name }
         parser.on('--version VERSION') { |version| options[:version] = version }
+        parser.on('--calls') { options[:calls] = true }
         parser.on('--to DIR') { |dir| directory = dir }
         files = parser.parse(args)
+        return convert_all(options, out, err) if files.empty? && directory.nil? && options[:name].nil? && project_root?
+
         unless files.size == 1
-          err.puts 'convert needs one configuration file'
+          err.puts 'convert needs one configuration file, or none in the root of a project: it then converts every api the project describes'
           return 2
         end
 
@@ -276,23 +296,70 @@ module ApiRecipes
         2
       end
 
+      # Every api that a file of the project describes moves to a portable
+      # recipe, one at a time. Returns the highest exit code.
+      def convert_all(options, out, err)
+        described = Upgrade::Project.new.config_files.reject { |file| file.end_with?(Internals::Recipe::SUFFIX) }
+        if described.empty?
+          out.puts 'No file of this project describes an api: there is nothing to convert'
+          return 0
+        end
+
+        written = {}
+        codes = described.sort.flat_map do |file|
+          names = begin
+            Convert.shape(File.read(file)).keys
+          rescue Convert::Refused, Psych::Exception, SystemCallError
+            [nil]
+          end
+          names.map { |name| convert_one(file, names.size > 1 ? name : nil, options, written, out, err) }
+        end
+        codes.max
+      end
+
+      def convert_one(file, name, options, written, out, err)
+        out.puts
+        result = Convert.new(file, **options, name: name).call
+        Convert::Migration.new(result, file, out: out, err: err, written: written).call
+      rescue Convert::Refused => e
+        err.puts "#{Recipes::Summary.shown(file, 300)} was not converted:"
+        e.reasons.each { |reason| err.puts "  - #{reason}" }
+        1
+      rescue Convert::Unusable => e
+        err.puts e.message
+        2
+      rescue SystemStackError
+        err.puts "#{Recipes::Summary.shown(file, 300)}: is nested too deeply to be read"
+        1
+      rescue StandardError => e
+        err.puts "convert failed (#{e.class}): this is a defect of api_recipes, not of the file"
+        1
+      end
+
       def routes(args, out, err)
         erb = false
         parser = OptionParser.new
         parser.on('--erb') { erb = true }
         files = parser.parse(args)
-        if files.empty?
-          err.puts 'routes needs at least one configuration file'
+        return Routes.new(files, erb: erb).report(out, err) unless files.empty?
+
+        # No file given: the apis of the project in the current directory.
+        unless project_root?
+          err.puts 'routes needs at least one configuration file, or to be run in the root of a project'
           return 2
         end
-
-        Routes.new(files, erb: erb).report(out, err)
+        found = Upgrade::Project.new.config_files
+        if found.empty?
+          err.puts 'no file that describes an api was found in this project: name the files to read'
+          return 1
+        end
+        Routes.new(found, erb: erb, project: true).report(out, err)
       rescue OptionParser::ParseError => e
         err.puts e.message
         2
       end
 
-      def upgrade(args, out, err)
+      def upgrade(args, out, err, input)
         configs = []
         erb = false
         parser = OptionParser.new
@@ -301,7 +368,7 @@ module ApiRecipes
         parser.on('--erb') { erb = true }
         parser.on('--no-code') { code = false }
         paths = parser.parse(args)
-        return Upgrade.new(paths, config: configs, erb: erb, code: code).report(out, err) unless paths.empty? && configs.empty?
+        return Upgrade.new(paths, config: configs, erb: erb, code: code).report(out, err, input: input) unless paths.empty? && configs.empty?
 
         unless File.file?('Gemfile')
           err.puts 'upgrade without arguments checks the project in the current directory, and there is no Gemfile ' \
@@ -309,7 +376,7 @@ module ApiRecipes
           return 2
         end
 
-        Upgrade.for_project(Upgrade::Project.new, erb: erb, code: code).report(out, err)
+        Upgrade.for_project(Upgrade::Project.new, erb: erb, code: code).report(out, err, input: input)
       rescue OptionParser::ParseError => e
         err.puts e.message
         2

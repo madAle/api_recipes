@@ -1,13 +1,13 @@
 require 'api_recipes'
 require 'yaml'
 
-# Configure ApiRecipes manually by loading configs from somewhere (Here we use one of the provided yml files for convenience)
-# Take a look at examples/config/github.yml.erb  for a full list of available options
+# Configure ApiRecipes manually by loading configs from somewhere (here the Hash is read from one of the recipes, for convenience)
+# Take a look at examples/config/github.recipe.yml  for a full list of available options
 
 
 ApiRecipes.configure do |config|
   # Note the 'apis_configs' method: provide an Hash with apis configurations
-  config.apis_configs = YAML.load_file(File.expand_path('examples/config/github.yml.erb'))
+  config.apis_configs = YAML.load_file(File.expand_path('examples/config/github.recipe.yml'))
   config.print_urls = true
 end
 

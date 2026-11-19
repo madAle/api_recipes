@@ -1,4 +1,8 @@
 github:
+  recipe:
+    name: github
+    version: 1.0.0
+    format: 1
   host: api.github.com
   endpoints:
     users:

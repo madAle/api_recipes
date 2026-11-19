@@ -1,12 +1,11 @@
 # Upgrading from 2.x to 3.0
 
-Version 3.0 keeps the way you use the gem: the YAML files, `ApiRecipes.configure`,
-`api :name` in a class and the chain
-`ApiRecipes.github.users.show('octocat').run` work as before. A YAML file that
-is valid for 2.x needs no change, apart from what part 2 describes: options and
-values that 2.x accepted without checking them, a placeholder in `base_url` and a
-`{word}` in a header value or in a path. What changes is how the gem behaves around them: it
-checks more, it refuses more, and a few results are different.
+Version 3.0 keeps the way you use the gem: `ApiRecipes.configure`, `api :name`
+in a class and the chain `ApiRecipes.github.users.show('octocat').run` work as
+before. The YAML description of an API becomes a portable recipe, with the same
+options and endpoints: `api_recipes convert` moves every description of a
+project to one, as part 2 describes. What changes is how the gem behaves around
+them: it checks more, it refuses more, and a few results are different.
 
 This guide has six parts:
 
@@ -87,21 +86,46 @@ configuration in place. Four things are worth knowing:
 - A `base_url` with a path placeholder (`:name` or `*name`) is an error. In 2.x
   it silently became a required parameter of every root endpoint. For a value
   that changes, declare a [variable](README.md#variables) and write `{name}`.
-- A word in braces, such as `{id}`, in a value of `default_headers` is now a
-  variable, and one that is not declared is an error. To send that text as it
-  is, declare a variable whose default is the text and use the variable:
+- A word in braces, such as `{id}`, in a value of `default_headers` or of
+  `default_params`, in the `base_url` or in the `path` of an endpoint is now a
+  variable, which a request asks a value for. In 2.x it was sent as text.
+  `api_recipes convert` keeps it text: it writes `\{id}` in a path and in the
+  `base_url`, and for a header or a parameter it declares a variable whose
+  default is the text and uses the variable, as in
   `variables: { template: { default: '{id}' } }` with the header value
   `'{template}'`. Braces around anything else, such as a JSON value, are sent
-  as they are.
-- A word in braces in the `path` of an endpoint, such as `/items/{id}`, is now a
-  variable too, and one that is not declared is an error. In 2.x the braces were
-  sent as text. If you meant a value that changes at every call, write a
-  placeholder, `/items/:id`. To keep the braces as text, write `\{id}`.
-- A file that is missing, empty, not valid YAML or not valid UTF-8 raises
-  `ApiRecipes::RecipeFileError`, which names the file. Files are read with
-  `YAML.safe_load`: plain values, symbols and aliases are accepted, and nothing
-  else. A file called `something.recipe.yml` is refused: it is a portable
-  recipe, and goes in `recipes_paths`.
+  as they are. In a path, if you meant a value that changes at every call,
+  write a placeholder, `/items/:id`.
+- A recipe that is missing, not valid YAML, not valid UTF-8 or not a recipe
+  raises `ApiRecipes::RecipeFileError`, which names the file. A recipe is
+  plain YAML: anchors, aliases, tags and the merge key are refused.
+
+### An API is described by a portable recipe
+
+2.x loaded the files of `apis_files_paths`: YAML that the gem evaluated with
+ERB. 3.0 loads only portable recipes, files called `NAME.recipe.yml` that
+hold data and no code, and `apis_configs`. Assigning `apis_files_paths` raises
+`ApiRecipes::Error`, and the message names the command to run:
+
+    $ bundle exec api_recipes convert
+
+In the root of the project, with no argument, it moves every API that a file
+describes to a recipe in `config/api_recipes`, one after the other:
+
+- what an `<%= ... %>` tag gave becomes a variable of the recipe, and the code
+  of the tag moves, as it is written, to `config.values` in the file that
+  calls `ApiRecipes.configure`;
+- `config.recipes_paths` is added, and `config.apis_files_paths` goes with the
+  last description;
+- the old file is deleted, and every change is listed.
+
+`api_recipes upgrade`, run without arguments in the root of the project,
+offers the same move on a terminal, one API at a time, and shows the files it
+creates, edits and deletes before it asks. A file
+where ERB decides the structure, with `<% if %>` or a tag that gives a name,
+cannot be converted by the command: it says so, and that description is
+rewritten by hand as a recipe. The whole of what `convert` does is in the
+README, under "From a file of your project".
 
 ### A class with its own destination needs its own credential
 
@@ -319,13 +343,6 @@ the nearest, then in the API, and takes the first value it finds. Look at the
 endpoints that set one of them and also contain other endpoints: those now
 find it there. `ok_code` is read only on its endpoint.
 
-### `apis_configs` after the files
-
-In 2.x, assigning `apis_configs` after `apis_files_paths` discarded what the
-files had loaded. Now every source is used, in the order they were assigned, and a
-later source replaces an API with the same name. If you assigned `apis_configs` to
-get rid of the files, do not assign the files.
-
 ### Endpoints named like a method
 
 An endpoint called `with`, `definition`, `authorization`, `basic_auth` or `variables`
@@ -427,8 +444,9 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   `protocol`, `port`, `timeout`, `on_bad_code`, `mime_type`, `verb` and
   `ok_code`, with values given at any of those levels.
 - **`default_params`**: query parameters sent with every request, as
-  `default_headers` does for headers. Both can be written on an endpoint, for
-  that endpoint and the ones below it.
+  `default_headers` does for headers. Both can be written on an endpoint: a
+  request looks for them on its endpoint, then on each endpoint that contains
+  it, then on the API.
 - **`resource`**: `resource: true` on an endpoint adds `show`, `create`,
   `update`, `replace` and `delete` under it.
 - **`auth`**: says where the credential goes: the `Authorization` header, a header
@@ -460,7 +478,8 @@ You can adopt these when you are ready. The [README](README.md) describes each o
   `definition` hide the values of `default_headers`.
 - An API, an endpoint, a response and a definition refuse `Marshal.dump` and
   `YAML.dump`; the first three refuse JSON too.
-- Configuration files are read with `YAML.safe_load`.
+- A recipe is read as plain YAML, without anchors, aliases or tags, and is
+  never evaluated with ERB.
 
 What stays with your application:
 
@@ -469,14 +488,17 @@ What stays with your application:
   host). Check it against a list of hosts you know.
 - `response.original_response` is the raw http.rb response and gives access to the
   request that was sent, headers included. Do not log or serialize it.
-- ERB in a configuration file runs code: load only files you trust.
+- The gem evaluates no ERB. `api_recipes upgrade --erb` and
+  `api_recipes routes --erb` do, on the files of a 2.x project that you name:
+  that runs the code in them.
 
 See [Security in the README](README.md#security) for the same list in its place.
 
 ## The `api_recipes upgrade` command
 
-The gem installs a command that looks for the changes of this guide. It never
-changes a file. Run it in the root of your project, with no argument:
+The gem installs a command that looks for the changes of this guide. It changes
+a file only when you say yes to a change it shows you. Run it in the root of
+your project, with no argument:
 
     $ bundle exec api_recipes upgrade
 
@@ -489,11 +511,25 @@ It finds by itself what to check, and says what it checked:
   `[breaks]`; a line that deserves a look because its result changes is marked
   `[check]`: a manual encoding of a path parameter, a bare `rescue`, `follow:`,
   `response.request`, the removed `Hash` and `Array` methods.
+- **What a line alone does not tell.** The command also reads each Ruby file
+  as a tree, without running it, and finds: a credential assigned in the body
+  of a class, through a variable, over two lines or with `send`; a credential
+  that is not text; `api :format` and the other names that are already
+  methods; a class that gives an API its own `host`, `protocol` or `port`
+  and no credential; `apis_configs` assigned after the files; a block passed
+  to `run` whose value is used; `request`, `to_s` and `respond_to?` called on
+  what `run` returned, whatever the variable is called; and `Error`,
+  `VERSION` or the name of an error of the gem written alone in a class that
+  includes `ApiRecipes`. A file that is not valid Ruby is read line by line
+  only.
 - **The files that describe an API**: the YAML files (`.yml`, `.yaml`, also
   followed by `.erb`) where a name has `endpoints`, each with its options or
   with none, and the files called `NAME.recipe.yml`. Those under `spec`, `test`
   and `features` are fixtures and are left out. Each is checked with the rules
-  of 3.0 (marked `[config]`).
+  of 3.0 (marked `[config]`). Two changes that give no error are marked
+  `[check]`: `timeout`, `on_bad_code`, `mime_type` or `verify_with` set on an
+  endpoint whose inner endpoints do not set it, which now find it there, and
+  an endpoint whose name is a method of the object that would have it.
 - **Less noise.** A bare `rescue` or a call to `CGI.escape` is in every
   application. The checks that also match code that has nothing to do with the
   gem are applied only to the files whose code names `ApiRecipes` or calls one
@@ -518,22 +554,28 @@ It finds by itself what to check, and says what it checked:
   only what it is sure of: one whole expression, with no `if`, `unless`,
   `rescue`, `and` or `or` after it, on a line that is always run.
 
-```
-app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
-app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
-config/apis/github.yml: [config] github: unknown option 'hots'
+What needs an answer comes last, where the terminal stops: what was checked,
+the changes the command cannot find, the findings, and what to do.
 
+```
 Checked 214 Ruby files, 6 of them use api_recipes
 Checked 2 configuration files: config/apis/billing.yml, config/apis/github.yml
 app/models/shop.rb:4: declares the api 'shopify', and no configuration file found here describes it
 config/apis/billing.yml: 2 values come from ERB and were not checked
+
+What this command cannot find
+(the list of the changes that a search in the text cannot find)
+
+app/client.rb:5: [breaks] endpoint.route was removed: use response.fill or endpoint.definition
+app/client.rb:6: [check] a bare rescue now catches ApiRecipes errors too
+config/apis/github.yml: [config] github: unknown option 'hots'
 
 Code to paste
 
 In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure (lines 1 to 3) with:
 
     ApiRecipes.configure do |config|
-      config.apis_files_paths = Dir['config/apis/*.yml']
+      config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
       config.values = {
         github: { authorization: "Bearer #{ENV['GITHUB_TOKEN']}" }
       }
@@ -541,10 +583,74 @@ In config/initializers/api_recipes.rb, replace the block of ApiRecipes.configure
 
 Then remove the lines that gave these values: config/initializers/github.rb:1
 
-(the list of what the command cannot find)
-
 3 findings
+
+What to do now
+  1. Fix the 1 line marked breaks: that code stops working, and each line says what to use instead
+  2. Correct what is marked config (1): each is a problem in a file that describes an api
+  3. Read the 1 line marked check: the result changes, and only you can tell whether the code still does what it should. A check line is reported at every run
+  4. Go through what this command cannot find: look in the code for the changes that concern the project
+  5. Run this command again: go on when only check lines that you have read are left
+  6. Start the application and run its tests: ApiRecipes.configure checks the whole configuration when it loads, also what an ERB tag gives, and lists every problem at once
 ```
+
+**On a terminal the command offers to make the changes it is sure of**, one
+at a time. Today they are the values that a line gave when the application
+started: `ApiRecipes.print_urls = ...` moves into the block of
+`ApiRecipes.configure`, and the credentials assigned on `ApiRecipes.NAME`
+become `config.values`. For a `rescue` that names no class, or
+`StandardError`, it offers to put before it `rescue ApiRecipes::Error` with a
+`raise`, which is what 2.x did: the errors of the gem go on to the code that
+called. Answer no when that rescue should handle them from now on. Each change
+is shown as a diff of the files it touches, and is made only when you answer
+`y` or `yes`:
+
+```
+Move print_urls into the block of ApiRecipes.configure
+
+config/initializers/api_recipes.rb:1
+  ApiRecipes.configure do |config|
+    config.recipes_paths = Dir['config/api_recipes/*.recipe.yml']
++   config.print_urls = true
+  end
+- ApiRecipes.print_urls = true
+
+Make this change? [y/N]
+```
+
+- A change is all the files it needs or none: the line that gave the value
+  is taken out together with the line that is added.
+- It touches only files that git has committed as they are now, so that
+  `git diff` shows the change and `git checkout` undoes it. Otherwise the
+  command says why, and gives the code to paste as before. A file saved while
+  the question waits is not written over: the command says so and writes
+  nothing. A file whose lines end with CR LF is left to you.
+- A line is taken out only when it is the assignment and nothing else, and
+  the value reads nothing that only that place has: a local variable, an
+  instance variable, a method of the file, `__FILE__`. A value given after
+  other code that may prepare it, as a `require` or `Dotenv.load`, is left to
+  you: in the file of the block when that code comes between the block and the
+  line, in another file when that file holds any other code, because it runs
+  at another time. So are two credentials for one API, for which the code to
+  paste gives neither and says to choose, and a block of `configure` that the
+  command cannot read whole or that already assigns the value.
+- A rescue is changed only in a file that names the gem. A change you refuse
+  stays among the findings, with its code to paste. A `rescue` that comes
+  after one that catches the errors of the gem first (`ApiRecipes::Error`,
+  `StandardError`, `Exception`, or one that names no class) is not a finding.
+- Given files or folders to check, the command moves no API to a recipe and
+  does not take `apis_files_paths` out: it does not know the rest of the
+  project. Run it without arguments in the root of the project for those.
+- It asks only when it reads the answers from a terminal and shows the
+  results on one. Away from a terminal, as in a CI or with the results sent
+  to a file, and with `--no-code`, the command asks nothing and changes
+  nothing.
+
+The steps at the end are those of what was found: a kind of finding that is
+not there has no step. On a terminal the same results are shown in sections,
+with a colour for each kind of finding and lines that fit the width of the
+window. Away from a terminal, as in a CI or through a pipe, and with
+`NO_COLOR` set, the text is the one above, with no colours.
 
 The line about `api :shopify` is said of a declaration in the code when no file
 found in the project describes that API and the code never assigns
@@ -557,9 +663,9 @@ file.
 
     $ api_recipes upgrade app lib --config config/apis/github.yml
 
-The command then prints the list of changes that a search in the text
-cannot find, which you check by hand (this guide has the details of each), and a
-summary line: `Nothing to change`, `1 finding` or `N findings`. When it found
+The list of the changes that a search in the text cannot find is the same at
+every run: you check them by hand, and this guide has the details of each. The
+summary line is `Nothing to change`, `1 finding` or `N findings`. When it found
 no description of an API it says so instead of `Nothing to change`. The summary
 line is left out when there is no finding and something could not be read.
 

@@ -114,10 +114,10 @@ describe 'Variables in the options of a request' do
   end
 
   describe 'the configuration' do
-    it 'refuses a variable that the api does not declare' do
-      found = problems { configure_test_apis(svc: { host: 'h.test', protocol: '{proto}', port: '{p}', timeout: '{t}', endpoints: { ping: { verb: '{v}' } } }) }
-      expect(found).to contain_exactly("svc.protocol: unknown variable 'proto'", "svc.port: unknown variable 'p'",
-                                       "svc.timeout: unknown variable 't'", "svc.endpoints.ping.verb: unknown variable 'v'")
+    it 'makes a variable with no default of a name that an option uses and the api does not declare' do
+      configure_test_apis(svc: { host: 'h.test', protocol: '{proto}', port: '{p}', timeout: '{t}', endpoints: { ping: { verb: '{v}' } } })
+      expect(ApiRecipes.svc.definition.variables.keys).to eq(%i[proto p t v])
+      expect { ApiRecipes.svc.ping.run }.to raise_error(ApiRecipes::MissingVariable)
     end
 
     it 'still refuses a value that is neither valid nor a variable' do

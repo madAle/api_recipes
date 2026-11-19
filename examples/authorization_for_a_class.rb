@@ -1,8 +1,8 @@
 require 'api_recipes'
 
-# Take a look at examples/config/github.yml.erb  for a full list of available options
+# Take a look at examples/config/github.recipe.yml  for a full list of available options
 ApiRecipes.configure do |config|
-  config.apis_files_paths = ['examples/config/github.yml.erb']
+  config.recipes_paths = ['examples/config/github.recipe.yml']
 end
 
 # Get your OAUTH token on Github.

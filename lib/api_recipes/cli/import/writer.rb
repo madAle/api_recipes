@@ -10,7 +10,7 @@ module ApiRecipes
       # Ruby's YAML generator. Before the text is returned it is read back and
       # compared with the data it was written from.
       class Writer
-        API_KEYS = %i[protocol host port base_url auth variables].freeze
+        API_KEYS = %i[recipe protocol host port base_url auth variables].freeze
         ENDPOINT_KEYS = %i[path verb route ok_code].freeze
         COMMENT_COLUMN = 34
         MAX_NAME = 1000
@@ -18,11 +18,14 @@ module ApiRecipes
         LINE_BREAKING = /[[:cntrl:]\u2028\u2029]/
         INTERNAL = 'internal error: the recipe does not read back as it was written, so nothing was written'
 
-        def initialize(name:, options:, nodes:, header: nil)
+        # calls: { names of an endpoint => how it is called }, written in a
+        # comment under the endpoint; nil to write none.
+        def initialize(name:, options:, nodes:, header: nil, calls: nil)
           @name = name
           @options = options
           @nodes = nodes
           @header = header
+          @calls = calls
         end
 
         def to_yaml
@@ -57,11 +60,13 @@ module ApiRecipes
           body.empty? ? nil : body
         end
 
-        def nodes(list, indent, where)
+        def nodes(list, indent, where, names = [])
           list.to_h do |node|
             name = scalar(node.name, where, 'the name of an endpoint')
             comment = Import.one_line(node.comment)
             line(indent, "#{name}:", comment.empty? ? nil : comment)
+            called = names + [node.name.to_s]
+            call_line(@calls[called]) if @calls && @calls[called]
             here = "#{where}.#{node.name}"
             body = {}
             ENDPOINT_KEYS.each do |key|
@@ -69,7 +74,7 @@ module ApiRecipes
             end
             unless node.children.empty?
               line(indent + 1, 'endpoints:')
-              body['endpoints'] = nodes(node.children, indent + 2, "#{here}.endpoints")
+              body['endpoints'] = nodes(node.children, indent + 2, "#{here}.endpoints", called)
             end
             [node.name, body.empty? ? nil : body]
           end
@@ -94,6 +99,13 @@ module ApiRecipes
             line(indent, "#{key}: #{scalar(content, where)}")
             content
           end
+        end
+
+        # A comment of its own under the line just written, where the comment
+        # of that line starts: how the endpoint is called.
+        def call_line(call)
+          column = @lines.last.index(' # ') || [COMMENT_COLUMN - 1, @lines.last.length].max
+          @lines << "#{' ' * column} # #{Import.one_line(call)}"
         end
 
         def line(indent, text, comment = nil)

@@ -18,7 +18,7 @@ module ApiRecipes
 
         # A header or a parameter sent with every request. where: the name of
         # the endpoint that adds it, nil for the api; below: whether that
-        # endpoint has others below it, which take it too.
+        # endpoint contains others, whose requests find it there too.
         Sent = Data.define(:name, :value, :where, :below) do
           def key = [name, where]
         end
@@ -166,7 +166,7 @@ module ApiRecipes
         def sent_row(one) = "#{clip(one.name, PART)}: #{clip(one.value, PART)}#{place(one, PART)}"
 
         def place(one, limit)
-          one.where ? " (#{clip(one.where, limit)}#{' and below' if one.below})" : ''
+          one.where ? " (#{clip(one.where, limit)}#{' and the endpoints it contains' if one.below})" : ''
         end
 
         # What changes between two lists of headers or of parameters, a line

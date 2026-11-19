@@ -171,7 +171,9 @@ module ApiRecipes
         summary.warnings.each { |warning| @out.puts "  warning: #{warning}" }
         return if current.nil? || current == summary.text
 
-        if entry && entry.sha256 != Recipe.digest(current)
+        if entry.nil?
+          @out.puts "  #{destination} is a recipe that recipes.lock does not name: what it holds now will be lost"
+        elsif entry.sha256 != Recipe.digest(current)
           @out.puts "  #{destination} was changed after it was installed: those changes will be lost"
         end
         summary.changes_from(installed_summary(current, destination)).each { |line| @out.puts line }
@@ -274,7 +276,8 @@ module ApiRecipes
 
         recipe = Recipe.parse(text, file, file_name: File.basename(file))
         describe(file, recipe)
-        return 0 if lock[name].version == recipe.version
+        # A recipe of the project has its version in the file, and nowhere else.
+        return 0 if !lock.from_a_repository?(name) || lock[name].version == recipe.version
 
         @err.puts "#{lock.path}: #{name} is version #{lock[name].version} in the lock, but the file says #{recipe.version}"
         1

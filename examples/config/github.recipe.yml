@@ -1,4 +1,10 @@
+# A portable recipe with every option commented. The key `recipe` names the
+# api, gives the version of the recipe and the format of the file.
 github:
+  recipe:
+    name: github
+    version: 1.0.0
+    format: 1
   protocol: https               # Optional. Default: 'https'
   host: api.github.com          # Optional. Default: 'localhost'
   port: 443                     # Optional. Default: 80 for http and 443 for https
@@ -6,7 +12,7 @@ github:
   timeout: 3                    # Optional. Default: 3 (time expressed in seconds)
   on_bad_code: raise            # Optional. Default 'raise'. Possible values: [ignore, raise]
   mime_type:                    # Optional. Default: nil. By default the library will try to automatically guess the mime type based on response's Content-Type header. Provide this option to override the default behaviour
-  verify_with:                  # Optional. Default nil. Specify a method (on the api-calling object) that will be called in order to verify if response was OK. Given method must accept one argument (response)
+  # verify_with is not in a recipe: give a method of the calling object where a class declares the api, as `api :github, verify_with: :ok?`
   default_headers:              # Optional. Headers sent with every request. A value can contain {variables}
     Accept: 'application/vnd.github.v3+json'
   # auth:                       # Optional. Where the credential assigned with authorization= goes. Default: the Authorization header
@@ -27,7 +33,6 @@ github:
       timeout: 2                # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
       on_bad_code:              # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
       mime_type:                # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
-      verify_with:              # Optional. Replaces the value of the API. An endpoint that does not set it looks for it up the tree
       endpoints:
         show:
           path: /:user_id       # You can use :some_param notation and provide the param when calling the route (see examples/simple_usage.rb)

@@ -119,10 +119,23 @@ module ApiRecipes
         def call_of(node)
           steps = []
           while node.is_a?(Endpoint)
-            steps.unshift("#{node.name}#{"(#{node.path_params.join(', ')})" unless node.path_params.empty?}")
+            steps.unshift(Definition.step(node.name, node.path_params, !node.parent.is_a?(Endpoint)))
             node = node.parent
           end
-          "#{name}.#{steps.join('.')}"
+          "#{name}#{steps.join}"
+        end
+      end
+
+      # How an endpoint called name is reached from the one that contains it:
+      # `.show(id)`, or `[:run, id]` and `["404"]` when the name has no method
+      # of its own. root: whether it is an endpoint of the api itself.
+      def self.step(name, path_params, root)
+        text = name.to_s
+        method = Compiler::METHOD_NAME.match?(text)
+        if method && !Handles.taken?(root ? ApiRecipes::Api : ApiRecipes::Endpoint, text.to_sym)
+          ".#{text}#{"(#{path_params.join(', ')})" unless path_params.empty?}"
+        else
+          "[#{[method ? ":#{text}" : text.inspect, *path_params].join(', ')}]"
         end
       end
 
